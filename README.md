@@ -101,3 +101,16 @@ Key domain entities include:
    - Partner portal for aircraft/boat operators
    - API for third-party travel and booking integrations
 
+
+## Google Login Demo
+
+A static "Login with Google" page is included in `index.html`. To use it on GitHub Pages:
+
+1. Create an OAuth 2.0 Web client in the [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+   - Set an authorized JavaScript origin that matches your GitHub Pages domain, e.g. `https://<username>.github.io` or `https://<username>.github.io/<repo>`.
+   - (Optional) Add an authorized redirect URI only if you need to exchange the credential on a backend.
+2. Replace `YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com` on the `<html>` element in `index.html` with your client ID.
+3. Commit the files and push to the branch you publish with GitHub Pages.
+4. When the page loads, the Google button renders automatically and displays the signed-in user's name, email, and avatar once authenticated.
+
+The demo uses the [Google Identity Services JavaScript SDK](https://developers.google.com/identity/gsi/web). The credential returned in the callback is a JWT containing basic profile information. For production deployments you should send the credential to a secure backend for verification and session management.
