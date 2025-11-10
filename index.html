@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" data-google-client-id="YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Innhopp Central &mdash; Login with Google</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="js/google-login.js" type="module" defer></script>
+  </head>
+  <body>
+    <main class="card">
+      <header class="card__header">
+        <img src="https://avatars.githubusercontent.com/u/107314449?s=200&v=4" alt="Innhopp Central logo" class="card__logo" />
+        <h1 class="card__title">Sign in to Innhopp Central</h1>
+        <p class="card__subtitle">
+          Use your Google account to access the Innhopp Central data management portal.
+        </p>
+      </header>
+
+      <section class="card__content">
+        <div id="google-signin" class="signin"></div>
+        <p id="client-warning" class="warning" hidden>
+          Replace <code>YOUR_GOOGLE_CLIENT_ID</code> in <code>index.html</code> with a Google OAuth client ID before deploying.
+        </p>
+
+        <article id="profile" class="profile" hidden>
+          <img id="profile-picture" class="profile__avatar" alt="Google account avatar" />
+          <div>
+            <h2 id="profile-name" class="profile__name"></h2>
+            <p id="profile-email" class="profile__email"></p>
+          </div>
+        </article>
+      </section>
+
+      <footer class="card__footer">
+        <button id="signout" class="button" hidden>Sign out</button>
+      </footer>
+    </main>
+
+    <template id="error-template">
+      <div class="toast" role="alert"></div>
+    </template>
+  </body>
+</html>
