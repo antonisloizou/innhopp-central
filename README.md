@@ -1,6 +1,6 @@
 # Innhopp Central Data Management System
 
-Innhopp.com coordinates group skydiving and wingsuit experiences that combine ferry or boat rides with parachute insertions into remote Norwegian destinations. The Innhopp Central platform provides a unified data management hub for operations, safety oversight, customer logistics, and post-event reporting.
+The Innhopp Central platform provides a unified data management hub for registration, operations, safety oversight, customer logistics, and post-event reporting.
 
 ## Vision
 
@@ -8,8 +8,8 @@ Create a single source of truth for all operational data that keeps the team syn
 
 ## Core Capabilities
 
-- **Operations Planning**: Manage season calendars, event templates, and jump manifests with weather, aircraft, boat, and landing zone requirements.
-- **Participant Lifecycle**: Track registrations, payments, waivers, certifications, and health declarations for individual jumpers and groups.
+- **Operations Planning**: Manage season calendars, event templates, and jump manifests with aircraft, boat, and landing zone requirements.
+- **Participant Lifecycle**: Track registrations, payments, waivers, certifications, gear checks and health declarations for individual jumpers and groups.
 - **Logistics Coordination**: Assign transport legs, gear, and accommodation; automate notifications for check-in, briefing schedules, and packing lists.
 - **Safety & Compliance**: Centralize incident reports, risk assessments, gear inspections, and regulatory filings with audit trails.
 - **Crew Management**: Schedule staff, capture availability, and ensure required roles are covered for each operation.
