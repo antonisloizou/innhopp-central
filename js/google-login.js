@@ -81,10 +81,31 @@ const initialize = () => {
   window.google.accounts.id.prompt();
 };
 
+const awaitGoogleLibrary = () => {
+  const googleScript = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+
+  if (window.google?.accounts?.id) {
+    initialize();
+    return;
+  }
+
+  if (!googleScript) {
+    showToast("Google Identity Services script tag is missing.");
+    return;
+  }
+
+  googleScript.addEventListener("load", initialize, { once: true });
+  googleScript.addEventListener(
+    "error",
+    () => showToast("Google Identity Services failed to load. Check your network connection."),
+    { once: true }
+  );
+};
+
 signOutButton.addEventListener("click", () => {
   window.google?.accounts.id.disableAutoSelect();
   profile.hidden = true;
   signOutButton.hidden = true;
 });
 
-window.addEventListener("DOMContentLoaded", initialize);
+window.addEventListener("DOMContentLoaded", awaitGoogleLibrary);
