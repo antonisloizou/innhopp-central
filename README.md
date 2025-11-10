@@ -11,6 +11,7 @@ Create a single source of truth for all operational data that keeps the team syn
 - **Operations Planning**: Manage season calendars, event templates, and jump manifests with aircraft, boat, and landing zone requirements.
 - **Participant Lifecycle**: Track registrations, payments, waivers, certifications, gear checks and health declarations for individual jumpers and groups.
 - **Logistics Coordination**: Assign transport legs, gear, and accommodation; automate notifications for check-in, briefing schedules, and packing lists.
+- **Driver Route Visibility**: Provide drivers with a read-only page that outlines location timings and detailed descriptions of the routes they must complete.
 - **Safety & Compliance**: Centralize NOTAMs, risk assessments,, and regulatory filings.
 - **Crew Management**: Schedule staff, capture availability, and ensure required roles are covered for each operation.
 - **Analytics & Reporting**: Generate dashboards on jump volume, customer demographics, gear utilization, and safety metrics.
@@ -24,6 +25,7 @@ Create a single source of truth for all operational data that keeps the team syn
 | **Jump Master** | Overall command of jump operations, safety decisions, and go/no-go authority | Mission briefs, weather intel, gear status, incident reports, crew rosters |
 | **Jump Leader** | Leads specific jump groups, ensures compliance with briefings, conducts debriefs | Assigned manifests, participant readiness, gear allocations, debrief notes |
 | **Ground Crew** | Coordinates landing zone readiness, transport, and recovery | LZ checklists, transport schedules, real-time updates, incident capture |
+| **Driver** | Executes transport routes between jump sites and staging areas | Read-only route pages with location timings and detailed segment descriptions |
 | **Packer** | Manages parachute packing, gear maintenance, and inspection logs | Packing queues, gear history, maintenance records |
 | **Participant** | Registers for events, completes paperwork, receives briefs and updates | Personal profile, waiver status, event schedule, payment receipts |
 
@@ -48,6 +50,7 @@ Key domain entities include:
 - **Payment Processing**: Connect with Nordic payment gateways for secure transactions and refunds.
 - **Digital Waivers**: Sync signed waivers from partner e-sign platforms.
 - **Messaging**: Push operational updates via SMS, email, and in-app notifications.
+- **Navigation Services**: Surface route guidance by integrating driver itineraries with Google Maps and Waze for real-time traffic-aware navigation.
 - **Accounting**: Export financial summaries to bookkeeping systems for reconciliation.
 
 ## Workflows
