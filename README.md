@@ -11,7 +11,7 @@ Create a single source of truth for all operational data that keeps the team syn
 - **Operations Planning**: Manage season calendars, event templates, and jump manifests with aircraft, boat, and landing zone requirements.
 - **Participant Lifecycle**: Track registrations, payments, waivers, certifications, gear checks and health declarations for individual jumpers and groups.
 - **Logistics Coordination**: Assign transport legs, gear, and accommodation; automate notifications for check-in, briefing schedules, and packing lists.
-- **Safety & Compliance**: Centralize incident reports, risk assessments, gear inspections, and regulatory filings with audit trails.
+- **Safety & Compliance**: Centralize NOTAMs, risk assessments,, and regulatory filings.
 - **Crew Management**: Schedule staff, capture availability, and ensure required roles are covered for each operation.
 - **Analytics & Reporting**: Generate dashboards on jump volume, customer demographics, gear utilization, and safety metrics.
 
@@ -100,16 +100,4 @@ Key domain entities include:
    - Analytics suite with KPI dashboards
    - Partner portal for aircraft/boat operators
    - API for third-party travel and booking integrations
-
-## Contribution Guidelines
-
-1. Fork the repository and clone locally.
-2. Create feature branches using the format `feature/<summary>`.
-3. Run the project linting and test suites before submitting pull requests.
-4. Provide clear documentation and screenshots for UI changes.
-5. Submit pull requests with context, testing notes, and linked issues.
-
-## License
-
-This project is released under the MIT License. See [LICENSE](LICENSE) for details.
 
