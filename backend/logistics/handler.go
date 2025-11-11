@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/rbac"
 )
 
 // Handler provides logistics operations such as gear tracking.
@@ -22,10 +23,10 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 }
 
 // Routes registers logistics routes.
-func (h *Handler) Routes() chi.Router {
+func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/gear-assets", h.listGearAssets)
-	r.Post("/gear-assets", h.createGearAsset)
+	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/gear-assets", h.listGearAssets)
+	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Post("/gear-assets", h.createGearAsset)
 	return r
 }
 
