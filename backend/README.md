@@ -1,14 +1,13 @@
 # Innhopp Central Backend
 
-This Go service provides a minimal REST API for managing users, events, and role assignments backed by PostgreSQL. It is intended as the starting point for the Innhopp Central platform and is deployable to Railway.
+This Go service provides the core REST API for the Innhopp Central platform. It is implemented with the [Chi](https://github.com/go-chi/chi) router, persists data in PostgreSQL, and is structured into domain-focused modules to support rapid iteration on jump operations.
 
 ## Features
 
-- Health check endpoint for uptime monitoring.
-- CRUD operations for users and events.
-- Canonical list of the event roles defined in the main project README.
-- Assign and remove user roles on a per-event basis.
-- Automatic bootstrapping of the database schema and default role data on startup.
+- Modular HTTP routing for authentication, event operations, participant management, crew RBAC, and logistics.
+- Automatic bootstrapping of the core PostgreSQL schema for seasons, events, manifests, participant profiles, crew assignments, and gear assets.
+- JSON APIs for managing seasons/events/manifests, participant records, crew assignments, and gear tracking.
+- Health check endpoint for uptime monitoring and Chi middleware for structured logging and request tracing.
 
 ## Requirements
 
@@ -30,10 +29,12 @@ For Railway deployments set `DATABASE_URL` to the connection string provided by 
 
 On startup the server creates these tables if they do not already exist:
 
-- `users` – stores name, email, and creation timestamp.
-- `events` – stores event metadata including start date.
-- `roles` – seeded with the eight roles defined in the main project README.
-- `event_user_roles` – join table linking users, events, and assigned roles.
+- `seasons` – defines the operational season calendar.
+- `events` – jump events linked to a season with start/end timestamps.
+- `manifests` – scheduled aircraft loads for an event.
+- `participant_profiles` – canonical roster of all flyers and staff.
+- `crew_assignments` – role assignments for a participant on a manifest.
+- `gear_assets` – tracked gear inventory with inspection status.
 
 ## Running Locally
 
@@ -64,10 +65,12 @@ On startup the server creates these tables if they do not already exist:
 5. Interact with the API (examples use `httpie` but `curl` works as well):
 
    ```bash
-   http POST :8080/api/users name="Aviator Ada" email="ada@example.com"
-   http POST :8080/api/events name="Arctic Jump" start_date="2024-08-01T09:00:00Z"
-   http POST :8080/api/events/1/roles user_id:=1 role="Jump Master"
-   http GET :8080/api/events/1/roles
+   http POST :8080/api/participants/profiles full_name="Aviator Ada" email="ada@example.com"
+   http POST :8080/api/events/seasons name="Winter Ops" starts_on="2024-01-10" ends_on="2024-03-01"
+   http POST :8080/api/events/events season_id:=1 name="Ice Landing" location="Tromsø" starts_at="2024-02-05T09:00:00Z"
+   http POST :8080/api/events/manifests event_id:=1 load_number:=1 scheduled_at="2024-02-05T09:30:00Z"
+   http POST :8080/api/rbac/crew-assignments manifest_id:=1 participant_id:=1 role="Jump Master"
+   http POST :8080/api/logistics/gear-assets name="Main Rig" serial_number="RIG-001" status="available"
    ```
 
 ## API Overview
@@ -75,36 +78,38 @@ On startup the server creates these tables if they do not already exist:
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/api/health` | Service health probe |
-| GET | `/api/roles` | List canonical role names |
-| GET | `/api/users` | List users |
-| POST | `/api/users` | Create a user |
-| GET | `/api/users/{id}` | Retrieve a user |
-| PUT | `/api/users/{id}` | Update a user |
-| DELETE | `/api/users/{id}` | Delete a user |
-| GET | `/api/events` | List events |
-| POST | `/api/events` | Create an event |
-| GET | `/api/events/{id}` | Retrieve an event |
-| PUT | `/api/events/{id}` | Update an event |
-| DELETE | `/api/events/{id}` | Delete an event |
-| GET | `/api/events/{id}/roles` | List role assignments for an event |
-| POST | `/api/events/{id}/roles` | Assign a role to a user for an event |
-| DELETE | `/api/events/{id}/roles` | Remove a role assignment from a user |
+| POST | `/api/auth/sessions` | Bootstrap a participant session by email |
+| GET | `/api/events/seasons` | List seasons |
+| POST | `/api/events/seasons` | Create a season |
+| GET | `/api/events/seasons/{id}` | Retrieve a season |
+| GET | `/api/events/events` | List events |
+| POST | `/api/events/events` | Create an event |
+| GET | `/api/events/events/{id}` | Retrieve an event |
+| GET | `/api/events/manifests` | List manifests |
+| POST | `/api/events/manifests` | Create a manifest |
+| GET | `/api/events/manifests/{id}` | Retrieve a manifest |
+| GET | `/api/participants/profiles` | List participant profiles |
+| POST | `/api/participants/profiles` | Create a participant profile |
+| GET | `/api/rbac/crew-assignments` | List crew assignments |
+| POST | `/api/rbac/crew-assignments` | Create a crew assignment |
+| GET | `/api/logistics/gear-assets` | List gear assets |
+| POST | `/api/logistics/gear-assets` | Create a gear asset |
 
 ### Request & Response Notes
 
-- `start_date` must be an ISO-8601 timestamp (RFC3339) when creating or updating an event.
-- Role assignment endpoints expect a JSON body with `user_id` and `role` (case-insensitive).
-- Duplicate role assignments are ignored to keep the operation idempotent.
+- All timestamps in request payloads must be RFC3339 strings except for season dates which use `YYYY-MM-DD`.
+- Endpoints respond with JSON and enforce strict payload validation (unknown fields are rejected).
+- Foreign key constraints ensure referenced seasons, events, manifests, and participants must already exist.
 
 ## Testing
 
-Run all Go tests (ensures the code compiles):
+Run a compile check across all packages:
 
 ```bash
-go test ./...
+go build ./...
 ```
 
-A running PostgreSQL instance accessible through `DATABASE_URL` is required for integration testing.
+A running PostgreSQL instance accessible through `DATABASE_URL` is required to exercise the HTTP endpoints end-to-end.
 
 ## Deployment on Railway
 
@@ -112,4 +117,3 @@ A running PostgreSQL instance accessible through `DATABASE_URL` is required for 
 2. Provision a PostgreSQL add-on and copy the provided `DATABASE_URL` into the service variables.
 3. Railway automatically sets the `$PORT` environment variable; no further configuration is required.
 4. Redeploy to apply the variables—the service will start listening on the assigned port.
-
