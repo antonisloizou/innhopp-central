@@ -1,464 +1,480 @@
-const statusOptions = ["draft", "planned", "scouted", "launched", "live", "past"];
+const STATUS_OPTIONS = ["draft", "planned", "scouted", "launched", "live", "past"];
 
-let seasons = [];
-let participants = [];
-let participantMap = new Map();
-let editingEventId = null;
+const state = {
+  seasons: [],
+  participants: [],
+  events: [],
+  selectedEventId: null,
+};
 
-const messageBox = document.getElementById("message");
-const createForm = document.getElementById("create-event-form");
-const updateForm = document.getElementById("update-event-form");
-const eventsTableBody = document.querySelector("#events-table tbody");
-const updateSubmit = document.getElementById("update-submit");
-const updateCancel = document.getElementById("update-cancel");
-const updateHint = document.getElementById("update-hint");
+const flash = document.getElementById("flash");
+const createForm = document.getElementById("create-form");
+const editForm = document.getElementById("edit-form");
+const eventList = document.getElementById("event-list");
+const deleteButton = document.getElementById("delete-event");
+const manageHint = document.getElementById("manage-hint");
+const innhoppTemplate = document.getElementById("innhopp-row-template");
 
-const createParticipantsContainer = document.getElementById("create-participants");
-const updateParticipantsContainer = document.getElementById("update-participants");
-const createInnhoppContainer = document.getElementById("create-innhopp-list");
-const updateInnhoppContainer = document.getElementById("update-innhopp-list");
-const addButtons = document.querySelectorAll('button[data-action="add-innhopp"]');
+initialize().catch((error) => {
+  console.error("Failed to initialise event manager", error);
+  showMessage("error", error.message || "Failed to load event data.");
+});
 
-const seasonSelects = [document.getElementById("create-season"), document.getElementById("update-season")];
-const statusSelects = [document.getElementById("create-status"), document.getElementById("update-status")];
+async function initialize() {
+  populateStatusSelects();
+  bindCreateForm();
+  bindEditForm();
 
-init();
+  await Promise.all([loadSeasons(), loadParticipants()]);
+  renderParticipants(createForm, []);
+  renderParticipants(editForm, []);
 
-async function init() {
-  fillStatusOptions();
-  setUpdateFormDisabled(true);
-  attachEventListeners();
+  await loadEvents();
+}
 
-  try {
-    await loadReferenceData();
-    await refreshEvents();
-  } catch (error) {
-    displayMessage(error.message, "error");
+function bindCreateForm() {
+  if (!createForm) {
+    return;
+  }
+
+  createForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      const payload = buildEventPayload(createForm);
+      const created = await requestJSON("/api/events/events", { method: "POST", body: payload });
+      upsertEvent(created);
+      createForm.reset();
+      renderParticipants(createForm, []);
+      clearInnhopps(createForm);
+      showMessage("success", `Created “${created.name}”.`);
+    } catch (error) {
+      console.error("Failed to create event", error);
+      showMessage("error", error.message || "Could not create event.");
+    }
+  });
+
+  createForm.addEventListener("reset", () => {
+    window.requestAnimationFrame(() => {
+      renderParticipants(createForm, []);
+      clearInnhopps(createForm);
+    });
+  });
+
+  createForm.addEventListener("click", handleInnhoppActions);
+}
+
+function bindEditForm() {
+  if (!editForm) {
+    return;
+  }
+
+  editForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const eventId = Number(editForm.dataset.eventId);
+    if (!eventId) {
+      return;
+    }
+
+    try {
+      const payload = buildEventPayload(editForm);
+      const updated = await requestJSON(`/api/events/events/${eventId}`, { method: "PUT", body: payload });
+      upsertEvent(updated);
+      selectEvent(updated.id);
+      showMessage("success", `Saved changes to “${updated.name}”.`);
+    } catch (error) {
+      console.error("Failed to update event", error);
+      showMessage("error", error.message || "Could not update event.");
+    }
+  });
+
+  editForm.addEventListener("click", handleInnhoppActions);
+
+  if (deleteButton) {
+    deleteButton.addEventListener("click", async () => {
+      const eventId = Number(editForm.dataset.eventId);
+      if (!eventId) {
+        return;
+      }
+      const event = state.events.find((entry) => entry.id === eventId);
+      const confirmed = window.confirm(`Delete “${event?.name ?? "this event"}”? This cannot be undone.`);
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await requestJSON(`/api/events/events/${eventId}`, { method: "DELETE" });
+        state.events = state.events.filter((entry) => entry.id !== eventId);
+        state.selectedEventId = null;
+        editForm.reset();
+        editForm.hidden = true;
+        renderParticipants(editForm, []);
+        clearInnhopps(editForm);
+        renderEventsList();
+        manageHint.textContent = "Select an event from the list to review or update it.";
+        showMessage("success", "Event deleted.");
+      } catch (error) {
+        console.error("Failed to delete event", error);
+        showMessage("error", error.message || "Could not delete event.");
+      }
+    });
   }
 }
 
-function attachEventListeners() {
-  createForm.addEventListener("submit", handleCreateEvent);
-  createForm.addEventListener("reset", () => {
-    renderParticipantOptions(createParticipantsContainer, []);
-    renderInnhoppsList(createInnhoppContainer, []);
-    clearMessage();
-  });
+function handleInnhoppActions(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
 
-  updateForm.addEventListener("submit", handleUpdateEvent);
+  const form = button.closest("form");
+  if (!form) {
+    return;
+  }
 
-  updateCancel.addEventListener("click", () => {
-    editingEventId = null;
-    updateForm.reset();
-    renderParticipantOptions(updateParticipantsContainer, []);
-    renderInnhoppsList(updateInnhoppContainer, []);
-    setUpdateFormDisabled(true);
-    updateHint.textContent = "Select an event from the list to start editing.";
-    clearMessage();
-  });
+  const container = form.querySelector('[data-role="innhopps"]');
+  if (!container) {
+    return;
+  }
 
-  addButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const target = document.getElementById(button.dataset.target);
-      addInnhoppRow(target);
-    });
-  });
+  const action = button.dataset.action;
+  if (action === "add-innhopp") {
+    event.preventDefault();
+    addInnhoppRow(container);
+  } else if (action === "remove-innhopp") {
+    event.preventDefault();
+    const row = button.closest(".innhopp-row");
+    row?.remove();
+  }
 }
 
-function fillStatusOptions() {
-  statusSelects.forEach((select) => {
+async function loadSeasons() {
+  const seasons = await requestJSON("/api/events/seasons");
+  state.seasons = Array.isArray(seasons) ? seasons : [];
+  populateSeasonSelect(createForm, state.seasons);
+  populateSeasonSelect(editForm, state.seasons);
+}
+
+async function loadParticipants() {
+  const participants = await requestJSON("/api/participants/profiles");
+  state.participants = Array.isArray(participants) ? participants : [];
+}
+
+async function loadEvents() {
+  const events = await requestJSON("/api/events/events");
+  state.events = Array.isArray(events) ? events : [];
+  sortEvents();
+  renderEventsList();
+}
+
+function populateStatusSelects() {
+  document.querySelectorAll('select[name="status"]').forEach((select) => {
     select.innerHTML = "";
-    statusOptions.forEach((status) => {
+    STATUS_OPTIONS.forEach((status) => {
       const option = document.createElement("option");
       option.value = status;
-      option.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      option.textContent = capitalize(status);
       select.append(option);
     });
-    select.value = statusOptions[0];
+    select.value = STATUS_OPTIONS[0];
   });
 }
 
-async function loadReferenceData() {
-  const [seasonData, participantData] = await Promise.all([
-    apiRequest("/api/events/seasons"),
-    apiRequest("/api/participants/profiles"),
-  ]);
-
-  seasons = seasonData;
-  participants = participantData;
-  participantMap = new Map(participants.map((p) => [p.id, p]));
-
-  seasonSelects.forEach((select) => populateSeasonSelect(select, seasons));
-  renderParticipantOptions(createParticipantsContainer, []);
-  renderParticipantOptions(updateParticipantsContainer, []);
-
-  if (!seasons || seasons.length === 0) {
-    setFormDisabled(createForm, true);
-    displayMessage("Create a season before scheduling events.", "error");
-  } else {
-    setFormDisabled(createForm, false);
-    clearMessage();
+function populateSeasonSelect(form, seasons) {
+  if (!form) {
+    return;
   }
-}
+  const select = form.querySelector('select[name="season_id"]');
+  if (!select) {
+    return;
+  }
 
-function populateSeasonSelect(select, seasonList) {
   select.innerHTML = "";
-  if (!seasonList || seasonList.length === 0) {
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "No seasons available";
-    placeholder.disabled = true;
-    placeholder.selected = true;
-    select.append(placeholder);
+  if (!seasons.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No seasons available";
+    option.disabled = true;
+    option.selected = true;
+    select.append(option);
     select.disabled = true;
     return;
   }
 
+  seasons.forEach((season) => {
+    const option = document.createElement("option");
+    option.value = String(season.id);
+    const range = [formatDateOnly(season.starts_on), formatDateOnly(season.ends_on)]
+      .filter(Boolean)
+      .join(" → ");
+    option.textContent = range ? `${season.name} (${range})` : season.name;
+    select.append(option);
+  });
   select.disabled = false;
-  seasonList
-    .slice()
-    .sort((a, b) => new Date(b.starts_on) - new Date(a.starts_on))
-    .forEach((season) => {
-      const option = document.createElement("option");
-      option.value = String(season.id);
-      option.textContent = `${season.name} (${season.starts_on})`;
-      select.append(option);
-    });
 }
 
-function renderParticipantOptions(container, selectedIds) {
-  container.innerHTML = "";
-  const selected = new Set(selectedIds || []);
+function renderParticipants(form, selectedIds) {
+  if (!form) {
+    return;
+  }
+  const container = form.querySelector('[data-role="participants"]');
+  if (!container) {
+    return;
+  }
 
-  if (participants.length === 0) {
+  container.innerHTML = "";
+  if (!state.participants.length) {
     const empty = document.createElement("p");
+    empty.className = "empty-state";
     empty.textContent = "No participant profiles available yet.";
     container.append(empty);
     return;
   }
 
-  participants
-    .slice()
-    .sort((a, b) => a.full_name.localeCompare(b.full_name))
-    .forEach((participant) => {
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.value = String(participant.id);
-      checkbox.checked = selected.has(participant.id);
-      label.append(checkbox, document.createTextNode(participant.full_name));
-      container.append(label);
-    });
-}
-
-function renderInnhoppsList(container, innhopps) {
-  container.innerHTML = "";
-  (innhopps || []).forEach((innhopp) => addInnhoppRow(container, innhopp));
-}
-
-function addInnhoppRow(container, innhopp = {}) {
-  const row = document.createElement("div");
-  row.className = "innhopp-row";
-
-  const rowGrid = document.createElement("div");
-  rowGrid.className = "row-grid";
-
-  const nameField = document.createElement("div");
-  nameField.className = "field";
-  const nameLabel = document.createElement("label");
-  nameLabel.textContent = "Name";
-  const nameInput = document.createElement("input");
-  nameInput.type = "text";
-  nameInput.className = "innhopp-name";
-  nameInput.value = innhopp.name ? innhopp.name : "";
-  nameField.append(nameLabel, nameInput);
-
-  const scheduleField = document.createElement("div");
-  scheduleField.className = "field";
-  const scheduleLabel = document.createElement("label");
-  scheduleLabel.textContent = "Scheduled";
-  const scheduleInput = document.createElement("input");
-  scheduleInput.type = "datetime-local";
-  scheduleInput.className = "innhopp-scheduled";
-  scheduleInput.value = innhopp.scheduled_at ? toLocalInputValue(innhopp.scheduled_at) : "";
-  scheduleField.append(scheduleLabel, scheduleInput);
-
-  rowGrid.append(nameField, scheduleField);
-
-  const notesField = document.createElement("div");
-  notesField.className = "field";
-  const notesLabel = document.createElement("label");
-  notesLabel.textContent = "Notes";
-  const notesInput = document.createElement("textarea");
-  notesInput.className = "innhopp-notes";
-  notesInput.value = innhopp.notes ? innhopp.notes : "";
-  notesField.append(notesLabel, notesInput);
-
-  const actions = document.createElement("div");
-  actions.className = "button-row";
-  const removeButton = document.createElement("button");
-  removeButton.type = "button";
-  removeButton.className = "ghost";
-  removeButton.textContent = "Remove";
-  removeButton.addEventListener("click", () => {
-    row.remove();
+  const selected = new Set(selectedIds ?? []);
+  state.participants.forEach((participant) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.name = "participant_ids";
+    input.value = String(participant.id);
+    if (selected.has(participant.id)) {
+      input.checked = true;
+    }
+    const span = document.createElement("span");
+    span.textContent = participant.full_name || participant.email || `Participant ${participant.id}`;
+    label.append(input, span);
+    container.append(label);
   });
-  actions.append(removeButton);
+}
 
-  row.append(rowGrid, notesField, actions);
+function renderInnhopps(form, innhopps) {
+  if (!form) {
+    return;
+  }
+  const container = form.querySelector('[data-role="innhopps"]');
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  (innhopps ?? []).forEach((item) => addInnhoppRow(container, item));
+}
+
+function addInnhoppRow(container, data = {}) {
+  if (!innhoppTemplate?.content) {
+    return;
+  }
+  const row = innhoppTemplate.content.firstElementChild.cloneNode(true);
+  const sequenceInput = row.querySelector(".innhopp-sequence");
+  const nameInput = row.querySelector(".innhopp-name");
+  const scheduledInput = row.querySelector(".innhopp-scheduled");
+  const notesInput = row.querySelector(".innhopp-notes");
+
+  if (sequenceInput && data.sequence) {
+    sequenceInput.value = data.sequence;
+  }
+  if (nameInput && data.name) {
+    nameInput.value = data.name;
+  }
+  if (scheduledInput && data.scheduled_at) {
+    scheduledInput.value = toLocalInputValue(data.scheduled_at);
+  }
+  if (notesInput && data.notes) {
+    notesInput.value = data.notes;
+  }
+
   container.append(row);
 }
 
-async function handleCreateEvent(event) {
-  event.preventDefault();
-
-  try {
-    const payload = collectEventPayload(createForm, createParticipantsContainer, createInnhoppContainer);
-    const created = await apiRequest("/api/events/events", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    displayMessage(`Created event “${created.name}”.`, "success");
-    createForm.reset();
-    renderParticipantOptions(createParticipantsContainer, []);
-    renderInnhoppsList(createInnhoppContainer, []);
-    await refreshEvents();
-  } catch (error) {
-    displayMessage(error.message, "error");
+function clearInnhopps(form) {
+  const container = form.querySelector('[data-role="innhopps"]');
+  if (container) {
+    container.innerHTML = "";
   }
 }
 
-async function handleUpdateEvent(event) {
-  event.preventDefault();
-  if (!editingEventId) {
-    displayMessage("Select an event to edit first.", "error");
+function renderEventsList() {
+  eventList.innerHTML = "";
+  if (!state.events.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "No events scheduled yet.";
+    eventList.append(empty);
     return;
   }
 
-  try {
-    const payload = collectEventPayload(updateForm, updateParticipantsContainer, updateInnhoppContainer);
-    const updated = await apiRequest(`/api/events/events/${editingEventId}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    });
+  state.events.forEach((event) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "event-row";
+    if (event.id === state.selectedEventId) {
+      button.classList.add("is-active");
+    }
 
-    displayMessage(`Updated event “${updated.name}”.`, "success");
-    await refreshEvents();
-    startEditingEvent(updated.id);
-  } catch (error) {
-    displayMessage(error.message, "error");
-  }
+    const name = document.createElement("span");
+    name.className = "event-row__name";
+    name.textContent = event.name;
+
+    const meta = document.createElement("span");
+    meta.className = "event-row__meta";
+    const formatted = formatDate(event.starts_at);
+    meta.textContent = `${formatted} · ${capitalize(event.status)}`;
+
+    button.append(name, meta);
+    button.addEventListener("click", () => selectEvent(event.id));
+    eventList.append(button);
+  });
 }
 
-function collectEventPayload(form, participantsContainer, innhoppContainer) {
+function selectEvent(eventId) {
+  const event = state.events.find((entry) => entry.id === eventId);
+  if (!event) {
+    return;
+  }
+
+  state.selectedEventId = eventId;
+  editForm.dataset.eventId = String(event.id);
+  editForm.hidden = false;
+  manageHint.textContent = `Editing “${event.name}”.`;
+
+  const seasonSelect = editForm.querySelector('select[name="season_id"]');
+  if (seasonSelect) {
+    seasonSelect.value = String(event.season_id);
+  }
+
+  const nameInput = editForm.querySelector('input[name="name"]');
+  if (nameInput) {
+    nameInput.value = event.name;
+  }
+
+  const locationInput = editForm.querySelector('input[name="location"]');
+  if (locationInput) {
+    locationInput.value = event.location || "";
+  }
+
+  const statusSelect = editForm.querySelector('select[name="status"]');
+  if (statusSelect) {
+    statusSelect.value = event.status;
+  }
+
+  const startsInput = editForm.querySelector('input[name="starts_at"]');
+  if (startsInput) {
+    startsInput.value = toLocalInputValue(event.starts_at);
+  }
+
+  const endsInput = editForm.querySelector('input[name="ends_at"]');
+  if (endsInput) {
+    endsInput.value = event.ends_at ? toLocalInputValue(event.ends_at) : "";
+  }
+
+  renderParticipants(editForm, event.participant_ids ?? []);
+  renderInnhopps(editForm, event.innhopps ?? []);
+  renderEventsList();
+}
+
+function buildEventPayload(form) {
   const data = new FormData(form);
-  const seasonId = Number(data.get("season_id"));
-  const name = data.get("name").trim();
-  const location = data.get("location").trim();
-  const status = data.get("status").trim();
-  const startsAt = data.get("starts_at");
-  const endsAt = data.get("ends_at");
-
-  if (!seasonId) {
-    throw new Error("Season is required");
-  }
-  if (!name) {
-    throw new Error("Event name is required");
-  }
-  if (!startsAt) {
-    throw new Error("A start time is required");
-  }
-
-  const participantIds = Array.from(
-    participantsContainer.querySelectorAll("input[type='checkbox']:checked")
-  ).map((checkbox) => Number(checkbox.value));
-
-  const innhopps = collectInnhopps(innhoppContainer);
-
-  return {
-    season_id: seasonId,
-    name,
-    location,
-    status,
-    starts_at: toISOString(startsAt),
-    ends_at: endsAt ? toISOString(endsAt) : "",
-    participant_ids: participantIds,
-    innhopps,
+  const startsInput = form.querySelector('input[name="starts_at"]');
+  const endsInput = form.querySelector('input[name="ends_at"]');
+  const payload = {
+    season_id: Number(data.get("season_id")),
+    name: (data.get("name") || "").toString().trim(),
+    location: (data.get("location") || "").toString().trim(),
+    status: (data.get("status") || "").toString(),
+    starts_at: toISOStringFromLocal(startsInput?.value ?? ""),
+    participant_ids: Array.from(form.querySelectorAll('input[name="participant_ids"]:checked')).map((input) => Number(input.value)),
+    innhopps: collectInnhopps(form.querySelector('[data-role="innhopps"]')),
   };
+
+  const endsAt = toISOStringFromLocal(endsInput?.value ?? "");
+  if (endsAt) {
+    payload.ends_at = endsAt;
+  }
+  if (!payload.location) {
+    delete payload.location;
+  }
+
+  return payload;
 }
 
 function collectInnhopps(container) {
-  const rows = Array.from(container.querySelectorAll(".innhopp-row"));
-  return rows.map((row) => {
-    const name = row.querySelector(".innhopp-name").value.trim();
-    const scheduledValue = row.querySelector(".innhopp-scheduled").value;
-    const notes = row.querySelector(".innhopp-notes").value.trim();
+  if (!container) {
+    return [];
+  }
 
-    if (!name) {
-      throw new Error("All innhopps must have a name");
+  return Array.from(container.querySelectorAll(".innhopp-row"))
+    .map((row) => {
+      const sequenceInput = row.querySelector(".innhopp-sequence");
+      const nameInput = row.querySelector(".innhopp-name");
+      const scheduledInput = row.querySelector(".innhopp-scheduled");
+      const notesInput = row.querySelector(".innhopp-notes");
+
+      const entry = {
+        name: nameInput?.value.trim() ?? "",
+      };
+
+    const sequenceValue = sequenceInput?.value.trim();
+    if (sequenceValue) {
+      entry.sequence = Number(sequenceValue);
     }
 
-    return {
-      name,
-      scheduled_at: scheduledValue ? toISOString(scheduledValue) : "",
-      notes,
-    };
-  });
-}
-
-async function refreshEvents() {
-  const eventData = await apiRequest("/api/events/events");
-  renderEventsTable(eventData);
-}
-
-function renderEventsTable(eventList) {
-  eventsTableBody.innerHTML = "";
-  if (!eventList || eventList.length === 0) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 5;
-    cell.textContent = "No events scheduled yet.";
-    row.append(cell);
-    eventsTableBody.append(row);
-    return;
-  }
-
-  eventList.forEach((event) => {
-    const row = document.createElement("tr");
-
-    const eventCell = document.createElement("td");
-    const title = document.createElement("div");
-    title.textContent = event.name;
-    const statusTag = document.createElement("span");
-    statusTag.className = "tag";
-    statusTag.textContent = event.status;
-    const location = document.createElement("div");
-    location.textContent = event.location ? event.location : "—";
-    eventCell.append(title, statusTag, location);
-
-    const scheduleCell = document.createElement("td");
-    scheduleCell.innerHTML = `${formatDateTime(event.starts_at)}<br />${event.ends_at ? formatDateTime(event.ends_at) : ""}`;
-
-    const participantsCell = document.createElement("td");
-    if (event.participant_ids && event.participant_ids.length > 0) {
-      const list = document.createElement("ul");
-      event.participant_ids.forEach((id) => {
-        const item = document.createElement("li");
-        const participant = participantMap.get(id);
-        item.textContent = participant ? participant.full_name : `Participant #${id}`;
-        list.append(item);
-      });
-      participantsCell.append(list);
-    } else {
-      participantsCell.textContent = "—";
+    const scheduledValue = scheduledInput?.value.trim();
+    if (scheduledValue) {
+      entry.scheduled_at = toISOStringFromLocal(scheduledValue);
     }
 
-    const innhoppsCell = document.createElement("td");
-    if (event.innhopps && event.innhopps.length > 0) {
-      const list = document.createElement("ol");
-      event.innhopps.forEach((innhopp) => {
-        const item = document.createElement("li");
-        const parts = [innhopp.name];
-        if (innhopp.scheduled_at) {
-          parts.push(formatDateTime(innhopp.scheduled_at));
-        }
-        if (innhopp.notes) {
-          parts.push(innhopp.notes);
-        }
-        item.textContent = parts.join(" — ");
-        list.append(item);
-      });
-      innhoppsCell.append(list);
-    } else {
-      innhoppsCell.textContent = "—";
+    const notesValue = notesInput?.value.trim();
+    if (notesValue) {
+      entry.notes = notesValue;
     }
 
-    const actionsCell = document.createElement("td");
-    actionsCell.className = "actions";
-
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "ghost";
-    editButton.textContent = "Edit";
-    editButton.addEventListener("click", () => startEditingEvent(event.id));
-
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "secondary";
-    deleteButton.textContent = "Delete";
-    deleteButton.addEventListener("click", () => confirmDelete(event));
-
-    actionsCell.append(editButton, deleteButton);
-
-    row.append(eventCell, scheduleCell, participantsCell, innhoppsCell, actionsCell);
-    eventsTableBody.append(row);
-  });
+      return entry;
+    })
+    .filter((entry) => entry.name);
 }
 
-async function startEditingEvent(eventId) {
-  try {
-    const event = await apiRequest(`/api/events/events/${eventId}`);
-    editingEventId = event.id;
-    setUpdateFormDisabled(false);
-    updateSubmit.disabled = false;
-    updateCancel.disabled = false;
-    updateHint.textContent = `Editing event “${event.name}”.`;
+function upsertEvent(event) {
+  const index = state.events.findIndex((entry) => entry.id === event.id);
+  if (index === -1) {
+    state.events.push(event);
+  } else {
+    state.events[index] = event;
+  }
+  sortEvents();
+  renderEventsList();
+}
 
-    document.getElementById("update-season").value = String(event.season_id);
-    document.getElementById("update-name").value = event.name;
-    document.getElementById("update-location").value = event.location || "";
-    document.getElementById("update-status").value = event.status;
-    document.getElementById("update-starts").value = toLocalInputValue(event.starts_at);
-    document.getElementById("update-ends").value = event.ends_at ? toLocalInputValue(event.ends_at) : "";
+function sortEvents() {
+  state.events.sort((a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime());
+}
 
-    renderParticipantOptions(updateParticipantsContainer, event.participant_ids || []);
-    renderInnhoppsList(updateInnhoppContainer, event.innhopps || []);
-
-    clearMessage();
-  } catch (error) {
-    displayMessage(error.message, "error");
+function showMessage(kind, message) {
+  flash.textContent = message || "";
+  flash.className = "flash";
+  if (kind) {
+    flash.classList.add(`flash--${kind}`);
   }
 }
 
-async function confirmDelete(event) {
-  const confirmed = window.confirm(`Delete event “${event.name}”? This cannot be undone.`);
-  if (!confirmed) {
-    return;
+function formatDate(iso) {
+  if (!iso) {
+    return "Unscheduled";
   }
-
-  try {
-    await apiRequest(`/api/events/events/${event.id}`, { method: "DELETE" });
-    displayMessage(`Deleted event “${event.name}”.`, "success");
-    if (editingEventId === event.id) {
-      updateCancel.click();
-    }
-    await refreshEvents();
-  } catch (error) {
-    displayMessage(error.message, "error");
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return iso;
   }
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-function setUpdateFormDisabled(disabled) {
-  setFormDisabled(updateForm, disabled);
-  if (disabled) {
-    updateSubmit.disabled = true;
-    updateCancel.disabled = true;
+function formatDateOnly(value) {
+  if (!value) {
+    return "";
   }
-}
-
-function setFormDisabled(form, disabled) {
-  Array.from(form.elements).forEach((element) => {
-    element.disabled = disabled;
-  });
-}
-
-function toISOString(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid date provided");
+    return value;
   }
-  return date.toISOString();
+  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
 function toLocalInputValue(isoString) {
@@ -469,61 +485,56 @@ function toLocalInputValue(isoString) {
   if (Number.isNaN(date.getTime())) {
     return "";
   }
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const tzOffset = date.getTimezoneOffset();
+  date.setMinutes(date.getMinutes() - tzOffset);
+  return date.toISOString().slice(0, 16);
 }
 
-function formatDateTime(isoString) {
-  if (!isoString) {
+function toISOStringFromLocal(value) {
+  if (!value) {
     return "";
   }
-  const date = new Date(isoString);
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return isoString;
+    return "";
   }
-  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  return date.toISOString();
 }
 
-async function apiRequest(url, options = {}) {
+function capitalize(value) {
+  if (!value) {
+    return "";
+  }
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+async function requestJSON(path, options = {}) {
   const config = {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    ...options,
+    method: options.method ?? "GET",
+    credentials: "include",
+    headers: {},
   };
 
-  const response = await fetch(url, config);
+  if (options.body !== undefined) {
+    config.body = JSON.stringify(options.body);
+    config.headers["Content-Type"] = "application/json";
+  }
 
-  let payload = null;
-  if (response.status !== 204) {
+  const response = await fetch(path, config);
+  const text = await response.text();
+  let data = null;
+  if (text) {
     try {
-      payload = await response.json();
+      data = JSON.parse(text);
     } catch (error) {
-      payload = null;
+      data = text;
     }
   }
 
   if (!response.ok) {
-    const message = payload && payload.error ? payload.error : response.statusText;
+    const message = typeof data === "object" && data !== null && "error" in data ? data.error : response.statusText;
     throw new Error(message || "Request failed");
   }
 
-  return payload;
-}
-
-function displayMessage(message, type) {
-  if (!messageBox) {
-    return;
-  }
-  messageBox.textContent = message;
-  messageBox.className = type === "error" ? "error" : "success";
-}
-
-function clearMessage() {
-  if (!messageBox) {
-    return;
-  }
-  messageBox.textContent = "";
-  messageBox.className = "";
+  return data;
 }

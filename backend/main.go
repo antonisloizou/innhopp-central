@@ -128,37 +128,37 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'`,
 		`CREATE TABLE IF NOT EXISTS manifests (
-            id SERIAL PRIMARY KEY,
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            load_number INTEGER NOT NULL,
-            scheduled_at TIMESTAMPTZ NOT NULL,
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`,
-		`CREATE TABLE IF NOT EXISTS event_participants (
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
-            added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (event_id, participant_id)
-        )`,
-		`CREATE TABLE IF NOT EXISTS event_innhopps (
-            id SERIAL PRIMARY KEY,
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            sequence INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            scheduled_at TIMESTAMPTZ,
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`,
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    load_number INTEGER NOT NULL,
+    scheduled_at TIMESTAMPTZ NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
 		`CREATE TABLE IF NOT EXISTS participant_profiles (
-            id SERIAL PRIMARY KEY,
-            full_name TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
-            phone TEXT,
-            experience_level TEXT,
-            emergency_contact TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`,
+    id SERIAL PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    phone TEXT,
+    experience_level TEXT,
+    emergency_contact TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+		`CREATE TABLE IF NOT EXISTS event_participants (
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (event_id, participant_id)
+)`,
+		`CREATE TABLE IF NOT EXISTS event_innhopps (
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    scheduled_at TIMESTAMPTZ,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
 		`CREATE TABLE IF NOT EXISTS crew_assignments (
             id SERIAL PRIMARY KEY,
             manifest_id INTEGER NOT NULL REFERENCES manifests(id) ON DELETE CASCADE,
