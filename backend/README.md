@@ -31,6 +31,8 @@ On startup the server creates these tables if they do not already exist:
 
 - `seasons` – defines the operational season calendar.
 - `events` – jump events linked to a season with start/end timestamps.
+- `event_participants` – associations between events and participant profiles.
+- `event_innhopps` – ordered jump sequences planned within an event.
 - `manifests` – scheduled aircraft loads for an event.
 - `participant_profiles` – canonical roster of all flyers and staff.
 - `crew_assignments` – role assignments for a participant on a manifest.
@@ -85,6 +87,8 @@ On startup the server creates these tables if they do not already exist:
 | GET | `/api/events/events` | List events |
 | POST | `/api/events/events` | Create an event |
 | GET | `/api/events/events/{id}` | Retrieve an event |
+| PUT | `/api/events/events/{id}` | Update an event |
+| DELETE | `/api/events/events/{id}` | Remove an event |
 | GET | `/api/events/manifests` | List manifests |
 | POST | `/api/events/manifests` | Create a manifest |
 | GET | `/api/events/manifests/{id}` | Retrieve a manifest |

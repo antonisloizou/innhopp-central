@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Innhopp Central — Event manager</title>
+    <link rel="stylesheet" href="events.css" />
+    <script src="js/events.js" type="module" defer></script>
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <h1>Event manager</h1>
+        <p>Plan innhopps, assign participants, and keep statuses in sync across every season.</p>
+        <div id="flash" class="flash" role="status" aria-live="polite"></div>
+      </header>
+
+      <section class="panel" aria-labelledby="create-heading">
+        <div class="panel__header">
+          <h2 id="create-heading">Create event</h2>
+          <p class="muted">Capture new operations with participants and innhopps in a single step.</p>
+        </div>
+        <form id="create-form" class="form" autocomplete="off">
+          <div class="grid">
+            <label>
+              <span>Season</span>
+              <select name="season_id" required></select>
+            </label>
+            <label>
+              <span>Event name</span>
+              <input type="text" name="name" required placeholder="Glacier innhopp" />
+            </label>
+            <label>
+              <span>Location</span>
+              <input type="text" name="location" placeholder="Hemsedal" />
+            </label>
+            <label>
+              <span>Status</span>
+              <select name="status" required></select>
+            </label>
+            <label>
+              <span>Starts at</span>
+              <input type="datetime-local" name="starts_at" required />
+            </label>
+            <label>
+              <span>Ends at</span>
+              <input type="datetime-local" name="ends_at" />
+            </label>
+          </div>
+
+          <fieldset class="fieldset">
+            <legend>Participants</legend>
+            <div class="participant-grid" data-role="participants"></div>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>Innhopps</legend>
+            <div class="innhopp-rows" data-role="innhopps"></div>
+            <button type="button" class="ghost" data-action="add-innhopp">Add innhopp</button>
+          </fieldset>
+
+          <div class="form__actions">
+            <button type="submit">Create event</button>
+            <button type="reset" class="secondary">Reset</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="manage-heading">
+        <div class="panel__header">
+          <h2 id="manage-heading">Manage existing events</h2>
+          <p id="manage-hint" class="muted">Select an event from the list to review or update it.</p>
+        </div>
+        <div id="event-list" class="event-list" aria-live="polite"></div>
+
+        <form id="edit-form" class="form" hidden autocomplete="off">
+          <div class="grid">
+            <label>
+              <span>Season</span>
+              <select name="season_id" required></select>
+            </label>
+            <label>
+              <span>Event name</span>
+              <input type="text" name="name" required />
+            </label>
+            <label>
+              <span>Location</span>
+              <input type="text" name="location" />
+            </label>
+            <label>
+              <span>Status</span>
+              <select name="status" required></select>
+            </label>
+            <label>
+              <span>Starts at</span>
+              <input type="datetime-local" name="starts_at" required />
+            </label>
+            <label>
+              <span>Ends at</span>
+              <input type="datetime-local" name="ends_at" />
+            </label>
+          </div>
+
+          <fieldset class="fieldset">
+            <legend>Participants</legend>
+            <div class="participant-grid" data-role="participants"></div>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>Innhopps</legend>
+            <div class="innhopp-rows" data-role="innhopps"></div>
+            <button type="button" class="ghost" data-action="add-innhopp">Add innhopp</button>
+          </fieldset>
+
+          <div class="form__actions">
+            <button type="submit">Save changes</button>
+            <button type="button" id="delete-event" class="danger">Delete event</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <template id="innhopp-row-template">
+      <div class="innhopp-row">
+        <label>
+          <span>Sequence</span>
+          <input type="number" min="1" class="innhopp-sequence" />
+        </label>
+        <label class="grow">
+          <span>Name</span>
+          <input type="text" class="innhopp-name" required placeholder="Dune swoop" />
+        </label>
+        <label>
+          <span>Scheduled at</span>
+          <input type="datetime-local" class="innhopp-scheduled" />
+        </label>
+        <label class="grow">
+          <span>Notes</span>
+          <input type="text" class="innhopp-notes" placeholder="Exit altitude, landing brief…" />
+        </label>
+        <button type="button" class="ghost danger" data-action="remove-innhopp" aria-label="Remove innhopp">&times;</button>
+      </div>
+    </template>
+  </body>
+</html>
