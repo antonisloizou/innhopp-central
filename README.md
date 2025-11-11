@@ -74,7 +74,7 @@ Key domain entities include:
 ## Technology Stack (Proposed)
 
 - **Frontend**: React with TypeScript, mobile-friendly layout for on-site tablets.
-- **Backend**: Node.js (NestJS) or Python (FastAPI) for modular service layer.
+- **Backend**: Minimal Go service (see `backend/`) providing REST APIs for user and event role management.
 - **Database**: PostgreSQL with PostGIS for landing zone geodata.
 - **Authentication**: OAuth2 / OpenID Connect with MFA support.
 - **Infrastructure**: Containerized deployment (Docker/Kubernetes), CI/CD pipelines, Infrastructure-as-Code.
@@ -117,3 +117,7 @@ A static "Login with Google" page is included in `index.html`. To use it on GitH
 4. When the page loads, the Google button renders automatically and displays the signed-in user's name, email, and avatar once authenticated.
 
 The demo uses the [Google Identity Services JavaScript SDK](https://developers.google.com/identity/gsi/web). The credential returned in the callback is a JWT containing basic profile information. For production deployments you should send the credential to a secure backend for verification and session management.
+
+## Backend Service
+
+A minimal Go backend that handles CRUD for users, events, and role assignments is located in [`backend/`](backend/). The service initializes the PostgreSQL schema on startup, seeds the canonical role list described above, and exposes REST endpoints documented in [`backend/README.md`](backend/README.md). It is configured for Railway deployment via the standard `DATABASE_URL` and `PORT` environment variables.
