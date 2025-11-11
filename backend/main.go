@@ -121,15 +121,32 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             season_id INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             location TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
             starts_at TIMESTAMPTZ NOT NULL,
             ends_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'`,
 		`CREATE TABLE IF NOT EXISTS manifests (
             id SERIAL PRIMARY KEY,
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             load_number INTEGER NOT NULL,
             scheduled_at TIMESTAMPTZ NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_participants (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
+            added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, participant_id)
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_innhopps (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            scheduled_at TIMESTAMPTZ,
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
