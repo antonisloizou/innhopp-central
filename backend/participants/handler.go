@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/rbac"
 )
 
 // Handler exposes participant profile endpoints.
@@ -22,10 +23,10 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 }
 
 // Routes registers participant routes.
-func (h *Handler) Routes() chi.Router {
+func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/profiles", h.listProfiles)
-	r.Post("/profiles", h.createProfile)
+	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles", h.listProfiles)
+	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles", h.createProfile)
 	return r
 }
 

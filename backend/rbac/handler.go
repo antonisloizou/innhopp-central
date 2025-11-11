@@ -22,10 +22,10 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 }
 
 // Routes registers crew assignment routes.
-func (h *Handler) Routes() chi.Router {
+func (h *Handler) Routes(enforcer *Enforcer) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/crew-assignments", h.listAssignments)
-	r.Post("/crew-assignments", h.createAssignment)
+	r.With(enforcer.Authorize(PermissionViewCrewAssignments)).Get("/crew-assignments", h.listAssignments)
+	r.With(enforcer.Authorize(PermissionManageCrewAssignments)).Post("/crew-assignments", h.createAssignment)
 	return r
 }
 

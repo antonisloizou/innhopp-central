@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/rbac"
 )
 
 // Handler provides read/write APIs for seasons, events, and manifests.
@@ -24,19 +25,19 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 }
 
 // Routes configures the HTTP routes for event resources.
-func (h *Handler) Routes() chi.Router {
+func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
-	r.Get("/seasons", h.listSeasons)
-	r.Post("/seasons", h.createSeason)
-	r.Get("/seasons/{seasonID}", h.getSeason)
+	r.With(enforcer.Authorize(rbac.PermissionViewSeasons)).Get("/seasons", h.listSeasons)
+	r.With(enforcer.Authorize(rbac.PermissionManageSeasons)).Post("/seasons", h.createSeason)
+	r.With(enforcer.Authorize(rbac.PermissionViewSeasons)).Get("/seasons/{seasonID}", h.getSeason)
 
-	r.Get("/events", h.listEvents)
-	r.Post("/events", h.createEvent)
-	r.Get("/events/{eventID}", h.getEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events", h.listEvents)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events", h.createEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events/{eventID}", h.getEvent)
 
-	r.Get("/manifests", h.listManifests)
-	r.Post("/manifests", h.createManifest)
-	r.Get("/manifests/{manifestID}", h.getManifest)
+	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests", h.listManifests)
+	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Post("/manifests", h.createManifest)
+	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests/{manifestID}", h.getManifest)
 	return r
 }
 
