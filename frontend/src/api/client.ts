@@ -1,0 +1,28 @@
+const defaultBaseUrl = '/api';
+
+const buildHeaders = (init?: RequestInit) => {
+  const headers = new Headers(init?.headers || {});
+  if (!headers.has('Content-Type') && init?.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+  return headers;
+};
+
+export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const url = `${import.meta.env.VITE_API_BASE_URL?.trim() || defaultBaseUrl}${path}`;
+  const response = await fetch(url, {
+    ...init,
+    credentials: 'include',
+    headers: buildHeaders(init)
+  });
+
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const payload = isJson ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message = typeof payload === 'string' ? payload : payload?.error || 'Request failed';
+    throw new Error(message);
+  }
+
+  return payload as T;
+};

@@ -102,7 +102,35 @@ Key domain entities include:
 3. **Insights & Growth (Phase 3)**
    - Analytics suite with KPI dashboards
    - Partner portal for aircraft/boat operators
-   - API for third-party travel and booking integrations
+    - API for third-party travel and booking integrations
+
+## Local development
+
+Prereqs: Go 1.22+, Node 18+ (or current LTS), npm, and Docker (for local Postgres). Backend lives in `backend/`, frontend in `frontend/`.
+
+Backend:
+
+```bash
+docker run --name innhopp-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=innhopp -p 5432:5432 -d postgres:15
+cd backend
+# optional if you change defaults: export DATABASE_URL="postgres://postgres:postgres@localhost:5432/innhopp?sslmode=disable"
+go mod tidy
+go run ./...
+# health check: http://localhost:8080/api/health
+```
+
+Frontend:
+
+```bash
+cd frontend
+cp .env.example .env
+# set VITE_GOOGLE_CLIENT_ID in .env
+npm install
+npm run dev
+# app: http://localhost:5173
+```
+
+Use `httpie` or `curl` to hit APIs once the backend is up, e.g. `http POST :8080/api/participants/profiles full_name="Aviator Ada" email="ada@example.com"`.
 
 
 ## Google Login Demo

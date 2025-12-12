@@ -21,12 +21,12 @@ var (
 	validEventStatuses = map[string]struct{}{
 		"draft":    {},
 		"planned":  {},
-		"scouted":  {},
 		"launched": {},
+		"scouted":  {},
 		"live":     {},
 		"past":     {},
 	}
-	eventStatusValues = []string{"draft", "planned", "scouted", "launched", "live", "past"}
+	eventStatusValues = []string{"draft", "planned", "launched", "scouted", "live", "past"}
 )
 
 const defaultEventStatus = "draft"
@@ -57,6 +57,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests", h.listManifests)
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Post("/manifests", h.createManifest)
 	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests/{manifestID}", h.getManifest)
+	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Put("/manifests/{manifestID}", h.updateManifest)
 	return r
 }
 
@@ -76,6 +77,7 @@ type Event struct {
 	Status         string     `json:"status"`
 	StartsAt       time.Time  `json:"starts_at"`
 	EndsAt         *time.Time `json:"ends_at,omitempty"`
+	Slots          int        `json:"slots"`
 	ParticipantIDs []int64    `json:"participant_ids"`
 	Innhopps       []Innhopp  `json:"innhopps"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -92,12 +94,13 @@ type Innhopp struct {
 }
 
 type Manifest struct {
-	ID          int64     `json:"id"`
-	EventID     int64     `json:"event_id"`
-	LoadNumber  int       `json:"load_number"`
-	ScheduledAt time.Time `json:"scheduled_at"`
-	Notes       string    `json:"notes,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	EventID       int64     `json:"event_id"`
+	LoadNumber    int       `json:"load_number"`
+	Capacity      int       `json:"capacity"`
+	Notes         string    `json:"notes,omitempty"`
+	ParticipantIDs []int64  `json:"participant_ids"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type eventPayload struct {
@@ -107,6 +110,7 @@ type eventPayload struct {
 	Status         string           `json:"status"`
 	StartsAt       string           `json:"starts_at"`
 	EndsAt         string           `json:"ends_at"`
+	Slots          int              `json:"slots"`
 	ParticipantIDs []int64          `json:"participant_ids"`
 	Innhopps       []innhoppPayload `json:"innhopps"`
 }
@@ -224,7 +228,7 @@ func (h *Handler) getSeason(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, season_id, name, location, status, starts_at, ends_at, created_at FROM events ORDER BY starts_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, season_id, name, location, status, starts_at, ends_at, slots, created_at FROM events ORDER BY starts_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list events")
 		return
@@ -234,7 +238,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	var events []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots, &e.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
 			return
 		}
@@ -305,9 +309,15 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 
+	slots := payload.Slots
+	if slots < 0 {
+		httpx.Error(w, http.StatusBadRequest, "slots cannot be negative")
+		return
+	}
+
 	row := tx.QueryRow(ctx,
-		`INSERT INTO events (season_id, name, location, status, starts_at, ends_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, created_at`,
-		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt,
+		`INSERT INTO events (season_id, name, location, status, starts_at, ends_at, slots) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots,
 	)
 
 	var event Event
@@ -317,6 +327,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	event.Status = status
 	event.StartsAt = startsAt
 	event.EndsAt = endsAt
+	event.Slots = slots
 
 	if err := row.Scan(&event.ID, &event.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create event")
@@ -415,6 +426,12 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slots := payload.Slots
+	if slots < 0 {
+		httpx.Error(w, http.StatusBadRequest, "slots cannot be negative")
+		return
+	}
+
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -424,8 +441,8 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE events SET season_id = $1, name = $2, location = $3, status = $4, starts_at = $5, ends_at = $6 WHERE id = $7`,
-		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, eventID,
+		`UPDATE events SET season_id = $1, name = $2, location = $3, status = $4, starts_at = $5, ends_at = $6, slots = $7 WHERE id = $8`,
+		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots, eventID,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update event")
@@ -481,7 +498,7 @@ func (h *Handler) deleteEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listManifests(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, event_id, load_number, scheduled_at, notes, created_at FROM manifests ORDER BY scheduled_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, event_id, load_number, capacity, notes, created_at FROM manifests ORDER BY load_number ASC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list manifests")
 		return
@@ -491,7 +508,7 @@ func (h *Handler) listManifests(w http.ResponseWriter, r *http.Request) {
 	var manifests []Manifest
 	for rows.Next() {
 		var m Manifest
-		if err := rows.Scan(&m.ID, &m.EventID, &m.LoadNumber, &m.ScheduledAt, &m.Notes, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.EventID, &m.LoadNumber, &m.Capacity, &m.Notes, &m.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse manifest")
 			return
 		}
@@ -503,6 +520,12 @@ func (h *Handler) listManifests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	manifests, err = h.attachManifestParticipants(r.Context(), manifests)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load manifest participants")
+		return
+	}
+
 	httpx.WriteJSON(w, http.StatusOK, manifests)
 }
 
@@ -510,8 +533,9 @@ func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		EventID     int64  `json:"event_id"`
 		LoadNumber  int    `json:"load_number"`
-		ScheduledAt string `json:"scheduled_at"`
+		Capacity    int    `json:"capacity"`
 		Notes       string `json:"notes"`
+		ParticipantIDs []int64 `json:"participant_ids"`
 	}
 
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -519,27 +543,40 @@ func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.EventID == 0 || payload.LoadNumber == 0 || payload.ScheduledAt == "" {
-		httpx.Error(w, http.StatusBadRequest, "event_id, load_number, and scheduled_at are required")
+	if payload.EventID == 0 || payload.LoadNumber == 0 {
+		httpx.Error(w, http.StatusBadRequest, "event_id and load_number are required")
 		return
 	}
 
-	scheduledAt, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+	if payload.Capacity < 0 {
+		httpx.Error(w, http.StatusBadRequest, "capacity cannot be negative")
+		return
+	}
+
+	participantIDs, err := normalizeParticipantIDs(payload.ParticipantIDs)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
+		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	row := h.db.QueryRow(r.Context(),
-		`INSERT INTO manifests (event_id, load_number, scheduled_at, notes) VALUES ($1, $2, $3, $4)
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create manifest")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx,
+		`INSERT INTO manifests (event_id, load_number, capacity, notes) VALUES ($1, $2, $3, $4)
          RETURNING id, created_at`,
-		payload.EventID, payload.LoadNumber, scheduledAt, payload.Notes,
+		payload.EventID, payload.LoadNumber, payload.Capacity, payload.Notes,
 	)
 
 	var manifest Manifest
 	manifest.EventID = payload.EventID
 	manifest.LoadNumber = payload.LoadNumber
-	manifest.ScheduledAt = scheduledAt
+	manifest.Capacity = payload.Capacity
 	manifest.Notes = payload.Notes
 
 	if err := row.Scan(&manifest.ID, &manifest.CreatedAt); err != nil {
@@ -547,7 +584,23 @@ func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpx.WriteJSON(w, http.StatusCreated, manifest)
+	if err := replaceManifestParticipantsTx(ctx, tx, manifest.ID, participantIDs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create manifest")
+		return
+	}
+
+	created, err := h.getManifestByID(ctx, manifest.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load manifest")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
 func (h *Handler) getManifest(w http.ResponseWriter, r *http.Request) {
@@ -557,9 +610,8 @@ func (h *Handler) getManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row := h.db.QueryRow(r.Context(), `SELECT id, event_id, load_number, scheduled_at, notes, created_at FROM manifests WHERE id = $1`, manifestID)
-	var manifest Manifest
-	if err := row.Scan(&manifest.ID, &manifest.EventID, &manifest.LoadNumber, &manifest.ScheduledAt, &manifest.Notes, &manifest.CreatedAt); err != nil {
+	manifest, err := h.getManifestByID(r.Context(), manifestID)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "manifest not found")
 			return
@@ -571,10 +623,88 @@ func (h *Handler) getManifest(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, manifest)
 }
 
+func (h *Handler) updateManifest(w http.ResponseWriter, r *http.Request) {
+	manifestID, err := strconv.ParseInt(chi.URLParam(r, "manifestID"), 10, 64)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid manifest id")
+		return
+	}
+
+	var payload struct {
+		EventID        int64   `json:"event_id"`
+		LoadNumber     int     `json:"load_number"`
+		Capacity       int     `json:"capacity"`
+		Notes          string  `json:"notes"`
+		ParticipantIDs []int64 `json:"participant_ids"`
+	}
+
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	if payload.EventID == 0 || payload.LoadNumber == 0 {
+		httpx.Error(w, http.StatusBadRequest, "event_id and load_number are required")
+		return
+	}
+
+	if payload.Capacity < 0 {
+		httpx.Error(w, http.StatusBadRequest, "capacity cannot be negative")
+		return
+	}
+
+	participantIDs, err := normalizeParticipantIDs(payload.ParticipantIDs)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update manifest")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE manifests
+         SET event_id = $1, load_number = $2, capacity = $3, notes = $4
+         WHERE id = $5`,
+		payload.EventID, payload.LoadNumber, payload.Capacity, payload.Notes, manifestID,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update manifest")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "manifest not found")
+		return
+	}
+
+	if err := replaceManifestParticipantsTx(ctx, tx, manifestID, participantIDs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update manifest")
+		return
+	}
+
+	updated, err := h.getManifestByID(ctx, manifestID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load manifest")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, updated)
+}
+
 func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) {
-	row := h.db.QueryRow(ctx, `SELECT id, season_id, name, location, status, starts_at, ends_at, created_at FROM events WHERE id = $1`, eventID)
+	row := h.db.QueryRow(ctx, `SELECT id, season_id, name, location, status, starts_at, ends_at, slots, created_at FROM events WHERE id = $1`, eventID)
 	var event Event
-	if err := row.Scan(&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.CreatedAt); err != nil {
+	if err := row.Scan(&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots, &event.CreatedAt); err != nil {
 		return Event{}, err
 	}
 
@@ -622,9 +752,9 @@ func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int
 	rows, err := h.db.Query(ctx,
 		`SELECT event_id, participant_id
          FROM event_participants
-         WHERE event_id = ANY($1::bigint[])
+         WHERE event_id = ANY($1)
          ORDER BY event_id, participant_id`,
-		pgx.Array(eventIDs),
+		eventIDs,
 	)
 	if err != nil {
 		return nil, err
@@ -646,14 +776,100 @@ func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int
 	return result, nil
 }
 
+func (h *Handler) attachManifestParticipants(ctx context.Context, manifests []Manifest) ([]Manifest, error) {
+	if len(manifests) == 0 {
+		return manifests, nil
+	}
+
+	ids := make([]int64, len(manifests))
+	for i, m := range manifests {
+		ids[i] = m.ID
+	}
+
+	participantMap, err := h.fetchParticipantsForManifests(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	attached := make([]Manifest, len(manifests))
+	copy(attached, manifests)
+	for i := range attached {
+		attached[i].ParticipantIDs = participantMap[attached[i].ID]
+	}
+	return attached, nil
+}
+
+func (h *Handler) fetchParticipantsForManifests(ctx context.Context, manifestIDs []int64) (map[int64][]int64, error) {
+	result := make(map[int64][]int64, len(manifestIDs))
+	rows, err := h.db.Query(ctx,
+		`SELECT manifest_id, participant_id
+         FROM manifest_participants
+         WHERE manifest_id = ANY($1)
+         ORDER BY manifest_id, participant_id`,
+		manifestIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var manifestID, participantID int64
+		if err := rows.Scan(&manifestID, &participantID); err != nil {
+			return nil, err
+		}
+		result[manifestID] = append(result[manifestID], participantID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func replaceManifestParticipantsTx(ctx context.Context, tx pgx.Tx, manifestID int64, participantIDs []int64) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM manifest_participants WHERE manifest_id = $1`, manifestID); err != nil {
+		return err
+	}
+	if len(participantIDs) == 0 {
+		return nil
+	}
+	for _, pid := range participantIDs {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO manifest_participants (manifest_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			manifestID, pid,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Handler) getManifestByID(ctx context.Context, manifestID int64) (Manifest, error) {
+	row := h.db.QueryRow(ctx, `SELECT id, event_id, load_number, capacity, notes, created_at FROM manifests WHERE id = $1`, manifestID)
+	var manifest Manifest
+	if err := row.Scan(&manifest.ID, &manifest.EventID, &manifest.LoadNumber, &manifest.Capacity, &manifest.Notes, &manifest.CreatedAt); err != nil {
+		return Manifest{}, err
+	}
+
+	participants, err := h.fetchParticipantsForManifests(ctx, []int64{manifest.ID})
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifest.ParticipantIDs = participants[manifest.ID]
+
+	return manifest, nil
+}
+
 func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]Innhopp, error) {
 	result := make(map[int64][]Innhopp, len(eventIDs))
 	rows, err := h.db.Query(ctx,
 		`SELECT id, event_id, sequence, name, scheduled_at, notes, created_at
          FROM event_innhopps
-         WHERE event_id = ANY($1::bigint[])
+         WHERE event_id = ANY($1)
          ORDER BY event_id, sequence, id`,
-		pgx.Array(eventIDs),
+		eventIDs,
 	)
 	if err != nil {
 		return nil, err

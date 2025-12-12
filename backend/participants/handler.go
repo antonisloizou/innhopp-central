@@ -2,6 +2,7 @@ package participants
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles", h.listProfiles)
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles", h.createProfile)
+	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles/{profileID}", h.getProfile)
+	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Put("/profiles/{profileID}", h.updateProfile)
 	return r
 }
 
@@ -102,4 +105,83 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusCreated, profile)
+}
+
+func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
+	profileID, err := strconv.ParseInt(chi.URLParam(r, "profileID"), 10, 64)
+	if err != nil || profileID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid profile id")
+		return
+	}
+
+	row := h.db.QueryRow(r.Context(),
+		`SELECT id, full_name, email, phone, experience_level, emergency_contact, created_at
+         FROM participant_profiles WHERE id = $1`,
+		profileID,
+	)
+
+	var profile Profile
+	if err := row.Scan(&profile.ID, &profile.FullName, &profile.Email, &profile.Phone, &profile.ExperienceLevel, &profile.EmergencyContact, &profile.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusNotFound, "participant not found")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
+	profileID, err := strconv.ParseInt(chi.URLParam(r, "profileID"), 10, 64)
+	if err != nil || profileID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid profile id")
+		return
+	}
+
+	var payload struct {
+		FullName         string `json:"full_name"`
+		Email            string `json:"email"`
+		Phone            string `json:"phone"`
+		ExperienceLevel  string `json:"experience_level"`
+		EmergencyContact string `json:"emergency_contact"`
+	}
+
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	fullName := strings.TrimSpace(payload.FullName)
+	email := strings.TrimSpace(strings.ToLower(payload.Email))
+	if fullName == "" || email == "" {
+		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
+		return
+	}
+
+	tag, err := h.db.Exec(r.Context(),
+		`UPDATE participant_profiles
+         SET full_name = $1, email = $2, phone = $3, experience_level = $4, emergency_contact = $5
+         WHERE id = $6`,
+		fullName, email, payload.Phone, payload.ExperienceLevel, payload.EmergencyContact, profileID,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update participant")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "participant not found")
+		return
+	}
+
+	row := h.db.QueryRow(r.Context(),
+		`SELECT id, full_name, email, phone, experience_level, emergency_contact, created_at
+         FROM participant_profiles WHERE id = $1`,
+		profileID,
+	)
+
+	var profile Profile
+	if err := row.Scan(&profile.ID, &profile.FullName, &profile.Email, &profile.Phone, &profile.ExperienceLevel, &profile.EmergencyContact, &profile.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, profile)
 }

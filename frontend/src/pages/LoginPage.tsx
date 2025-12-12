@@ -104,17 +104,9 @@ const LoginPage = () => {
   return (
     <div className="login-layout">
       <section className="login-panel">
-        <h1>Innhopp Central Access</h1>
-        <p>
-          Sign in with your operational Google Workspace account to continue to manifests, logistics dashboards, and
-          participant tools.
-        </p>
-        {!hasConfiguredGoogleClient && (
-          <div className="notice warning">
-            <strong>Configuration reminder:</strong> Provide <code>VITE_GOOGLE_CLIENT_ID</code> in an <code>.env</code> file to
-            enable live authentication.
-          </div>
-        )}
+        <h1>Innhopp Central</h1>
+        <p>Events, Participants, Operations, Manifests, and Logistics all in one place.</p>
+        <p>Sign in to continue.</p>
         <div ref={buttonRef} className="google-button" aria-live="polite" />
         <div className="debug-login" role="group" aria-labelledby="debug-login-heading">
           <h2 id="debug-login-heading">Debug credentials</h2>
@@ -162,14 +154,6 @@ const LoginPage = () => {
         )}
         {error && <p className="error-text">{error}</p>}
       </section>
-      <aside className="login-sidebar">
-        <h2>Why Google Identity?</h2>
-        <ul>
-          <li>Single sign-on reduces credential sprawl and speeds jump-day access.</li>
-          <li>Multi-factor enforcement aligns with aviation safety requirements.</li>
-          <li>Identity tokens can be exchanged with the Go backend for session hardening.</li>
-        </ul>
-      </aside>
     </div>
   );
 };

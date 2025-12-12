@@ -2,9 +2,9 @@ import { NavLink, Outlet } from 'react-router-dom';
 
 const navItems = [
   { to: '/events', label: 'Event Calendar' },
-  { to: '/manifests', label: 'Manifest Management' },
-  { to: '/participants', label: 'Participant Onboarding' },
-  { to: '/logistics', label: 'Logistics Dashboards' }
+  { to: '/manifests', label: 'Manifest' },
+  { to: '/participants', label: 'Participants' },
+  { to: '/logistics', label: 'Logistics' }
 ];
 
 const Layout = () => (
@@ -12,7 +12,7 @@ const Layout = () => (
     <header className="app-header">
       <div>
         <h1>Innhopp Central</h1>
-        <p className="app-tagline">Operations, manifests, and logistics in one place.</p>
+        <p className="app-tagline">Events, Participants, Operations, Manifests, and Logistics all in one place</p>
       </div>
       <NavLink to="/login" className="logout-link">
         Sign out

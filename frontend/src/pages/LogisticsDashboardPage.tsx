@@ -15,12 +15,6 @@ const transportLegs = [
   }
 ];
 
-const gearStatus = [
-  { item: 'Student rigs', status: '9/12 packed', owner: 'Packing bay' },
-  { item: 'Oxygen systems', status: '3 units reserved', owner: 'Safety team' },
-  { item: 'Boats', status: 'Pre-launch checklist running', owner: 'Marine ops' }
-];
-
 const LogisticsDashboardPage = () => (
   <section>
     <header className="page-header">
@@ -57,22 +51,6 @@ const LogisticsDashboardPage = () => (
             ))}
           </tbody>
         </table>
-      </article>
-      <article className="card">
-        <header className="card-header">
-          <h3>Gear readiness</h3>
-        </header>
-        <ul className="status-list">
-          {gearStatus.map((gear) => (
-            <li key={gear.item}>
-              <div>
-                <strong>{gear.item}</strong>
-                <p>{gear.status}</p>
-              </div>
-              <span className="badge neutral">{gear.owner}</span>
-            </li>
-          ))}
-        </ul>
       </article>
     </div>
   </section>
