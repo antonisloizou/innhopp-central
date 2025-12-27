@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { roleOptions } from '../utils/roles';
 
 type ParticipantCard = {
   id: number;
@@ -17,13 +18,43 @@ const sortSeasonsDesc = (seasons: Season[]) =>
   [...seasons].sort((a, b) => b.name.localeCompare(a.name));
 
 const ParticipantOnboardingPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
-  const [selectedSeason, setSelectedSeason] = useState<string>('');
-  const [selectedEvent, setSelectedEvent] = useState<string>('');
+  const [selectedSeason, setSelectedSeason] = useState<string>(() => searchParams.get('season') || '');
+  const [selectedEvent, setSelectedEvent] = useState<string>(() => searchParams.get('event') || '');
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(() => {
+    const rolesParam = searchParams.get('roles');
+    return rolesParam ? rolesParam.split(',').filter(Boolean) : [];
+  });
+  const [nameQuery, setNameQuery] = useState<string>(() => searchParams.get('q') || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const highlightName = (name: string) => {
+    if (!nameQuery.trim()) return name;
+    const query = nameQuery.trim();
+    const regex = new RegExp(`(${escapeRegExp(query)})`, 'ig');
+    return name.split(regex).map((part, idx) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={idx}>{part}</mark>
+      ) : (
+        <span key={idx}>{part}</span>
+      )
+    );
+  };
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (selectedSeason) next.set('season', selectedSeason);
+    if (selectedEvent) next.set('event', selectedEvent);
+    if (selectedRoles.length) next.set('roles', selectedRoles.join(','));
+    if (nameQuery) next.set('q', nameQuery);
+    setSearchParams(next, { replace: true });
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,10 +112,24 @@ const ParticipantOnboardingPage = () => {
   }, [events, selectedSeason]);
 
   const filteredParticipants: ParticipantCard[] = useMemo(() => {
+    const matchesSelectedRoles = (profile?: ParticipantProfile | null) => {
+      const requiredRoles = selectedRoles.filter((role) => role !== 'Participant');
+      if (!requiredRoles.length) return true;
+      const roles = Array.isArray(profile?.roles) ? profile?.roles : [];
+      return requiredRoles.every((role) => roles.includes(role));
+    };
+    const matchesName = (profile?: ParticipantProfile | null) => {
+      if (!nameQuery.trim()) return true;
+      const fullName = profile?.full_name || '';
+      return fullName.toLowerCase().includes(nameQuery.trim().toLowerCase());
+    };
+
     const addParticipant = (id: number, acc: ParticipantCard[], seen: Set<number>) => {
       if (seen.has(id)) return;
       seen.add(id);
       const profile = participantLookup.get(id);
+      if (!matchesSelectedRoles(profile)) return;
+      if (!matchesName(profile)) return;
       const eventCount = participantEventsMap.get(id)?.length || 0;
       acc.push({
         id,
@@ -120,14 +165,33 @@ const ParticipantOnboardingPage = () => {
 
     participants.forEach((p) => addParticipant(p.id, result, seen));
     return result;
-  }, [selectedEvent, selectedSeason, events, filteredEvents, participants, participantLookup, participantEventsMap]);
+  }, [
+    selectedEvent,
+    selectedSeason,
+    selectedRoles,
+    nameQuery,
+    events,
+    filteredEvents,
+    participants,
+    participantLookup,
+    participantEventsMap
+  ]);
+
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    if (selectedSeason) params.set('season', selectedSeason);
+    if (selectedEvent) params.set('event', selectedEvent);
+    if (selectedRoles.length) params.set('roles', selectedRoles.join(','));
+    if (nameQuery) params.set('q', nameQuery);
+    const serialized = params.toString();
+    return serialized ? `?${serialized}` : '';
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery]);
 
   return (
     <section>
       <header className="page-header">
         <div>
           <h2>Participants</h2>
-          <p>Filter by season or event to see assigned participants.</p>
         </div>
         <Link className="primary button-link" to="/participants/new">
           Add participant
@@ -165,6 +229,59 @@ const ParticipantOnboardingPage = () => {
                 ))}
               </select>
             </label>
+            <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+              <span>Name</span>
+              <input
+                type="text"
+                placeholder="Search by name"
+                value={nameQuery}
+                onChange={(e) => setNameQuery(e.target.value)}
+              />
+            </label>
+            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+              <span>Roles</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {roleOptions
+                  .filter((role) => role !== 'Participant')
+                  .map((role) => {
+                  const checked = selectedRoles.includes(role);
+                  return (
+                    <label
+                      key={role}
+                      className="badge neutral"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setSelectedRoles((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(role);
+                            } else {
+                              next.delete(role);
+                            }
+                            return Array.from(next);
+                          });
+                        }}
+                      />
+                      {role}
+                    </label>
+                  );
+                })}
+                {selectedRoles.length > 0 && (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => setSelectedRoles([])}
+                    style={{ padding: '0.2rem 0.6rem' }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
           {selectedSeason && filteredEvents.length === 0 && (
             <p className="muted">No events for this season.</p>
@@ -190,8 +307,12 @@ const ParticipantOnboardingPage = () => {
             <ul className="status-list">
               {filteredParticipants.map((p) => (
                 <li key={p.id}>
-                  <Link to={`/participants/${p.id}`} className="card-link" style={{ flex: 1 }}>
-                    <strong>{p.full_name}</strong>
+                  <Link
+                    to={{ pathname: `/participants/${p.id}`, search: queryString }}
+                    className="card-link"
+                    style={{ flex: 1 }}
+                  >
+                    <strong>{highlightName(p.full_name)}</strong>
                     <div className="muted">{p.email || 'No email on file'}</div>
                     <div className="muted">
                       Experience: {p.experience_level || 'Not provided'}

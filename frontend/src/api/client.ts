@@ -16,6 +16,14 @@ export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T
     headers: buildHeaders(init)
   });
 
+  // Short-circuit for no-content responses
+  if (response.status === 204 || response.status === 205) {
+    if (!response.ok) {
+      throw new Error('Request failed');
+    }
+    return undefined as T;
+  }
+
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
 

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CreateParticipantPayload, createParticipantProfile } from '../api/participants';
+import { roleOptions } from '../utils/roles';
 
 const ParticipantCreatePage = () => {
   const [form, setForm] = useState<CreateParticipantPayload>({
@@ -8,7 +9,8 @@ const ParticipantCreatePage = () => {
     email: '',
     phone: '',
     experience_level: '',
-    emergency_contact: ''
+    emergency_contact: '',
+    roles: ['Participant']
   });
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -24,7 +26,8 @@ const ParticipantCreatePage = () => {
         email: form.email.trim(),
         phone: form.phone?.trim() || undefined,
         experience_level: form.experience_level?.trim() || undefined,
-        emergency_contact: form.emergency_contact?.trim() || undefined
+        emergency_contact: form.emergency_contact?.trim() || undefined,
+        roles: form.roles && form.roles.length > 0 ? form.roles : ['Participant']
       });
       setMessage('Participant created');
       navigate('/participants');
@@ -40,7 +43,7 @@ const ParticipantCreatePage = () => {
       <header className="page-header">
         <div>
           <h2>Create participant</h2>
-          <p>Add a new participant to the Innhopp Family.</p>
+          <p>Add a new member to the Innhopp Family.</p>
         </div>
         <button className="ghost" type="button" onClick={() => navigate('/participants')}>
           Back to participants
@@ -97,6 +100,39 @@ const ParticipantCreatePage = () => {
               placeholder="Optional"
             />
           </label>
+          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <span>Roles</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              {roleOptions.map((role) => {
+                const checked = form.roles?.includes(role);
+                return (
+                  <label
+                    key={role}
+                    className="badge neutral"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        setForm((prev) => {
+                          const current = new Set(prev.roles || []);
+                          if (e.target.checked) {
+                            current.add(role);
+                          } else {
+                            current.delete(role);
+                          }
+                          const next = Array.from(current);
+                          return { ...prev, roles: next.length > 0 ? next : ['Participant'] };
+                        });
+                      }}
+                    />
+                    {role}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <div className="form-actions">
             <button type="submit" className="primary" disabled={submitting}>
               {submitting ? 'Creating…' : 'Create participant'}

@@ -33,6 +33,11 @@ button.primary {
   color: #fff;
 }
 
+button.primary.saved {
+  background: #16a34a;
+  color: #fff;
+}
+
 button.secondary {
   background: #0f172a;
   color: #fff;
@@ -41,6 +46,7 @@ button.secondary {
 button.ghost {
   background: transparent;
   color: #0f172a;
+  font-size: 1.05rem;
 }
 
 .button-link {
@@ -65,6 +71,20 @@ button.ghost {
 }
 
 .button-link:hover {
+  text-decoration: none;
+}
+
+.ghost-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.25rem;
+  color: #0f172a;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ghost-link:hover {
   text-decoration: none;
 }
 
@@ -101,7 +121,15 @@ button.ghost {
   border-radius: 0.5rem;
   border: 1px solid #cbd5e1;
   background: #fff;
+  font-family: inherit;
   font-size: 1rem;
+}
+
+.innhopp-row .form-field select {
+  width: 100%;
+  max-width: 100%;
+  justify-self: start;
+  text-overflow: ellipsis;
 }
 
 .form-field input:focus,
@@ -109,6 +137,18 @@ button.ghost {
 .form-field textarea:focus {
   outline: 2px solid #2563eb;
   outline-offset: 1px;
+}
+
+.form-field textarea {
+  min-height: 3rem;
+  overflow: hidden;
+}
+
+.form-field.field-missing input,
+.form-field.field-missing select,
+.form-field.field-missing textarea {
+  border-color: #ef4444;
+  background: #fef2f2;
 }
 
 .form-actions {
@@ -134,6 +174,43 @@ button.ghost {
   padding: 1.5rem 2rem;
   background: #111827;
   color: #f9fafb;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.brand-logo {
+  width: 232px;
+  height: auto;
+  max-height: 800px;
+  border-radius: 0.35rem;
+}
+
+.brand-text {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.brand-title {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.brand-subtitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #cbd5f5;
+  line-height: 1.3;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 .app-tagline {
@@ -185,6 +262,82 @@ button.ghost {
   overflow-y: auto;
 }
 
+.menu-toggle {
+  display: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f9fafb;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+}
+
+.menu-icon {
+  display: grid;
+  gap: 4px;
+}
+
+.menu-icon .bar {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: #f9fafb;
+  border-radius: 2px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.menu-toggle.open .bar:nth-child(1) {
+  transform: translateY(6px) rotate(45deg);
+}
+
+.menu-toggle.open .bar:nth-child(2) {
+  opacity: 0;
+}
+
+.menu-toggle.open .bar:nth-child(3) {
+  transform: translateY(-6px) rotate(-45deg);
+}
+
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 9;
+}
+
+@media (max-width: 960px) {
+  .app-body {
+    grid-template-columns: 1fr;
+    position: relative;
+  }
+
+  .app-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 16rem;
+    transform: translateX(-105%);
+    transition: transform 0.2s ease;
+    z-index: 10;
+    box-shadow: 0 20px 45px -20px rgba(15, 23, 42, 0.55);
+  }
+
+  .app-nav.open {
+    transform: translateX(0);
+  }
+
+  .app-content {
+    padding: 1.25rem;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+}
+
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -195,6 +348,21 @@ button.ghost {
 
 .page-header h2 {
   margin: 0;
+}
+
+.event-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.event-location {
+  margin: 0;
+  margin-top: 0.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.01em;
 }
 
 .grid {
@@ -283,7 +451,7 @@ button.ghost {
 }
 
 .badge.status-draft {
-  background: #9ca3af;
+  background: #e5e7eb;
   color: #111827;
 }
 
@@ -298,18 +466,28 @@ button.ghost {
 }
 
 .badge.status-scouted {
-  background: #c7d2fe;
-  color: #1e3a8a;
+  background: #fed7aa;
+  color: #9a3412;
 }
 
 .badge.status-live {
+  background: #2b8a3e;
+  color: #ffffff;
+}
+
+.badge.status-past {
+  background: #9ca3af;
+  color: #111827;
+}
+
+.badge.success {
   background: #bbf7d0;
   color: #166534;
 }
 
-.badge.status-past {
-  background: #e5e7eb;
-  color: #111827;
+.badge.danger {
+  background: #fecdd3;
+  color: #9b1c1c;
 }
 
 .table {
@@ -344,11 +522,29 @@ button.ghost {
   border-bottom: 1px solid #e2e8f0;
 }
 
+.schedule-time:hover {
+  cursor: text;
+}
+
+.schedule-time-active {
+  box-shadow: 0 0 0 2px #3b82f6;
+  border-radius: 6px;
+}
+
+.schedule-time-picker .flatpickr-input,
+.schedule-time-picker .flatpickr-alt-input {
+  display: none !important;
+}
+
 .innhopp-row {
   display: grid;
   gap: 0.75rem;
   column-gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns:
+    minmax(80px, 110px)
+    minmax(240px, 1.1fr)
+    minmax(240px, 1fr)
+    minmax(400px, 1.2fr);
   align-items: end;
   padding: 1rem;
   border: 1px dashed #cbd5e1;
@@ -496,14 +692,6 @@ button.ghost {
 }
 
 @media (max-width: 900px) {
-  .app-body {
-    grid-template-columns: 1fr;
-  }
-
-  .app-nav {
-    display: none;
-  }
-
   .login-layout {
     grid-template-columns: 1fr;
   }

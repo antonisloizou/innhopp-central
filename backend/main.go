@@ -15,6 +15,7 @@ import (
 
 	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/events"
+	"github.com/innhopp/central/backend/innhopps"
 	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/participants"
 	"github.com/innhopp/central/backend/rbac"
@@ -100,6 +101,7 @@ func main() {
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))
 
 	addr := ":8080"
 	if port := os.Getenv("PORT"); port != "" {
@@ -139,11 +141,13 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     load_number INTEGER NOT NULL,
     capacity INTEGER NOT NULL DEFAULT 0,
+    staff_slots INTEGER,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
 		`ALTER TABLE manifests DROP COLUMN IF EXISTS scheduled_at`,
 		`ALTER TABLE manifests ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE manifests ADD COLUMN IF NOT EXISTS staff_slots INTEGER`,
 		`CREATE TABLE IF NOT EXISTS participant_profiles (
     id SERIAL PRIMARY KEY,
     full_name TEXT NOT NULL,
@@ -151,8 +155,10 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     phone TEXT,
     experience_level TEXT,
     emergency_contact TEXT,
+    roles TEXT[] NOT NULL DEFAULT ARRAY['Participant'],
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
+		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS roles TEXT[] NOT NULL DEFAULT ARRAY['Participant']`,
 		`CREATE TABLE IF NOT EXISTS event_participants (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
@@ -164,10 +170,59 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     sequence INTEGER NOT NULL,
     name TEXT NOT NULL,
+    takeoff_airfield_id INTEGER REFERENCES airfields(id),
+    elevation INTEGER,
     scheduled_at TIMESTAMPTZ,
     notes TEXT,
+    coordinates TEXT,
+    reason_for_choice TEXT,
+    adjust_altimeter_aad TEXT,
+    notam TEXT,
+    distance_by_air NUMERIC,
+    distance_by_road NUMERIC,
+    primary_landing_area_name TEXT,
+    primary_landing_area_description TEXT,
+    primary_landing_area_size TEXT,
+    primary_landing_area_obstacles TEXT,
+    secondary_landing_area_name TEXT,
+    secondary_landing_area_description TEXT,
+    secondary_landing_area_size TEXT,
+    secondary_landing_area_obstacles TEXT,
+    risk_assessment TEXT,
+    safety_precautions TEXT,
+    jumprun TEXT,
+    hospital TEXT,
+    rescue_boat BOOLEAN,
+    minimum_requirements TEXT,
+    land_owners JSONB,
+    land_owner_permission BOOLEAN,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS takeoff_airfield_id INTEGER REFERENCES airfields(id)`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS elevation INTEGER`,
+		`ALTER TABLE event_innhopps ALTER COLUMN scheduled_at TYPE TIMESTAMPTZ USING scheduled_at::timestamptz`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS coordinates TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS reason_for_choice TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS adjust_altimeter_aad TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS notam TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS distance_by_air NUMERIC`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS distance_by_road NUMERIC`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_name TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_description TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_size TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_obstacles TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS secondary_landing_area_name TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS secondary_landing_area_description TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS secondary_landing_area_size TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS secondary_landing_area_obstacles TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS risk_assessment TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS safety_precautions TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS jumprun TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS hospital TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS rescue_boat BOOLEAN`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS minimum_requirements TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owners JSONB DEFAULT '[]'::jsonb`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owner_permission BOOLEAN`,
 		`CREATE TABLE IF NOT EXISTS manifest_participants (
     manifest_id INTEGER NOT NULL REFERENCES manifests(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
@@ -181,6 +236,37 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             role TEXT NOT NULL,
             assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
+		`CREATE TABLE IF NOT EXISTS airfields (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            latitude TEXT NOT NULL,
+            longitude TEXT NOT NULL,
+            elevation INTEGER NOT NULL,
+            description TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE airfields ALTER COLUMN latitude TYPE TEXT USING latitude::TEXT`,
+		`ALTER TABLE airfields ALTER COLUMN longitude TYPE TEXT USING longitude::TEXT`,
+		`CREATE TABLE IF NOT EXISTS event_airfields (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            airfield_id INTEGER NOT NULL REFERENCES airfields(id) ON DELETE CASCADE,
+            added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, airfield_id)
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_accommodation (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            capacity INTEGER NOT NULL DEFAULT 0,
+            coordinates TEXT,
+            booked BOOLEAN,
+            check_in_at TIMESTAMPTZ,
+            check_out_at TIMESTAMPTZ,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE event_accommodation ADD COLUMN IF NOT EXISTS coordinates TEXT`,
+		`ALTER TABLE event_accommodation ADD COLUMN IF NOT EXISTS booked BOOLEAN`,
 		`CREATE TABLE IF NOT EXISTS gear_assets (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -188,6 +274,71 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             status TEXT NOT NULL,
             location TEXT,
             inspected_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE TABLE IF NOT EXISTS logistics_transports (
+            id SERIAL PRIMARY KEY,
+            pickup_location TEXT NOT NULL,
+            destination TEXT NOT NULL,
+            passenger_count INTEGER NOT NULL,
+            scheduled_at TIMESTAMPTZ,
+            event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+            season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
+		`CREATE TABLE IF NOT EXISTS logistics_other (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            coordinates TEXT,
+            scheduled_at TIMESTAMPTZ,
+            description TEXT,
+            notes TEXT,
+            event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+            season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS coordinates TEXT`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS description TEXT`,
+		`ALTER TABLE logistics_other ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`CREATE TABLE IF NOT EXISTS logistics_meals (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            location TEXT,
+            scheduled_at TIMESTAMPTZ,
+            notes TEXT,
+            event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+            season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS location TEXT`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`CREATE TABLE IF NOT EXISTS logistics_transport_vehicles (
+            id SERIAL PRIMARY KEY,
+            transport_id INTEGER NOT NULL REFERENCES logistics_transports(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            driver TEXT,
+            passenger_capacity INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL`,
+		`CREATE TABLE IF NOT EXISTS logistics_event_vehicles (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            driver TEXT,
+            passenger_capacity INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
 		`CREATE TABLE IF NOT EXISTS accounts (

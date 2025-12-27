@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
+import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 
 const normalizeEvents = (raw: Event[]) =>
   (Array.isArray(raw) ? raw : []).map((event) => ({
     ...event,
     slots: typeof event.slots === 'number' ? event.slots : 0,
+    airfield_ids: Array.isArray(event.airfield_ids) ? event.airfield_ids : [],
     participant_ids: Array.isArray(event.participant_ids) ? event.participant_ids : [],
     innhopps: Array.isArray(event.innhopps) ? event.innhopps : []
   }));
@@ -26,6 +28,7 @@ const EventCalendarPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [showPast, setShowPast] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
+  const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
 
   const seasonLookup = useMemo(() => {
     const map = new Map<number, Season>();
@@ -39,10 +42,15 @@ const EventCalendarPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
+        const [seasonResponse, eventResponse, participantResponse] = await Promise.all([
+          listSeasons(),
+          listEvents(),
+          listParticipantProfiles()
+        ]);
         if (cancelled) return;
         setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
         setEvents(normalizeEvents(eventResponse as Event[]));
+        setParticipants(Array.isArray(participantResponse) ? participantResponse : []);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load events');
@@ -99,6 +107,22 @@ const EventCalendarPage = () => {
       }));
   }, [visibleEvents, seasonLookup]);
 
+  const participantLookup = useMemo(() => {
+    const map = new Map<number, ParticipantProfile>();
+    participants.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [participants]);
+
+  const countNonStaff = (ids?: number[]) => {
+    if (!Array.isArray(ids)) return 0;
+    return ids.reduce((count, id) => {
+      const roles = Array.isArray(participantLookup.get(id)?.roles)
+        ? participantLookup.get(id)?.roles || []
+        : [];
+      return roles.includes('Staff') ? count : count + 1;
+    }, 0);
+  };
+
   useEffect(() => {
     if (!selectedSeason) return;
     const seasonId = Number(selectedSeason);
@@ -132,7 +156,7 @@ const EventCalendarPage = () => {
             {seasons.length === 0 && <p className="muted">No seasons yet. Create one to get started.</p>}
           </div>
           <footer className="card-footer">
-            <Link className="secondary button-link" to="/seasons/new">
+            <Link className="primary button-link" to="/seasons/new">
               Create season
             </Link>
           </footer>
@@ -164,37 +188,52 @@ const EventCalendarPage = () => {
                     {group.events.map((event) => (
                       <Link key={event.id} className="card-link" to={`/events/${event.id}`}>
                         <article className="card">
-                          <header className="card-header">
-                            <div>
-                              <h3>{event.name}</h3>
-                              <p className="muted">{event.location || 'Location TBD'}</p>
-                            </div>
-                            <span className={`badge status-${event.status}`}>
-                              {event.status}
-                            </span>
-                          </header>
-                          <dl className="card-details">
-                            <div>
-                              <dt>Starts</dt>
-                              <dd>{formatDate(event.starts_at)}</dd>
-                            </div>
-                            <div>
+                          {(() => {
+                            const nonStaffCount = countNonStaff(event.participant_ids);
+                            const slotCount = event.slots ?? 0;
+                            const remaining = Math.max(slotCount - nonStaffCount, 0);
+                            const isFull = remaining === 0;
+                            return (
+                              <>
+                                <header className="card-header">
+                                  <div>
+                                    <h3>{event.name}</h3>
+                                    <p className="muted">{event.location || 'Location TBD'}</p>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                    <span className={`badge status-${event.status}`}>
+                                      {event.status}
+                                    </span>
+                                    <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                                      {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                                    </span>
+                                  </div>
+                                </header>
+                                <dl className="card-details">
+                                <div>
+                                  <dt>Starts</dt>
+                                  <dd>{formatDate(event.starts_at)}</dd>
+                                </div>
+                                <div>
                               <dt>Ends</dt>
                               <dd>{formatDate(event.ends_at)}</dd>
                             </div>
                             <div>
                               <dt>Participants</dt>
-                              <dd>{event.participant_ids?.length ?? 0}</dd>
+                              <dd>{countNonStaff(event.participant_ids)}</dd>
                             </div>
                             <div>
-                              <dt>INNHOPPS</dt>
-                              <dd>{event.innhopps?.length ?? 0}</dd>
-                            </div>
-                            <div>
-                              <dt>Slots</dt>
-                              <dd>{event.slots ?? 0}</dd>
-                            </div>
-                          </dl>
+                                  <dt>INNHOPPS</dt>
+                                  <dd>{event.innhopps?.length ?? 0}</dd>
+                                </div>
+                                <div>
+                                  <dt>Slots</dt>
+                                  <dd>{slotCount}</dd>
+                                </div>
+                              </dl>
+                              </>
+                            );
+                          })()}
                         </article>
                       </Link>
                     ))}

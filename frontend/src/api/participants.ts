@@ -7,6 +7,7 @@ export interface ParticipantProfile {
   phone?: string;
   experience_level?: string;
   emergency_contact?: string;
+  roles: string[];
   created_at: string;
 }
 
@@ -19,6 +20,7 @@ export interface CreateParticipantPayload {
   phone?: string;
   experience_level?: string;
   emergency_contact?: string;
+  roles?: string[];
 }
 
 export const createParticipantProfile = (payload: CreateParticipantPayload) =>
