@@ -34,6 +34,14 @@ const Layout = () => {
     window.localStorage.setItem('innhopp-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const shouldLockScroll =
+      navOpen && window.matchMedia && window.matchMedia('(max-width: 960px)').matches;
+    document.body.classList.toggle('nav-open', shouldLockScroll);
+    return () => document.body.classList.remove('nav-open');
+  }, [navOpen]);
+
   const handleNavClick = () => setNavOpen(false);
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 

@@ -64,6 +64,11 @@ body {
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 
+body.nav-open {
+  overflow: hidden;
+  height: 100vh;
+}
+
 body::-webkit-scrollbar {
   width: 10px;
   background: transparent;
@@ -394,6 +399,9 @@ button.ghost {
   display: grid;
   gap: 0.75rem;
   align-content: start;
+  position: sticky;
+  top: 1.5rem;
+  z-index: 2;
 }
 
 .nav-link {
