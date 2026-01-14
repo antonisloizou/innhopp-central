@@ -165,6 +165,17 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (event_id, participant_id)
 )`,
+		`CREATE TABLE IF NOT EXISTS airfields (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            latitude TEXT NOT NULL,
+            longitude TEXT NOT NULL,
+            elevation INTEGER NOT NULL,
+            description TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE airfields ALTER COLUMN latitude TYPE TEXT USING latitude::TEXT`,
+		`ALTER TABLE airfields ALTER COLUMN longitude TYPE TEXT USING longitude::TEXT`,
 		`CREATE TABLE IF NOT EXISTS event_innhopps (
     id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -240,17 +251,6 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             role TEXT NOT NULL,
             assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
-		`CREATE TABLE IF NOT EXISTS airfields (
-            id SERIAL PRIMARY KEY,
-            name TEXT NOT NULL,
-            latitude TEXT NOT NULL,
-            longitude TEXT NOT NULL,
-            elevation INTEGER NOT NULL,
-            description TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`,
-		`ALTER TABLE airfields ALTER COLUMN latitude TYPE TEXT USING latitude::TEXT`,
-		`ALTER TABLE airfields ALTER COLUMN longitude TYPE TEXT USING longitude::TEXT`,
 		`CREATE TABLE IF NOT EXISTS event_airfields (
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             airfield_id INTEGER NOT NULL REFERENCES airfields(id) ON DELETE CASCADE,
@@ -326,6 +326,15 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS location TEXT`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`CREATE TABLE IF NOT EXISTS logistics_event_vehicles (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            driver TEXT,
+            passenger_capacity INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
 		`CREATE TABLE IF NOT EXISTS logistics_transport_vehicles (
             id SERIAL PRIMARY KEY,
             transport_id INTEGER NOT NULL REFERENCES logistics_transports(id) ON DELETE CASCADE,
@@ -338,15 +347,6 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL`,
-		`CREATE TABLE IF NOT EXISTS logistics_event_vehicles (
-            id SERIAL PRIMARY KEY,
-            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            driver TEXT,
-            passenger_capacity INTEGER NOT NULL DEFAULT 0,
-            notes TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`,
 		`CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             subject TEXT NOT NULL UNIQUE,
