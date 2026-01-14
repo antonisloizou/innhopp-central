@@ -80,5 +80,5 @@ jobs:
                 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
             export IMAGE_TAG=${{ steps.vars.outputs.sha_tag }}
             export ECR_REGISTRY=${{ steps.vars.outputs.registry }}
-            docker compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml pull
-            docker compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml up -d
+            docker-compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml pull
+            docker-compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml up -d
