@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Event, getEvent, getManifest, listEvents, Manifest, updateEvent, updateManifest } from '../api/events';
+import { Event, getEvent, getManifest, listEvents, listManifests, Manifest, updateEvent, updateManifest } from '../api/events';
 import {
   CreateParticipantPayload,
   ParticipantProfile,
@@ -19,6 +19,7 @@ const ManifestDetailPage = () => {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [events, setEvents] = useState<EventLite[]>([]);
   const [eventData, setEventData] = useState<Event | null>(null);
+  const [manifests, setManifests] = useState<Manifest[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -64,10 +65,11 @@ const ManifestDetailPage = () => {
       setError(null);
       try {
         const manifestData = await getManifest(Number(manifestId));
-        const [eventsData, participantData, eventDetails] = await Promise.all([
+        const [eventsData, participantData, eventDetails, manifestsData] = await Promise.all([
           listEvents(),
           listParticipantProfiles(),
-          getEvent(manifestData.event_id)
+          getEvent(manifestData.event_id),
+          listManifests()
         ]);
         if (cancelled) return;
         setManifest(manifestData);
@@ -81,6 +83,7 @@ const ManifestDetailPage = () => {
         );
         setParticipants(Array.isArray(participantData) ? participantData : []);
         setEventData(eventDetails);
+        setManifests(Array.isArray(manifestsData) ? manifestsData : []);
         setForm({
           event_id: String(manifestData.event_id),
           load_number: String(manifestData.load_number ?? ''),
@@ -125,24 +128,33 @@ const ManifestDetailPage = () => {
     };
   }, [form.event_id]);
 
+  const currentEventId = useMemo(() => Number(form.event_id || manifest?.event_id || 0), [form.event_id, manifest?.event_id]);
+  const assignedToOtherLoads = useMemo(() => {
+    if (!currentEventId) return new Set<number>();
+    const currentManifestId = manifest?.id ?? Number(manifestId);
+    const ids = manifests
+      .filter((m) => m.event_id === currentEventId && m.id !== currentManifestId)
+      .flatMap((m) => (Array.isArray(m.participant_ids) ? m.participant_ids : []));
+    return new Set(ids);
+  }, [currentEventId, manifests, manifest?.id, manifestId]);
   const availableParticipants = useMemo(() => {
     const allowedIds = eventData?.participant_ids ?? [];
     return participants.filter((p) => {
       const roles = Array.isArray(p.roles) ? p.roles : [];
       const isSkydiver = roles.includes('Skydiver');
       const isStaff = roles.includes('Staff');
-      return allowedIds.includes(p.id) && !participantIds.includes(p.id) && isSkydiver && !isStaff;
+      return allowedIds.includes(p.id) && !participantIds.includes(p.id) && isSkydiver && !isStaff && !assignedToOtherLoads.has(p.id);
     });
-  }, [participants, participantIds, eventData]);
+  }, [participants, participantIds, eventData, assignedToOtherLoads]);
   const availableStaff = useMemo(() => {
     const allowedIds = eventData?.participant_ids ?? [];
     return participants.filter((p) => {
       const roles = Array.isArray(p.roles) ? p.roles : [];
       const isSkydiver = roles.includes('Skydiver');
       const isStaff = roles.includes('Staff');
-      return allowedIds.includes(p.id) && !participantIds.includes(p.id) && isSkydiver && isStaff;
+      return allowedIds.includes(p.id) && !participantIds.includes(p.id) && isSkydiver && isStaff && !assignedToOtherLoads.has(p.id);
     });
-  }, [participants, participantIds, eventData]);
+  }, [participants, participantIds, eventData, assignedToOtherLoads]);
   const staffParticipants = useMemo(
     () =>
       participantIds.filter((id) => {
@@ -192,6 +204,13 @@ const ManifestDetailPage = () => {
     const updated = await updateManifest(Number(manifestId), payload);
     setManifest(updated);
     setParticipantIds(Array.isArray(updated.participant_ids) ? updated.participant_ids : nextParticipantIds);
+    setManifests((prev) => {
+      const exists = prev.some((m) => m.id === updated.id);
+      if (exists) {
+        return prev.map((m) => (m.id === updated.id ? updated : m));
+      }
+      return [...prev, updated];
+    });
     return updated;
   };
 

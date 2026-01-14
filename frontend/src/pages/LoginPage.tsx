@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { googleClientId, hasConfiguredGoogleClient } from '../config/google';
 import { decodeGoogleCredential, GoogleProfile } from '../utils/googleJwt';
+import logo from '../assets/logo.webp';
 
 const scriptSrc = 'https://accounts.google.com/gsi/client';
 
@@ -30,6 +31,9 @@ const LoginPage = () => {
         setError('Google Identity Services SDK is unavailable.');
         return;
       }
+
+      // Clear any existing button to avoid duplicates when React runs effects twice in dev.
+      buttonRef.current!.innerHTML = '';
 
       window.google.accounts.id.initialize({
         client_id: googleClientId,
@@ -104,15 +108,10 @@ const LoginPage = () => {
   return (
     <div className="login-layout">
       <section className="login-panel">
-        <h1>Innhopp Central</h1>
-        <p>Events, Participants, Operations, Manifests, and Logistics all in one place.</p>
-        <p>Sign in to continue.</p>
+        <img src={logo} alt="Innhopp Central logo" className="login-logo" />
         <div ref={buttonRef} className="google-button" aria-live="polite" />
         <div className="debug-login" role="group" aria-labelledby="debug-login-heading">
-          <h2 id="debug-login-heading">Debug credentials</h2>
-          <p className="debug-login-description">
-            Temporary access path for local development when Google Identity is unavailable.
-          </p>
+          <h2 id="debug-login-heading">Testing credentials</h2>
           <form onSubmit={handleDebugLogin} className="debug-login-form">
             <label className="field">
               <span>Username</span>

@@ -23,6 +23,7 @@ const EventCreatePage = () => {
     season_id: '',
     name: '',
     location: '',
+    slots: '',
     status: 'draft' as EventStatus,
     starts_at: '',
     ends_at: ''
@@ -69,12 +70,16 @@ const EventCreatePage = () => {
       if (form.ends_at) {
         payload.ends_at = toIsoDate(form.ends_at);
       }
+      if (form.slots) {
+        payload.slots = Number(form.slots);
+      }
       await createEvent(payload);
       setMessage('Event created');
       setForm({
         season_id: '',
         name: '',
         location: '',
+        slots: '',
         status: 'draft',
         starts_at: '',
         ends_at: ''
@@ -146,6 +151,16 @@ const EventCreatePage = () => {
                 value={form.location}
                 onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
                 placeholder="The overall location the event takes place"
+              />
+            </label>
+            <label className="form-field">
+              <span>Slots</span>
+              <input
+                type="number"
+                min="0"
+                value={form.slots}
+                onChange={(e) => setForm((prev) => ({ ...prev, slots: e.target.value }))}
+                placeholder="Total participant slots"
               />
             </label>
             <label className="form-field">

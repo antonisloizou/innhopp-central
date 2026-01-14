@@ -1,9 +1,12 @@
-import { FormEvent, useEffect, useMemo, useState, useCallback } from 'react';
+import { FormEvent, useEffect, useMemo, useState, useCallback, useRef, DragEvent } from 'react';
+import { createPortal } from 'react-dom';
+import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Event,
   Innhopp,
   InnhoppInput,
+  InnhoppImage,
   LandOwner,
   LandingArea,
   UpdateInnhoppPayload,
@@ -14,6 +17,7 @@ import {
   deleteInnhopp
 } from '../api/events';
 import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '../api/airfields';
+import { formatMetersWithFeet, metersToFeet } from '../utils/units';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
@@ -150,6 +154,7 @@ type InnhoppFormState = Omit<InnhoppInput, 'land_owners' | 'primary_landing_area
   secondary_landing_area: LandingAreaForm;
   rescue_boat?: boolean | null;
   land_owner_permission?: boolean | null;
+  image_files: InnhoppImage[];
 };
 
 const InnhoppDetailPage = () => {
@@ -183,7 +188,8 @@ const InnhoppDetailPage = () => {
     rescue_boat: undefined,
     minimum_requirements: '',
     land_owners: [],
-    land_owner_permission: undefined
+    land_owner_permission: undefined,
+    image_files: []
   };
   const [form, setForm] = useState<InnhoppFormState>(initialFormState);
   const [draftAirfield, setDraftAirfield] = useState<CreateAirfieldPayload>({
@@ -199,6 +205,19 @@ const InnhoppDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [dragOver, setDragOver] = useState(false);
+
+  const extractImageFiles = (dt?: DataTransfer | null): File[] => {
+    if (!dt) return [];
+    const fromItems = Array.from(dt.items || [])
+      .map((item) => (item.kind === 'file' ? item.getAsFile() : null))
+      .filter((file): file is File => !!file && file.type.startsWith('image/'));
+    const fromFiles = Array.from(dt.files || []).filter((file) => file.type.startsWith('image/'));
+    return fromItems.length ? fromItems : fromFiles;
+  };
   const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
   const saveButtonLabel = saving ? 'Saving…' : saved ? 'Saved' : 'Save';
   const buildSignature = useCallback(
@@ -213,6 +232,20 @@ const InnhoppDetailPage = () => {
     if (takeoffElevation == null) return null;
     return takeoffElevation - form.elevation;
   }, [form.elevation, form.takeoff_airfield_id, airfields]);
+
+  const galleryImages = useMemo(
+    () =>
+      (form.image_files || [])
+        .filter((img) => img?.data)
+        .map((img, idx) => ({
+          key: `${img.data.slice(0, 24)}-${idx}`,
+          name: img.name || `Image ${idx + 1}`,
+          mime: img.mime_type || 'image/*',
+          data: img.data,
+          src: `data:${img.mime_type || 'image/*'};base64,${img.data}`
+        })),
+    [form.image_files]
+  );
 
   const toInputDateTime = (iso?: string | null) => {
     if (!iso) return '';
@@ -277,7 +310,7 @@ const InnhoppDetailPage = () => {
           if (cancelled) return;
           setInnhopp(target);
           const defaultStart = target.scheduled_at
-            ? null
+            ? ''
             : (() => {
                 if (target.event_id && evtCache.current?.[target.event_id]) {
                   const e = evtCache.current[target.event_id];
@@ -311,7 +344,8 @@ const InnhoppDetailPage = () => {
             rescue_boat: target.rescue_boat ?? undefined,
             minimum_requirements: target.minimum_requirements || '',
             land_owners: toLandOwnerForms(target.land_owners),
-            land_owner_permission: target.land_owner_permission ?? undefined
+            land_owner_permission: target.land_owner_permission ?? undefined,
+            image_files: target.image_files || []
           });
           setTakeoffSelectValue(target.takeoff_airfield_id ? String(target.takeoff_airfield_id) : '');
           // fetch event for context
@@ -373,7 +407,8 @@ const InnhoppDetailPage = () => {
               rescue_boat: copy.rescue_boat ?? undefined,
               minimum_requirements: copy.minimum_requirements || '',
               land_owners: toLandOwnerForms(copy.land_owners),
-              land_owner_permission: copy.land_owner_permission ?? undefined
+              land_owner_permission: copy.land_owner_permission ?? undefined,
+              image_files: copy.image_files || []
             });
             setTakeoffSelectValue(copy.takeoff_airfield_id ? String(copy.takeoff_airfield_id) : '');
           }
@@ -441,7 +476,12 @@ const InnhoppDetailPage = () => {
         telephone: owner.telephone.trim(),
         email: owner.email.trim()
       })),
-      land_owner_permission: state.land_owner_permission ?? undefined
+      land_owner_permission: state.land_owner_permission ?? undefined,
+      image_files: (state.image_files || []).map((img) => ({
+        name: img.name?.trim() || undefined,
+        mime_type: img.mime_type?.trim() || undefined,
+        data: img.data
+      }))
     };
   };
 
@@ -481,6 +521,99 @@ const InnhoppDetailPage = () => {
       ...prev,
       land_owners: (prev.land_owners || []).filter((_, idx) => idx !== index)
     }));
+  };
+
+  const readFileAsBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (typeof result !== 'string') {
+          reject(new Error('Failed to read file'));
+          return;
+        }
+        const base64 = result.split(',')[1] || '';
+        resolve(base64);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleFilesSelected = async (fileList: FileList | File[] | null) => {
+    if (!fileList || (fileList as FileList | File[]).length === 0) return;
+    const files = Array.isArray(fileList) ? fileList : Array.from(fileList);
+    try {
+      const payloads: InnhoppImage[] = [];
+      for (const file of files) {
+        const data = await readFileAsBase64(file);
+        payloads.push({
+          name: file.name,
+          mime_type: file.type || undefined,
+          data
+        });
+      }
+      const existing = form.image_files || [];
+      const merged = [...existing];
+      payloads.forEach((img) => {
+        if (merged.some((m) => m.data === img.data)) return;
+        merged.push(img);
+      });
+      const newItems = merged.length - existing.length;
+      if (newItems > 0) {
+        setActiveImageIndex(existing.length);
+      }
+      setForm((prev) => ({ ...prev, image_files: merged }));
+      if (innhopp) {
+        await autoSaveImages(merged);
+      }
+    } catch (err) {
+      // ignore file read errors for now
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      image_files: (prev.image_files || []).filter((_, idx) => idx !== index)
+    }));
+    if (lightboxIndex !== null && lightboxIndex === index) {
+      setLightboxIndex(null);
+    } else if (lightboxIndex !== null && index < lightboxIndex) {
+      setLightboxIndex((prev) => (prev != null ? prev - 1 : null));
+    }
+    if (index === activeImageIndex && galleryImages.length > 1) {
+      setActiveImageIndex((prev) => (prev - 1 + galleryImages.length) % galleryImages.length);
+    } else if (index < activeImageIndex) {
+      setActiveImageIndex((prev) => Math.max(prev - 1, 0));
+    }
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (e.dataTransfer?.files?.length) {
+      handleFilesSelected(e.dataTransfer.files);
+    }
+  };
+
+  const handlePaste = (e: ReactClipboardEvent<HTMLDivElement>) => {
+    const images = extractImageFiles(e.clipboardData);
+    if (!images.length) return;
+    e.preventDefault();
+    handleFilesSelected(images);
   };
 
   useEffect(() => {
@@ -526,6 +659,31 @@ const InnhoppDetailPage = () => {
     }
   };
 
+  const autoSaveImages = async (nextImages: InnhoppImage[]) => {
+    if (!eventId) return;
+    if (!innhopp) {
+      setMessage('Save the innhopp first to persist images.');
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    setSaved(false);
+    try {
+      const payload = buildPayload({ image_files: nextImages });
+      const updated = await updateInnhopp(innhopp.id, payload);
+      setInnhopp(updated);
+      setForm((prev) => ({ ...prev, image_files: updated.image_files || nextImages }));
+      setMessage('Images saved');
+      setSaved(true);
+      setLastSavedSignature(buildSignature({ ...form, image_files: nextImages }));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to save images');
+      setSaved(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!innhopp || !eventData || deleting) return;
     const confirmed = window.confirm('Are you sure you want to delete this innhopp? This cannot be undone.');
@@ -541,8 +699,7 @@ const InnhoppDetailPage = () => {
     }
   };
 
-  const handleCreateAirfield = async (evt: FormEvent<HTMLFormElement>) => {
-    evt.preventDefault();
+  const handleCreateAirfield = async () => {
     setSaving(true);
     setMessage(null);
     try {
@@ -579,6 +736,17 @@ const InnhoppDetailPage = () => {
     }
   }, [currentSignature, lastSavedSignature, saved]);
 
+  useEffect(() => {
+    const onWindowPaste = (e: ClipboardEvent) => {
+      const images = extractImageFiles(e.clipboardData);
+      if (!images.length) return;
+      e.preventDefault();
+      handleFilesSelected(images);
+    };
+    window.addEventListener('paste', onWindowPaste);
+    return () => window.removeEventListener('paste', onWindowPaste);
+  }, []);
+
   if (loading) {
     return <p className="muted">Loading innhopp…</p>;
   }
@@ -597,7 +765,12 @@ const InnhoppDetailPage = () => {
               {eventData.name} — {isCreateMode ? 'New innhopp' : `#${innhopp?.sequence} ${innhopp?.name}`}
             </h2>
             {!isCreateMode && (
-              <span className={`badge ${ready ? 'success' : 'danger'}`}>{ready ? 'OP READY' : 'MISSING INFO'}</span>
+              <span
+                className={`badge ${ready ? 'success' : 'danger'}`}
+                style={{ minWidth: '2.4ch', textAlign: 'center', display: 'inline-block' }}
+              >
+                {ready ? 'OP READY' : '!'}
+              </span>
             )}
           </div>
         </div>
@@ -634,106 +807,546 @@ const InnhoppDetailPage = () => {
       <form className="stack" onSubmit={handleSave}>
         <article className="card">
           <div className="form-grid">
-            <label className={`form-field ${missingRequired.sequence ? 'field-missing' : ''}`}>
-              <span>Sequence</span>
-              <input
-                type="number"
-                min={1}
-                value={form.sequence}
-                onFocus={(e) => e.target.select()}
-                onChange={(e) => setForm((prev) => ({ ...prev, sequence: Number(e.target.value) }))}
-              />
-            </label>
-            <label className={`form-field ${missingRequired.name ? 'field-missing' : ''}`}>
-              <span>Name</span>
-              <input
-                type="text"
-                value={form.name}
-                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                required
-              />
-            </label>
+            <div
+              className="form-grid"
+              style={{
+                gridTemplateColumns: 'max-content 16px 1fr',
+                gridColumn: '1 / -1',
+                gap: '1rem',
+                alignItems: 'end'
+              }}
+            >
+              <label
+                className={`form-field ${missingRequired.sequence ? 'field-missing' : ''}`}
+                style={{ maxWidth: '140px' }}
+              >
+                <span>Sequence</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.sequence}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setForm((prev) => ({ ...prev, sequence: Number(e.target.value) }))}
+                  style={{ minWidth: '80px' }}
+                />
+              </label>
+              <div aria-hidden="true" />
+              <label className={`form-field ${missingRequired.name ? 'field-missing' : ''}`}>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                  required
+                />
+              </label>
+            </div>
             <label className="form-field">
               <span>Reason for choice</span>
-              <textarea
-                data-autosize
-                onInput={handleTextareaInput}
+              <input
+                type="text"
                 value={form.reason_for_choice || ''}
                 onChange={(e) => setForm((prev) => ({ ...prev, reason_for_choice: e.target.value }))}
                 placeholder="Why this innhopp location was selected"
               />
             </label>
-            <label className={`form-field ${missingRequired.coordinates ? 'field-missing' : ''}`}>
-              <span>Coordinates (DMS)</span>
-              <div className="input-with-button">
-                <input
-                  type="text"
-                  value={form.coordinates || ''}
-                  onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
-                  pattern={`^[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[NS]\\s[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[EW]$`}
-                  title={`Use DMS format like 11°14'30.0\"N 73°42'59.7\"W`}
-                  style={{ minWidth: '24ch' }}
-                />
-                <button
-                  type="button"
-                  className="ghost"
-                  disabled={!form.coordinates?.trim()}
-                  onClick={() => {
-                    const coords = form.coordinates?.trim();
-                    if (!coords) return;
-                    window.open(
-                      `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`,
-                      '_blank'
-                    );
+            <div
+              className="form-grid"
+              style={{
+                gridTemplateColumns: form.coordinates?.trim() ? 'repeat(2,minmax(0,1fr))' : '1fr',
+                gridColumn: '1 / -1',
+                alignItems: 'start',
+                gap: '1rem'
+              }}
+            >
+              <div
+                className="form-grid"
+                style={{
+                  gridTemplateColumns: '1fr',
+                  rowGap: '0.9rem',
+                  gridColumn: form.coordinates?.trim() ? '1 / span 1' : '1 / -1'
+                }}
+              >
+                <label className={`form-field ${missingRequired.coordinates ? 'field-missing' : ''}`}>
+                  <span>Coordinates (DMS)</span>
+                  <div className="input-with-button" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: 'fit-content' }}>
+                    <input
+                      type="text"
+                      value={form.coordinates || ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
+                      pattern={`^[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[NS]\\s[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[EW]$`}
+                      title={`Use DMS format like 11°14'30.0\"N 73°42'59.7\"W`}
+                      style={{ width: '24ch' }}
+                    />
+                    {form.coordinates?.trim() ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        style={{
+                          minWidth: '12ch',
+                          textAlign: 'right',
+                          justifyContent: 'flex-end',
+                          whiteSpace: 'nowrap'
+                        }}
+                        onClick={() => {
+                          const coords = form.coordinates?.trim();
+                          if (!coords) return;
+                          window.open(
+                            `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`,
+                            '_blank'
+                          );
+                        }}
+                      >
+                        Open in Maps
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+                <div
+                  className="form-grid"
+                  style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
+                >
+                <label className={`form-field ${missingRequired.elevation ? 'field-missing' : ''}`}>
+                  <span>Elevation (m)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.elevation ?? ''}
+                      style={{ width: '24ch' }}
+                      onFocus={(e) => {
+                        const target = e.target as HTMLInputElement;
+                        requestAnimationFrame(() => target.select());
+                      }}
+                      onClick={(e) => {
+                        const target = e.target as HTMLInputElement;
+                        requestAnimationFrame(() => target.select());
+                      }}
+                      onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
+                    />
+                    <span className="muted" style={{ whiteSpace: 'nowrap', minWidth: '12ch', textAlign: 'left' }}>
+                      {form.elevation !== undefined && form.elevation !== null && !Number.isNaN(form.elevation)
+                        ? `${metersToFeet(form.elevation)} ft`
+                        : '— ft'}
+                    </span>
+                  </div>
+                </label>
+                </div>
+                <div
+                  className="form-grid"
+                  style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
+                >
+                  <label className={`form-field ${missingRequired.scheduled_at ? 'field-missing' : ''}`}>
+                    <span>Scheduled at</span>
+                    <div style={{ width: '24ch' }}>
+                      <Flatpickr
+                        value={toPickerDate(form.scheduled_at || undefined)}
+                        options={{
+                          enableTime: true,
+                          time_24hr: true,
+                          altInput: true,
+                          altInputClass: 'full-width-alt',
+                          altFormat: 'Y-m-d H:i',
+                          dateFormat: 'Z',
+                          formatDate: (date) => formatUTC(date)
+                        }}
+                        style={{ width: '100%' }}
+                        onChange={(dates) => {
+                          const picked = dates[0];
+                          setForm((prev) => ({
+                            ...prev,
+                            scheduled_at: picked ? fromPickerDateToISO(picked) : ''
+                          }));
+                        }}
+                        placeholder="Select date & time"
+                      />
+                    </div>
+                  </label>
+                </div>
+              </div>
+              {form.coordinates?.trim() ? (
+                <div
+                  className="form-field"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.4rem',
+                    gridRow: '1 / span 3',
+                    gridColumn: '2',
+                    alignSelf: 'stretch'
                   }}
                 >
-                  Open in Maps
-                </button>
+                  <span className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                    Location preview
+                  </span>
+                  <div
+                    style={{
+                      height: '100%',
+                      minHeight: '220px',
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      border: '1px solid #d7dfe7'
+                    }}
+                  >
+                    <iframe
+                      title="Innhopp location preview"
+                      src={`https://www.google.com/maps?q=${encodeURIComponent(form.coordinates.trim())}&t=k&z=15&output=embed`}
+                      loading="lazy"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        border: 0
+                      }}
+                      allowFullScreen
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+            {saveButtonLabel}
+          </button>
+        </div>
+      </article>
+
+        <article className="card">
+          <div className="form-field" style={{ gridColumn: '1 / -1', marginBottom: '0.5rem' }}>
+            <span>Image gallery</span>
+          </div>
+          <div
+            className="form-grid"
+            style={{
+              gridTemplateColumns: '1fr',
+              gap: '0.75rem',
+              border: dragOver ? '2px dashed #2b5fab' : undefined,
+              borderRadius: dragOver ? '12px' : undefined,
+              padding: dragOver ? '0.5rem' : undefined,
+              transition: 'border 0.15s ease, background 0.15s ease',
+              background: dragOver ? '#f1f6ff' : undefined
+            }}
+            tabIndex={0}
+            id="innhopp-gallery-card"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onPaste={handlePaste}
+          >
+            {galleryImages.length ? (
+              <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem',
+                    alignItems: 'center',
+                    gridColumn: '1 / -1',
+                    width: 'fit-content',
+                    maxWidth: '100%'
+                  }}
+                >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', justifyContent: 'center' }}>
+                  {galleryImages.length > 4 ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      aria-label="Previous image"
+                      disabled={galleryImages.length <= 1}
+                      style={{ fontSize: '2rem', padding: '0.4rem 0.6rem' }}
+                      onClick={() =>
+                        setActiveImageIndex((prev) =>
+                          galleryImages.length ? (prev - 1 + galleryImages.length) % galleryImages.length : 0
+                        )
+                      }
+                    >
+                      ‹
+                    </button>
+                  ) : (
+                    <div style={{ width: '2.5rem' }} />
+                  )}
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      margin: '0 auto',
+                      width: '100%',
+                      maxWidth: '900px'
+                    }}
+                  >
+                    {galleryImages
+                      .slice(activeImageIndex, activeImageIndex + 4)
+                      .concat(
+                        activeImageIndex + 4 > galleryImages.length
+                          ? galleryImages.slice(0, activeImageIndex + 4 - galleryImages.length)
+                          : []
+                      )
+                      .slice(0, Math.min(4, galleryImages.length))
+                      .map((img, idx) => {
+                        const absoluteIndex = (activeImageIndex + idx) % galleryImages.length;
+                        return (
+                          <figure
+                            key={`${img.key}-${idx}`}
+                            style={{
+                              margin: 0,
+                              border: '1px solid #d7dfe7',
+                              borderRadius: '10px',
+                              overflow: 'hidden',
+                              background: '#fff',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              position: 'relative',
+                              cursor: 'pointer',
+                              width: '180px',
+                              height: '180px',
+                              flex: '0 0 180px'
+                            }}
+                            onClick={() => setLightboxIndex(absoluteIndex)}
+                          >
+                            <button
+                              type="button"
+                              aria-label="Remove image"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveImage(absoluteIndex);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '8px',
+                                left: '8px',
+                                background: 'rgba(0,0,0,0.6)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '28px',
+                                height: '28px',
+                                padding: 0,
+                                lineHeight: 1,
+                                fontSize: '16px',
+                                minWidth: '28px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                zIndex: 2
+                              }}
+                            >
+                              ×
+                            </button>
+                            <div
+                              style={{
+                                position: 'relative',
+                                width: '100%',
+                                height: '100%',
+                                background: '#f9fbfd',
+                                overflow: 'hidden'
+                              }}
+                            >
+                              <img
+                                src={img.src}
+                                alt={`Image ${absoluteIndex + 1}`}
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                  objectPosition: 'center',
+                                  display: 'block'
+                                }}
+                              />
+                            </div>
+                          </figure>
+                        );
+                      })}
+                  </div>
+                  {galleryImages.length > 4 ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      aria-label="Next image"
+                      disabled={galleryImages.length <= 1}
+                      style={{ fontSize: '2rem', padding: '0.4rem 0.6rem' }}
+                      onClick={() =>
+                        setActiveImageIndex((prev) =>
+                          galleryImages.length ? (prev + 1) % galleryImages.length : 0
+                        )
+                      }
+                    >
+                      ›
+                    </button>
+                  ) : (
+                    <div style={{ width: '2.5rem' }} />
+                  )}
+                </div>
+                {galleryImages.length > 4 ? (
+                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {galleryImages.map((img, idx) => (
+                      <button
+                        key={img.key}
+                        type="button"
+                        aria-label={`Go to image ${idx + 1}`}
+                        onClick={() => setActiveImageIndex(idx)}
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          border: 'none',
+                          background: idx === activeImageIndex ? '#2b5fab' : '#d3dbe6',
+                          cursor: 'pointer',
+                          padding: 0,
+                          minWidth: 'auto',
+                          lineHeight: 1,
+                          display: 'inline-block'
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                </div>
               </div>
-            </label>
-            <label className={`form-field ${missingRequired.elevation ? 'field-missing' : ''}`}>
-              <span>Elevation (m)</span>
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                No images uploaded yet.
+              </p>
+            )}
+            <div
+              className="form-actions upload-pane"
+              style={{
+                gridColumn: '1 / -1',
+                display: 'flex',
+                gap: '0.75rem',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                padding: '0.75rem 0.9rem',
+                background: dragOver ? 'var(--upload-pane-hover-bg)' : undefined,
+                borderColor: dragOver ? 'var(--upload-pane-hover-border)' : undefined
+              }}
+            >
               <input
-                type="number"
-                min={0}
-                value={form.elevation ?? ''}
-                onFocus={(e) => {
-                  const target = e.target as HTMLInputElement;
-                  requestAnimationFrame(() => target.select());
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  handleFilesSelected(e.target.files);
+                  e.target.value = '';
                 }}
-                onClick={(e) => {
-                  const target = e.target as HTMLInputElement;
-                  requestAnimationFrame(() => target.select());
-                }}
-                onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
               />
-            </label>
-            <label className={`form-field ${missingRequired.scheduled_at ? 'field-missing' : ''}`}>
-              <span>Scheduled at</span>
-              <Flatpickr
-                value={toPickerDate(form.scheduled_at || undefined)}
-                options={{
-                  enableTime: true,
-                  time_24hr: true,
-                  altInput: true,
-                  altFormat: 'Y-m-d H:i',
-                  dateFormat: 'Z',
-                  formatDate: (date) => formatUTC(date),
-                  parseDate: (datestr) => (datestr ? new Date(datestr) : null)
-                }}
-                onChange={(dates) => {
-                  const picked = dates[0];
-                  setForm((prev) => ({
-                    ...prev,
-                    scheduled_at: picked ? fromPickerDateToISO(picked) : ''
-                  }));
-                }}
-                placeholder="Select date & time"
-              />
-            </label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                <button
+                  type="button"
+                  className="ghost browse-button"
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  Browse your device
+                </button>
+                <span className="muted" style={{ fontSize: '0.95rem' }}>
+                  or drag & drop / paste images into this box
+                </span>
+              </div>
+              <span className="muted" style={{ marginLeft: 'auto' }}>
+                {galleryImages.length} uploaded
+              </span>
+            </div>
+            {lightboxIndex !== null &&
+              galleryImages[lightboxIndex] &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.75)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    zIndex: 1000,
+                    padding: '1rem'
+                  }}
+                  onClick={() => setLightboxIndex(null)}
+                >
+                  <div
+                    style={{
+                      position: 'relative',
+                      maxWidth: '90vw',
+                      maxHeight: '90vh'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <img
+                      src={galleryImages[lightboxIndex].src}
+                      alt={galleryImages[lightboxIndex].name}
+                      style={{ maxWidth: '90vw', maxHeight: '80vh', display: 'block', borderRadius: '12px' }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        left: '-2.5rem',
+                        transform: 'translateY(-50%)',
+                        display: galleryImages.length > 1 ? 'flex' : 'none'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLightboxIndex((prev) =>
+                            prev === null ? prev : (prev - 1 + galleryImages.length) % galleryImages.length
+                          );
+                        }}
+                      >
+                        ‹
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '50%',
+                        right: '-2.5rem',
+                        transform: 'translateY(-50%)',
+                        display: galleryImages.length > 1 ? 'flex' : 'none'
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLightboxIndex((prev) =>
+                            prev === null ? prev : (prev + 1) % galleryImages.length
+                          );
+                        }}
+                      >
+                        ›
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost danger"
+                      style={{ position: 'absolute', top: '-2.75rem', right: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLightboxIndex(null);
+                      }}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>,
+                document.body
+              )}
           </div>
           <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-            <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+            <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>
           </div>
@@ -813,35 +1426,18 @@ const InnhoppDetailPage = () => {
                 </label>
                 <label className="form-field">
                   <span>Coordinates</span>
-                  <div className="input-with-button">
-                    <input
-                      type="text"
-                      value={draftAirfield.coordinates}
-                      onChange={(e) =>
-                        setDraftAirfield((prev) => ({
-                          ...prev,
-                          coordinates: e.target.value
-                        }))
-                      }
-                      style={{ minWidth: '22ch' }}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="ghost"
-                      disabled={!draftAirfield.coordinates.trim()}
-                      onClick={() => {
-                        const coords = draftAirfield.coordinates.trim();
-                        if (!coords) return;
-                        window.open(
-                          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(coords)}`,
-                          '_blank'
-                        );
-                      }}
-                    >
-                      Open in Maps
-                    </button>
-                  </div>
+                  <input
+                    type="text"
+                    value={draftAirfield.coordinates}
+                    onChange={(e) =>
+                      setDraftAirfield((prev) => ({
+                        ...prev,
+                        coordinates: e.target.value
+                      }))
+                    }
+                    style={{ minWidth: '22ch' }}
+                    required
+                  />
                 </label>
                 <label className="form-field">
                   <span>Description</span>
@@ -875,21 +1471,36 @@ const InnhoppDetailPage = () => {
                 </div>
               </div>
             )}
-            {elevationDifference !== null && (
+            {elevationDifference !== null ? (
+              <div
+                className="form-grid"
+                style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gridColumn: '1 / -1' }}
+              >
+                <label className="form-field">
+                  <span>Elevation difference</span>
+                  <input type="text" readOnly value={`${elevationDifference} m`} />
+                </label>
+                <label className="form-field">
+                  <span>Adjust altimeter / AAD</span>
+                  <input
+                    type="text"
+                    value={form.adjust_altimeter_aad || ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, adjust_altimeter_aad: e.target.value }))}
+                    placeholder="Adjustment guidance"
+                  />
+                </label>
+              </div>
+            ) : (
               <label className="form-field">
-                <span>Elevation difference</span>
-                <input type="text" readOnly value={`${elevationDifference} m`} />
+                <span>Adjust altimeter / AAD</span>
+                <input
+                  type="text"
+                  value={form.adjust_altimeter_aad || ''}
+                  onChange={(e) => setForm((prev) => ({ ...prev, adjust_altimeter_aad: e.target.value }))}
+                  placeholder="Adjustment guidance"
+                />
               </label>
             )}
-            <label className="form-field">
-              <span>Adjust altimeter / AAD</span>
-              <input
-                type="text"
-                value={form.adjust_altimeter_aad || ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, adjust_altimeter_aad: e.target.value }))}
-                placeholder="Adjustment guidance"
-              />
-            </label>
             <label className="form-field">
               <span>NOTAM</span>
               <input
@@ -899,37 +1510,64 @@ const InnhoppDetailPage = () => {
                 placeholder="NOTAM reference or notes"
               />
             </label>
-            <label className={`form-field ${missingRequired.distance_by_air ? 'field-missing' : ''}`}>
-              <span>Distance by air (km)</span>
-              <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={form.distance_by_air ?? ''}
+            <div
+              className="form-grid"
+              style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gridColumn: '1 / -1', alignItems: 'end' }}
+            >
+              <label className={`form-field ${missingRequired.distance_by_air ? 'field-missing' : ''}`}>
+                <span>Distance by air (km)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  value={form.distance_by_air ?? ''}
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
                     distance_by_air: e.target.value ? Number(e.target.value) : undefined
                   }))
                 }
-                placeholder="Optional"
               />
             </label>
-            <label className={`form-field ${missingRequired.distance_by_road ? 'field-missing' : ''}`}>
-              <span>Distance by road (km)</span>
-              <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={form.distance_by_road ?? ''}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    distance_by_road: e.target.value ? Number(e.target.value) : undefined
-                  }))
-                }
-              />
-            </label>
+              <label className={`form-field ${missingRequired.distance_by_road ? 'field-missing' : ''}`}>
+                <span>Distance by road (km)</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  value={form.distance_by_road ?? ''}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      distance_by_road: e.target.value ? Number(e.target.value) : undefined
+                    }))
+                  }
+                />
+              </label>
+              <div className="form-field" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                <span>&nbsp;</span>
+                {form.coordinates?.trim() &&
+                airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim() ? (
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => {
+                      const innCoords = form.coordinates?.trim();
+                      const takeoffCoords = airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim();
+                      if (!innCoords || !takeoffCoords) return;
+                      window.open(
+                        `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+                          takeoffCoords
+                        )}&destination=${encodeURIComponent(innCoords)}&travelmode=driving`,
+                        '_blank'
+                      );
+                    }}
+                  >
+                    Open route in Maps
+                  </button>
+                ) : null}
+              </div>
+            </div>
             <label className={`form-field ${missingRequired.jumprun ? 'field-missing' : ''}`}>
               <span>Jumprun</span>
               <textarea
@@ -964,24 +1602,29 @@ const InnhoppDetailPage = () => {
                 onChange={(e) => handleLandingAreaChange('primary', 'name', e.target.value)}
               />
             </label>
-            <label className={`form-field ${missingRequired.primary_size ? 'field-missing' : ''}`}>
-              <span>Size and surface</span>
-              <input
-                type="text"
-                value={form.primary_landing_area.size}
-                onChange={(e) => handleLandingAreaChange('primary', 'size', e.target.value)}
-                placeholder="Dimensions and surface"
-              />
-            </label>
-            <label className={`form-field ${missingRequired.primary_obstacles ? 'field-missing' : ''}`}>
-              <span>Obstacles</span>
-              <input
-                type="text"
-                value={form.primary_landing_area.obstacles}
-                onChange={(e) => handleLandingAreaChange('primary', 'obstacles', e.target.value)}
-                placeholder="Powerlines, trees, terrain"
-              />
-            </label>
+            <div
+              className="form-grid"
+              style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
+            >
+              <label className={`form-field ${missingRequired.primary_size ? 'field-missing' : ''}`}>
+                <span>Size and surface</span>
+                <input
+                  type="text"
+                  value={form.primary_landing_area.size}
+                  onChange={(e) => handleLandingAreaChange('primary', 'size', e.target.value)}
+                  placeholder="Dimensions and surface"
+                />
+              </label>
+              <label className={`form-field ${missingRequired.primary_obstacles ? 'field-missing' : ''}`}>
+                <span>Obstacles</span>
+                <input
+                  type="text"
+                  value={form.primary_landing_area.obstacles}
+                  onChange={(e) => handleLandingAreaChange('primary', 'obstacles', e.target.value)}
+                  placeholder="Powerlines, trees, terrain"
+                />
+              </label>
+            </div>
             <label className={`form-field ${missingRequired.primary_description ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
               <span>Description</span>
               <textarea
@@ -1003,24 +1646,29 @@ const InnhoppDetailPage = () => {
                 onChange={(e) => handleLandingAreaChange('secondary', 'name', e.target.value)}
               />
             </label>
-            <label className="form-field">
-              <span>Size and surface</span>
-              <input
-                type="text"
-                value={form.secondary_landing_area.size}
-                onChange={(e) => handleLandingAreaChange('secondary', 'size', e.target.value)}
-                placeholder="Dimensions and surface"
-              />
-            </label>
-            <label className="form-field">
-              <span>Obstacles</span>
-              <input
-                type="text"
-                value={form.secondary_landing_area.obstacles}
-                onChange={(e) => handleLandingAreaChange('secondary', 'obstacles', e.target.value)}
-                placeholder="Powerlines, trees, terrain"
-              />
-            </label>
+            <div
+              className="form-grid"
+              style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
+            >
+              <label className="form-field">
+                <span>Size and surface</span>
+                <input
+                  type="text"
+                  value={form.secondary_landing_area.size}
+                  onChange={(e) => handleLandingAreaChange('secondary', 'size', e.target.value)}
+                  placeholder="Dimensions and surface"
+                />
+              </label>
+              <label className="form-field">
+                <span>Obstacles</span>
+                <input
+                  type="text"
+                  value={form.secondary_landing_area.obstacles}
+                  onChange={(e) => handleLandingAreaChange('secondary', 'obstacles', e.target.value)}
+                  placeholder="Powerlines, trees, terrain"
+                />
+              </label>
+            </div>
             <label className="form-field" style={{ gridColumn: '1 / -1' }}>
               <span>Description</span>
               <textarea
@@ -1181,14 +1829,10 @@ const InnhoppDetailPage = () => {
               <button type="submit" className={saveButtonClass} disabled={saving}>
                 {saveButtonLabel}
               </button>
-              {message && <span className="muted">{message}</span>}
             </div>
           </div>
         </article>
       </form>
-      <p className="muted" style={{ marginTop: '0.5rem' }}>
-        Fields highlighted in red are required for the Innhopp to be "OP READY". Fill them to clear the "MISSING INFO" status.
-      </p>
     </section>
   );
 };

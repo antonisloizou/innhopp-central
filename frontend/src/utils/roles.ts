@@ -1,1 +1,12 @@
-export const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Driver', 'Pilot', 'COP'] as const;
+export const roleOptions = [
+  'Participant',
+  'Skydiver',
+  'Staff',
+  'Ground Crew',
+  'Jump Master',
+  'Jump Leader',
+  'Photo',
+  'Pilot',
+  'COP',
+  'Driver'
+] as const;

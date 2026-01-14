@@ -3,14 +3,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import {
-  CreateTransportPayload,
   deleteTransport,
   getTransport,
   updateTransport,
   createEventVehicle,
   listEventVehicles,
   EventVehicle,
-  TransportVehicle
+  TransportVehicle,
+  UpdateTransportPayload
 } from '../api/logistics';
 import { Event, listEvents, Accommodation, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
@@ -27,7 +27,12 @@ type LocationOption = {
   valueKey: string;
   label: string;
   type: 'Innhopp' | 'Airfield' | 'Accommodation' | 'Other' | 'Meal';
+  coordinates?: string | null;
+  detailUrl?: string;
 };
+
+const hasText = (value?: string | null) => !!value && value.trim().length > 0;
+const normalizeName = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim().toLowerCase();
 
 const LogisticsDetailPage = () => {
   const { transportId } = useParams();
@@ -36,8 +41,12 @@ const LogisticsDetailPage = () => {
     pickup_location: '',
     destination: '',
     passenger_count: '',
-    scheduled_at: ''
+    scheduled_at: '',
+    notes: ''
   });
+  const [saved, setSaved] = useState(false);
+  const [loadedNotes, setLoadedNotes] = useState('');
+  const [notesTouched, setNotesTouched] = useState(false);
   const [events, setEvents] = useState<Event[]>([]);
   const [existingVehicles, setExistingVehicles] = useState<EventVehicle[]>([]);
   const [loadedVehicles, setLoadedVehicles] = useState<TransportVehicle[]>([]);
@@ -60,6 +69,11 @@ const LogisticsDetailPage = () => {
   const initialEventSet = useRef(true);
   const [pickupOptionKey, setPickupOptionKey] = useState('');
   const [destinationOptionKey, setDestinationOptionKey] = useState('');
+  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
+  const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const markDirty = () => {
+    if (saved) setSaved(false);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -100,8 +114,11 @@ const LogisticsDetailPage = () => {
           pickup_location: transport.pickup_location,
           destination: transport.destination,
           passenger_count: String(transport.passenger_count),
-          scheduled_at: defaultScheduled
+          scheduled_at: defaultScheduled,
+          notes: transport.notes || ''
         });
+        setLoadedNotes(transport.notes || '');
+        setNotesTouched(false);
         setSelectedEventId(String(transport.event_id || ''));
         const vehiclesFromEventIds =
           Array.isArray(transport.vehicles) && transport.vehicles.length > 0
@@ -114,6 +131,7 @@ const LogisticsDetailPage = () => {
                 .filter((id): id is number => typeof id === 'number')
             : [];
         setSelectedVehicleIds(vehiclesFromEventIds);
+        setSaved(false);
       } catch (err) {
         if (!cancelled) {
           setMessage(err instanceof Error ? err.message : 'Failed to load transport');
@@ -131,12 +149,23 @@ const LogisticsDetailPage = () => {
   }, [transportId]);
 
   const handleAddVehicle = () => {
+    markDirty();
     setShowVehicleForm(true);
     setNewVehicle({ name: '', driver: '', passenger_capacity: '', notes: '' });
   };
 
   const handleRemoveVehicle = (id: number) => {
     setSelectedVehicleIds((prev) => prev.filter((v) => v !== id));
+    setLoadedVehicles((prev) =>
+      prev.filter(
+        (v, idx) => !(
+          v.event_vehicle_id === id ||
+          ((v as any).id && typeof (v as any).id === 'number' && (v as any).id === id) ||
+          (!v.event_vehicle_id && !(v as any).id && idx === id)
+        )
+      )
+    );
+    markDirty();
   };
 
   useEffect(() => {
@@ -144,11 +173,13 @@ const LogisticsDetailPage = () => {
       initialEventSet.current = false;
       return;
     }
+    setNotesTouched(false);
     setSelectedVehicleIds([]);
     setShowVehicleForm(false);
     setPickupOptionKey('');
     setDestinationOptionKey('');
-    setForm((prev) => ({ ...prev, pickup_location: '', destination: '' }));
+    setForm((prev) => ({ ...prev, pickup_location: '', destination: '', notes: '' }));
+    setSaved(false);
     // do not clear loadedVehicles so existing attached vehicles remain visible
     if (selectedEventId) {
       Promise.all([
@@ -189,7 +220,20 @@ const LogisticsDetailPage = () => {
     }
   }, [selectedEventId]);
 
-  const buildOptionKey = (type: LocationOption['type'], label: string) => `${type}::${label}`;
+  const locationCoordinates = (name: string | null | undefined) => {
+    const target = normalizeName(name || '');
+    if (!target) return null;
+    const accommodation = accommodations.find((a) => normalizeName(a.name || '') === target);
+    if (accommodation?.coordinates) return accommodation.coordinates;
+    const other = others.find((o) => normalizeName(o.name || '') === target);
+    if (other?.coordinates) return other.coordinates;
+    const af = airfields.find((a) => normalizeName(a.name || '') === target);
+    if (af?.coordinates) return af.coordinates;
+    return null;
+  };
+
+  const buildOptionKey = (type: LocationOption['type'], id: number | string, label: string) =>
+    `${type}#${id ?? label}`;
   const normalizeLocationValue = (val: string) => val.toLowerCase().replace(/^#?\s*\d+\s*/, '').trim();
 
   const pickupOptions = (() => {
@@ -200,8 +244,10 @@ const LogisticsDetailPage = () => {
         const label = `${inn.sequence ? `#${inn.sequence} ` : ''}${inn.name}`;
         options.push({
           label,
-          valueKey: buildOptionKey('Innhopp', label),
-          type: 'Innhopp'
+          valueKey: buildOptionKey('Innhopp', inn.id, label),
+          type: 'Innhopp',
+          coordinates: (inn as any).coordinates || null,
+          detailUrl: event ? `/events/${event.id}/innhopps/${inn.id}` : undefined
         });
       });
     }
@@ -209,26 +255,46 @@ const LogisticsDetailPage = () => {
       airfields
         .filter((af) => event.airfield_ids.includes(af.id))
         .forEach((af) => {
-          options.push({ label: af.name, valueKey: buildOptionKey('Airfield', af.name), type: 'Airfield' });
+          options.push({
+            label: af.name,
+            valueKey: buildOptionKey('Airfield', af.id, af.name),
+            type: 'Airfield',
+            coordinates: af.coordinates || null,
+            detailUrl: `/airfields/${af.id}`
+          });
         });
     }
     if (accommodations.length) {
       accommodations.forEach((acc) => {
         options.push({
           label: acc.name,
-          valueKey: buildOptionKey('Accommodation', acc.name),
-          type: 'Accommodation'
+          valueKey: buildOptionKey('Accommodation', acc.id, acc.name),
+          type: 'Accommodation',
+          coordinates: acc.coordinates || null,
+          detailUrl: event ? `/events/${event.id}/accommodations/${acc.id}` : undefined
         });
       });
     }
     if (meals.length) {
       meals.forEach((meal) => {
-        options.push({ label: meal.name, valueKey: buildOptionKey('Meal', meal.name), type: 'Meal' });
+        options.push({
+          label: meal.name,
+          valueKey: buildOptionKey('Meal', meal.id, meal.name),
+          type: 'Meal',
+          coordinates: (meal as any).coordinates || null,
+          detailUrl: `/logistics/meals/${meal.id}`
+        });
       });
     }
     if (others.length) {
       others.forEach((o) => {
-        options.push({ label: o.name, valueKey: buildOptionKey('Other', o.name), type: 'Other' });
+        options.push({
+          label: o.name,
+          valueKey: buildOptionKey('Other', o.id, o.name),
+          type: 'Other',
+          coordinates: o.coordinates || null,
+          detailUrl: `/logistics/others/${o.id}`
+        });
       });
     }
     return options;
@@ -241,6 +307,30 @@ const LogisticsDetailPage = () => {
     pickupOptions.find(
       (opt) => normalizeLocationValue(opt.label) === normalizeLocationValue(label)
     )?.valueKey;
+  const pickupHasCoordinates = (() => {
+    const opt = findOptionByKey(pickupOptionKey);
+    return !!opt && hasText(opt.coordinates);
+  })();
+  const destinationHasCoordinates = (() => {
+    const opt = findOptionByKey(destinationOptionKey);
+    return !!opt && hasText(opt.coordinates);
+  })();
+  const pickupCoordinates = (() => {
+    const opt = findOptionByKey(pickupOptionKey);
+    return opt?.coordinates?.trim();
+  })();
+  const destinationCoordinates = (() => {
+    const opt = findOptionByKey(destinationOptionKey);
+    return opt?.coordinates?.trim();
+  })();
+  const pickupDetailUrl = (() => {
+    const opt = findOptionByKey(pickupOptionKey);
+    return opt?.detailUrl;
+  })();
+  const destinationDetailUrl = (() => {
+    const opt = findOptionByKey(destinationOptionKey);
+    return opt?.detailUrl;
+  })();
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -248,14 +338,21 @@ const LogisticsDetailPage = () => {
     setSubmitting(true);
     setMessage(null);
     try {
-      const payload: CreateTransportPayload & { vehicle_ids?: number[] } = {
+      const payload: UpdateTransportPayload = {
         pickup_location: form.pickup_location.trim(),
         destination: form.destination.trim(),
         passenger_count: Number(form.passenger_count) || 0,
         scheduled_at: form.scheduled_at ? form.scheduled_at : undefined,
+        notes: form.notes.trim() || undefined,
         event_id: Number(selectedEventId)
       };
-      payload.vehicle_ids = [...selectedVehicleIds];
+      const fallbackVehicleIds =
+        selectedVehicleIds.length > 0
+          ? [...selectedVehicleIds]
+          : loadedVehicles
+              .map((v) => v.event_vehicle_id)
+              .filter((id): id is number => typeof id === 'number');
+      payload.vehicle_ids = fallbackVehicleIds;
       if (showVehicleForm && newVehicle.name.trim()) {
         const created = await createEventVehicle({
           event_id: Number(selectedEventId),
@@ -268,12 +365,30 @@ const LogisticsDetailPage = () => {
       }
       await updateTransport(Number(transportId), payload);
       setMessage('Transport updated');
+      setSaved(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update transport');
     } finally {
       setSubmitting(false);
     }
   };
+
+  const transportComplete = (() => {
+    const pickupCoords = locationCoordinates(form.pickup_location);
+    const destCoords = locationCoordinates(form.destination);
+    const passengerCount = Number(form.passenger_count);
+    const hasPassengers = Number.isFinite(passengerCount) && passengerCount > 0;
+    const hasVehicles =
+      (Array.isArray(selectedVehicleIds) && selectedVehicleIds.length > 0) ||
+      (Array.isArray(loadedVehicles) && loadedVehicles.length > 0);
+    return (
+      hasText(pickupCoords) &&
+      hasText(destCoords) &&
+      hasText(form.scheduled_at) &&
+      hasPassengers &&
+      hasVehicles
+    );
+  })();
 
   const handleDelete = async () => {
     if (!transportId) return;
@@ -300,6 +415,7 @@ const LogisticsDetailPage = () => {
       setSelectedVehicleIds((prev) => (prev.includes(created.id) ? prev : [...prev, created.id]));
       setNewVehicle({ name: '', driver: '', passenger_capacity: '', notes: '' });
       setShowVehicleForm(false);
+      setSaved(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create vehicle');
     }
@@ -310,6 +426,9 @@ const LogisticsDetailPage = () => {
       setPickupOptionKey('');
       return;
     }
+    if (!notesTouched && loadedNotes && !form.notes) {
+      setForm((prev) => ({ ...prev, notes: loadedNotes }));
+    }
     const direct = findOptionByKey(pickupOptionKey);
     if (direct && direct.label === form.pickup_location) return;
     const matchKey = findOptionKeyByLabel(form.pickup_location);
@@ -318,12 +437,15 @@ const LogisticsDetailPage = () => {
       setPickupOptionKey(matchKey);
       if (match) setForm((prev) => ({ ...prev, pickup_location: match.label }));
     }
-  }, [pickupOptions, form.pickup_location, pickupOptionKey]);
+  }, [pickupOptions, form.pickup_location, pickupOptionKey, loadedNotes, notesTouched, form.notes]);
 
   useEffect(() => {
     if (!form.destination) {
       setDestinationOptionKey('');
       return;
+    }
+    if (!notesTouched && loadedNotes && !form.notes) {
+      setForm((prev) => ({ ...prev, notes: loadedNotes }));
     }
     const direct = findOptionByKey(destinationOptionKey);
     if (direct && direct.label === form.destination) return;
@@ -333,7 +455,7 @@ const LogisticsDetailPage = () => {
       setDestinationOptionKey(matchKey);
       if (match) setForm((prev) => ({ ...prev, destination: match.label }));
     }
-  }, [pickupOptions, form.destination, destinationOptionKey]);
+  }, [pickupOptions, form.destination, destinationOptionKey, loadedNotes, notesTouched, form.notes]);
 
   if (loading) {
     return <p className="muted">Loading transport…</p>;
@@ -341,6 +463,15 @@ const LogisticsDetailPage = () => {
 
   const routeSummary =
     form.pickup_location && form.destination ? `${form.pickup_location} → ${form.destination}` : '';
+  const canOpenRoute = !!(pickupCoordinates && destinationCoordinates);
+  const routeLink = canOpenRoute
+    ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+        pickupCoordinates as string
+      )}&destination=${encodeURIComponent(destinationCoordinates as string)}`
+    : null;
+  const missingPassengerCount = form.passenger_count === '' || Number.isNaN(Number(form.passenger_count));
+  const missingScheduledAt = !hasText(form.scheduled_at);
+  const missingVehicles = selectedVehicleIds.length === 0 && loadedVehicles.length === 0;
 
   const closestEventDate = (current?: string) => {
     const ev = events.find((e) => e.id === Number(selectedEventId));
@@ -365,8 +496,33 @@ const LogisticsDetailPage = () => {
     <section>
       <header className="page-header">
         <div>
-          <h2>Transport Route</h2>
-          {routeSummary && <p>{routeSummary}</p>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>{routeSummary || 'Transport Route'}</h2>
+            <span
+              className={`badge ${transportComplete ? 'success' : 'danger'}`}
+              aria-label={transportComplete ? 'Complete' : 'Missing info'}
+              title={transportComplete ? 'Complete' : 'Missing info'}
+              style={{ minWidth: '2.4ch', textAlign: 'center' }}
+            >
+              {transportComplete ? '✓' : '!'}
+            </span>
+          </div>
+          {routeSummary && (
+            <p>
+              <button
+                type="button"
+                className="link-button"
+                style={{ fontSize: '1.25em' }}
+                disabled={!canOpenRoute}
+                onClick={() => {
+                  if (!routeLink) return;
+                  window.open(routeLink, '_blank');
+                }}
+              >
+                Open route in Maps
+              </button>
+            </p>
+          )}
         </div>
         <div className="card-actions">
           <button
@@ -381,6 +537,7 @@ const LogisticsDetailPage = () => {
                     destination: form.destination,
                     passenger_count: form.passenger_count,
                     scheduled_at: form.scheduled_at,
+                    notes: form.notes,
                     vehicle_ids: selectedVehicleIds,
                     vehicles: loadedVehicles.map((v) => ({
                       event_vehicle_id: v.event_vehicle_id,
@@ -410,32 +567,42 @@ const LogisticsDetailPage = () => {
           <div className="form-grid">
             <label className="form-field">
               <span>Event</span>
-              <select
-                value={selectedEventId}
-                onChange={(e) => setSelectedEventId(e.target.value)}
-                required
-              >
-                <option value="">Select event</option>
-                {events.map((ev) => (
-                  <option key={ev.id} value={ev.id}>
-                    {ev.name}
-                  </option>
-                ))}
-              </select>
+                  <div className="input-with-button">
+                    <select
+                      value={selectedEventId}
+                      onChange={(e) => {
+                        setSelectedEventId(e.target.value);
+                        markDirty();
+                      }}
+                      required
+                      style={{ flex: 1, minWidth: 0 }}
+                    >
+                      <option value="">Select event</option>
+                      {events.map((ev) => (
+                    <option key={ev.id} value={ev.id}>
+                      {ev.name}
+                    </option>
+                  ))}
+                </select>
+                <span style={{ visibility: 'hidden' }}>Open in Maps</span>
+              </div>
             </label>
-            <label className="form-field">
+            <label className={`form-field ${pickupOptionKey && !pickupHasCoordinates ? 'field-missing' : ''}`}>
               <span>Pickup location</span>
-              <select
-                value={pickupOptionKey}
+              <div className="input-with-button">
+                <select
+                  value={pickupOptionKey}
                 onChange={(e) => {
                   const key = e.target.value;
                   setPickupOptionKey(key);
                   const opt = findOptionByKey(key);
+                  markDirty();
                   setForm((prev) => ({ ...prev, pickup_location: opt ? opt.label : '' }));
                 }}
                 required
-              >
-                <option value="">Select pickup</option>
+                style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="">Select pickup</option>
                 {pickupOptions
                   .filter((opt) => opt.type === 'Innhopp' && opt.valueKey !== destinationOptionKey)
                   .length > 0 && (
@@ -499,21 +666,42 @@ const LogisticsDetailPage = () => {
                       ))}
                   </optgroup>
                 )}
-              </select>
+                </select>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={!pickupCoordinates && !pickupDetailUrl}
+                  onClick={() => {
+                    if (pickupCoordinates) {
+                      window.open(
+                        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pickupCoordinates)}`,
+                        '_blank'
+                      );
+                    } else if (pickupDetailUrl) {
+                      navigate(pickupDetailUrl);
+                    }
+                  }}
+                >
+                  {pickupCoordinates ? 'Open in Maps' : 'Update location'}
+                </button>
+              </div>
             </label>
-            <label className="form-field">
+            <label className={`form-field ${destinationOptionKey && !destinationHasCoordinates ? 'field-missing' : ''}`}>
               <span>Destination</span>
-              <select
-                value={destinationOptionKey}
-                onChange={(e) => {
-                  const key = e.target.value;
-                  setDestinationOptionKey(key);
-                  const opt = findOptionByKey(key);
-                  setForm((prev) => ({ ...prev, destination: opt ? opt.label : '' }));
-                }}
-                required
-              >
-                <option value="">Select destination</option>
+              <div className="input-with-button">
+                <select
+                  value={destinationOptionKey}
+                  onChange={(e) => {
+                    const key = e.target.value;
+                    setDestinationOptionKey(key);
+                    const opt = findOptionByKey(key);
+                    markDirty();
+                    setForm((prev) => ({ ...prev, destination: opt ? opt.label : '' }));
+                  }}
+                  required
+                  style={{ flex: 1, minWidth: 0 }}
+                >
+                  <option value="">Select destination</option>
                 {destinationOptions.filter((opt) => opt.type === 'Innhopp').length > 0 && (
                   <optgroup label="Innhopps">
                     {destinationOptions
@@ -569,39 +757,73 @@ const LogisticsDetailPage = () => {
                       ))}
                   </optgroup>
                 )}
-              </select>
+                </select>
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={!destinationCoordinates && !destinationDetailUrl}
+                  onClick={() => {
+                    if (destinationCoordinates) {
+                      window.open(
+                        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(destinationCoordinates)}`,
+                        '_blank'
+                      );
+                    } else if (destinationDetailUrl) {
+                      navigate(destinationDetailUrl);
+                    }
+                  }}
+                >
+                  {destinationCoordinates ? 'Open in Maps' : 'Update location'}
+                </button>
+              </div>
             </label>
-            <label className="form-field">
-              <span>Passenger count</span>
-              <input
-                type="number"
-                min={0}
-                value={form.passenger_count}
-                onChange={(e) => setForm((prev) => ({ ...prev, passenger_count: e.target.value }))}
-                required
-              />
-            </label>
-            <label className="form-field">
-              <span>Scheduled at</span>
-              <Flatpickr
-                value={form.scheduled_at ? new Date(form.scheduled_at) : undefined}
-                options={{
-                  enableTime: true,
-                  dateFormat: 'Y-m-d H:i',
-                  time_24hr: true,
-                  defaultDate: closestEventDate(form.scheduled_at)
-                }}
-                onChange={(dates) => {
-                  const date = dates[0];
-                  setForm((prev) => ({ ...prev, scheduled_at: date ? date.toISOString() : '' }));
-                }}
-              />
-            </label>
+            <div className="form-field" style={{ gridColumn: '1 / -1', padding: 0 }}>
+              <div
+                className="form-grid"
+                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}
+              >
+                <label className={`form-field ${missingPassengerCount ? 'field-missing' : ''}`} style={{ margin: 0 }}>
+                  <span>Passenger count</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.passenger_count}
+                    onChange={(e) => {
+                      markDirty();
+                      setForm((prev) => ({ ...prev, passenger_count: e.target.value }));
+                    }}
+                    required
+                  />
+                </label>
+                <label className={`form-field ${missingScheduledAt ? 'field-missing' : ''}`} style={{ margin: 0 }}>
+                  <span>Scheduled at</span>
+                  <Flatpickr
+                    value={form.scheduled_at ? new Date(form.scheduled_at) : undefined}
+                    options={{
+                      enableTime: true,
+                      dateFormat: 'Y-m-d H:i',
+                      time_24hr: true,
+                      defaultDate: closestEventDate(form.scheduled_at)
+                    }}
+                    onChange={(dates) => {
+                      const date = dates[0];
+                      markDirty();
+                      setForm((prev) => ({ ...prev, scheduled_at: date ? date.toISOString() : '' }));
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+              {saveButtonLabel}
+            </button>
           </div>
         </article>
 
         <article className="card">
-          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <div className={`form-field ${missingVehicles ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
             <span>Vehicles</span>
             {(() => {
               type DisplayVehicle = {
@@ -612,58 +834,56 @@ const LogisticsDetailPage = () => {
                 notes?: string;
                 removable: boolean;
               };
-              let items: DisplayVehicle[] = [];
-
-              if (selectedVehicleIds.length > 0) {
-                items = selectedVehicleIds
-                  .map((id) => {
-                    const fromExisting = existingVehicles.find((ev) => ev.id === id);
-                    if (fromExisting) {
-                      return {
-                        id,
-                        name: fromExisting.name,
-                        driver: fromExisting.driver,
-                        passenger_capacity: fromExisting.passenger_capacity,
-                        notes: fromExisting.notes,
-                        removable: true
-                      };
-                    }
-                    const fallback = loadedVehicles.find(
-                      (lv) =>
-                        lv.event_vehicle_id === id ||
-                        ((lv as any).id && typeof (lv as any).id === 'number' && (lv as any).id === id)
-                    );
-                    if (fallback) {
-                      return {
-                        id,
-                        name: fallback.name,
-                        driver: fallback.driver,
-                        passenger_capacity: fallback.passenger_capacity,
-                        notes: fallback.notes,
-                        removable: true
-                      };
-                    }
-                    return null;
-                  })
-                  .filter((v): v is DisplayVehicle => v !== null);
-              }
+              const items: DisplayVehicle[] =
+                selectedVehicleIds.length > 0
+                  ? selectedVehicleIds.reduce<DisplayVehicle[]>((acc, id) => {
+                      const fromExisting = existingVehicles.find((ev) => ev.id === id);
+                      if (fromExisting) {
+                        acc.push({
+                          id,
+                          name: fromExisting.name,
+                          driver: fromExisting.driver,
+                          passenger_capacity: fromExisting.passenger_capacity,
+                          notes: fromExisting.notes,
+                          removable: true
+                        });
+                        return acc;
+                      }
+                      const fallback = loadedVehicles.find(
+                        (lv) =>
+                          lv.event_vehicle_id === id ||
+                          ((lv as any).id && typeof (lv as any).id === 'number' && (lv as any).id === id)
+                      );
+                      if (fallback) {
+                        acc.push({
+                          id,
+                          name: fallback.name,
+                          driver: fallback.driver,
+                          passenger_capacity: fallback.passenger_capacity,
+                          notes: fallback.notes,
+                          removable: true
+                        });
+                      }
+                      return acc;
+                    }, [])
+                  : [];
 
               if (items.length === 0 && loadedVehicles.length > 0) {
-                items = loadedVehicles.map((v, idx) => {
+                loadedVehicles.forEach((v, idx) => {
                   const removableId =
                     typeof v.event_vehicle_id === 'number'
                       ? v.event_vehicle_id
                       : (v as any).id && typeof (v as any).id === 'number'
                       ? (v as any).id
                       : idx;
-                  return {
+                  items.push({
                     id: removableId as number,
                     name: v.name,
                     driver: v.driver,
                     passenger_capacity: v.passenger_capacity,
                     notes: v.notes,
                     removable: typeof v.event_vehicle_id === 'number' || typeof (v as any).id === 'number'
-                  };
+                  });
                 });
               }
 
@@ -694,18 +914,18 @@ const LogisticsDetailPage = () => {
                             <strong>{entry.name}</strong>
                             <div className="muted">
                               {entry.driver ? `Driver: ${entry.driver} • ` : ''}
-                              Cap: {entry.passenger_capacity}
-                              {entry.notes ? ` • ${entry.notes}` : ''}
+                              Capacity: {entry.passenger_capacity}
                             </div>
+                            {entry.notes && <div className="muted">Notes: {entry.notes}</div>}
                           </Link>
                         ) : (
                           <div style={{ flex: 1 }}>
                             <strong>{entry.name}</strong>
                             <div className="muted">
                               {entry.driver ? `Driver: ${entry.driver} • ` : ''}
-                              Cap: {entry.passenger_capacity}
-                              {entry.notes ? ` • ${entry.notes}` : ''}
+                              Capacity: {entry.passenger_capacity}
                             </div>
+                            {entry.notes && <div className="muted">Notes: {entry.notes}</div>}
                           </div>
                         )}
                         {entry.removable && (
@@ -730,6 +950,7 @@ const LogisticsDetailPage = () => {
                         const id = Number(e.target.value);
                         if (!id) return;
                         if (selectedVehicleIds.includes(id)) return;
+                        markDirty();
                         setSelectedVehicleIds((prev) => [...prev, id]);
                       }}
                     >
@@ -761,7 +982,10 @@ const LogisticsDetailPage = () => {
                   <input
                     type="text"
                     value={newVehicle.name}
-                    onChange={(e) => setNewVehicle((prev) => ({ ...prev, name: e.target.value }))}
+                    onChange={(e) => {
+                      markDirty();
+                      setNewVehicle((prev) => ({ ...prev, name: e.target.value }));
+                    }}
                     required
                   />
                 </label>
@@ -770,7 +994,10 @@ const LogisticsDetailPage = () => {
                   <input
                     type="text"
                     value={newVehicle.driver}
-                    onChange={(e) => setNewVehicle((prev) => ({ ...prev, driver: e.target.value }))}
+                    onChange={(e) => {
+                      markDirty();
+                      setNewVehicle((prev) => ({ ...prev, driver: e.target.value }));
+                    }}
                   />
                 </label>
                 <label className="form-field">
@@ -779,9 +1006,10 @@ const LogisticsDetailPage = () => {
                     type="number"
                     min={0}
                     value={newVehicle.passenger_capacity}
-                    onChange={(e) =>
-                      setNewVehicle((prev) => ({ ...prev, passenger_capacity: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      markDirty();
+                      setNewVehicle((prev) => ({ ...prev, passenger_capacity: e.target.value }));
+                    }}
                   />
                 </label>
                 <label className="form-field">
@@ -789,7 +1017,10 @@ const LogisticsDetailPage = () => {
                   <input
                     type="text"
                     value={newVehicle.notes}
-                    onChange={(e) => setNewVehicle((prev) => ({ ...prev, notes: e.target.value }))}
+                    onChange={(e) => {
+                      markDirty();
+                      setNewVehicle((prev) => ({ ...prev, notes: e.target.value }));
+                    }}
                   />
                 </label>
                 <div className="form-actions">
@@ -809,15 +1040,38 @@ const LogisticsDetailPage = () => {
                 </div>
               </div>
             )}
+            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+              <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+                {saveButtonLabel}
+              </button>
+            </div>
           </div>
         </article>
 
-        <div className="form-actions">
-          <button type="submit" className="primary" disabled={submitting}>
-            {submitting ? 'Saving…' : 'Save route'}
-          </button>
-          {message && <span className="muted">{message}</span>}
-        </div>
+        <article className="card">
+          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <span>Notes</span>
+            <textarea
+              value={form.notes}
+              onChange={(e) => {
+                if (!notesTouched) setNotesTouched(true);
+                markDirty();
+                setForm((prev) => ({ ...prev, notes: e.target.value }));
+              }}
+              rows={3}
+            />
+          </label>
+          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+              {saveButtonLabel}
+            </button>
+          </div>
+        </article>
+        {message && (
+          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <span className="muted">{message}</span>
+          </div>
+        )}
       </form>
     </section>
   );

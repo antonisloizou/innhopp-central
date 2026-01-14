@@ -23,6 +23,12 @@ export interface LandOwner {
   email?: string | null;
 }
 
+export interface InnhoppImage {
+  name?: string | null;
+  mime_type?: string | null;
+  data: string;
+}
+
 export interface Innhopp {
   id: number;
   event_id: number;
@@ -48,6 +54,7 @@ export interface Innhopp {
   minimum_requirements?: string | null;
   land_owners?: LandOwner[];
   land_owner_permission?: boolean | null;
+  image_files?: InnhoppImage[];
   created_at: string;
 }
 
@@ -109,6 +116,8 @@ export const createEvent = (payload: CreateEventPayload) =>
   apiRequest<Event>('/events/events', { method: 'POST', body: JSON.stringify(payload) });
 
 export const getEvent = (id: number) => apiRequest<Event>(`/events/events/${id}`);
+export const copyEvent = (id: number) =>
+  apiRequest<Event>(`/events/events/${id}/copy`, { method: 'POST' });
 export const deleteEvent = (id: number) =>
   apiRequest<void>(`/events/events/${id}`, { method: 'DELETE' });
 
@@ -167,6 +176,7 @@ export interface InnhoppInput {
   minimum_requirements?: string;
   land_owners?: LandOwner[];
   land_owner_permission?: boolean;
+  image_files?: InnhoppImage[];
 }
 
 export interface UpdateInnhoppPayload {
@@ -192,6 +202,7 @@ export interface UpdateInnhoppPayload {
   minimum_requirements?: string;
   land_owners?: LandOwner[];
   land_owner_permission?: boolean;
+  image_files?: InnhoppImage[];
 }
 
 export interface UpdateEventPayload extends CreateEventPayload {

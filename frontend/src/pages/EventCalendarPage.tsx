@@ -135,37 +135,20 @@ const EventCalendarPage = () => {
     setShowPast(allPast);
   }, [events, selectedSeason]);
 
+  const firstSeasonLabel = groupedEvents[0]?.label || null;
+
   return (
-    <section>
+    <section className="stack">
+      <header className="page-header">
+        <div>
+          <h2 style={{ margin: 0 }}>Event Calendar</h2>
+        </div>
+      </header>
       <div className="stack">
         <article className="card">
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Season</span>
-              <select value={selectedSeason} onChange={(e) => setSelectedSeason(e.target.value)}>
-                <option value="">All seasons</option>
-                {[...seasons]
-                  .sort((a, b) => b.name.localeCompare(a.name))
-                  .map((season) => (
-                    <option key={season.id} value={season.id}>
-                      {season.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {seasons.length === 0 && <p className="muted">No seasons yet. Create one to get started.</p>}
-          </div>
-          <footer className="card-footer">
-            <Link className="primary button-link" to="/seasons/new">
-              Create season
-            </Link>
-          </footer>
-        </article>
-
-        <article className="card">
-          <header className="card-header">
-            <div>
-              <h3>Events</h3>
+          <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ flex: 1, fontWeight: 800, fontSize: '1.25rem' }}>
+              {firstSeasonLabel || 'Events'}
             </div>
             <span className="badge neutral">
               {visibleEvents.length} {visibleEvents.length === 1 ? 'event' : 'events'}
@@ -179,34 +162,44 @@ const EventCalendarPage = () => {
             <p className="muted">No events yet. Use the actions below to add one.</p>
           ) : (
             <div className="stack">
-              {groupedEvents.map((group) => (
+              {groupedEvents.map((group, idx) => (
                 <div key={group.seasonId} className="stack">
-                  <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-                    {group.label}
-                  </p>
-                  <div className="grid two-column">
+                  {idx === 0 ? null : (
+                    <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+                      <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>{group.label}</span>
+                    </p>
+                  )}
+                  <div className="stack">
                     {group.events.map((event) => (
-                      <Link key={event.id} className="card-link" to={`/events/${event.id}`}>
-                        <article className="card">
+                      <Link
+                        key={event.id}
+                        className="card-link"
+                        to={`/events/${event.id}`}
+                        state={{ suppressHighlight: true }}
+                      >
+                        <article className="card event-summary-card">
                           {(() => {
                             const nonStaffCount = countNonStaff(event.participant_ids);
                             const slotCount = event.slots ?? 0;
                             const remaining = Math.max(slotCount - nonStaffCount, 0);
                             const isFull = remaining === 0;
+                            const past = isPastEvent(event);
                             return (
                               <>
                                 <header className="card-header">
                                   <div>
                                     <h3>{event.name}</h3>
-                                    <p className="muted">{event.location || 'Location TBD'}</p>
+                                    <p className="muted event-location">{event.location || 'Location TBD'}</p>
                                   </div>
                                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                                     <span className={`badge status-${event.status}`}>
                                       {event.status}
                                     </span>
-                                    <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                                      {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                                    </span>
+                                    {!past && (
+                                      <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                                        {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                                      </span>
+                                    )}
                                   </div>
                                 </header>
                                 <dl className="card-details">
@@ -251,6 +244,34 @@ const EventCalendarPage = () => {
                 {showPast ? 'Hide past events' : 'Show past events'}
               </button>
             </div>
+          </footer>
+        </article>
+
+        <article className="card">
+          <div className="form-grid">
+            <label className="form-field">
+              <span>Season</span>
+              <select
+                value={selectedSeason}
+                onChange={(e) => setSelectedSeason(e.target.value)}
+                style={{ width: '16.666%', minWidth: '140px' }}
+              >
+                <option value="">All seasons</option>
+                {[...seasons]
+                  .sort((a, b) => b.name.localeCompare(a.name))
+                  .map((season) => (
+                    <option key={season.id} value={season.id}>
+                      {season.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {seasons.length === 0 && <p className="muted">No seasons yet. Create one to get started.</p>}
+          </div>
+          <footer className="card-footer">
+            <Link className="primary button-link" to="/seasons/new">
+              Create season
+            </Link>
           </footer>
         </article>
       </div>

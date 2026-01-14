@@ -37,3 +37,8 @@ export const updateParticipantProfile = (id: number, payload: CreateParticipantP
     method: 'PUT',
     body: JSON.stringify(payload)
   });
+
+export const deleteParticipantProfile = (id: number) =>
+  apiRequest<void>(`/participants/profiles/${id}`, {
+    method: 'DELETE'
+  });

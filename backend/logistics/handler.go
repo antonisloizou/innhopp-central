@@ -165,10 +165,12 @@ func (h *Handler) createOther(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "event_id is required")
 		return
 	}
-	coord := strings.TrimSpace(payload.Coordinates)
-	if coord == "" {
-		httpx.Error(w, http.StatusBadRequest, "coordinates are required")
-		return
+
+	var coordVal interface{}
+	var coordResult *string
+	if coord := strings.TrimSpace(payload.Coordinates); coord != "" {
+		coordVal = coord
+		coordResult = &coord
 	}
 
 	var scheduled *time.Time
@@ -181,14 +183,18 @@ func (h *Handler) createOther(w http.ResponseWriter, r *http.Request) {
 		scheduled = &t
 	}
 
-	coordVal := coord
-	descriptionVal := strings.TrimSpace(payload.Description)
-	if descriptionVal == "" {
-		descriptionVal = ""
+	var descriptionVal interface{}
+	var descriptionResult *string
+	if desc := strings.TrimSpace(payload.Description); desc != "" {
+		descriptionVal = desc
+		descriptionResult = &desc
 	}
-	notesVal := strings.TrimSpace(payload.Notes)
-	if notesVal == "" {
-		notesVal = ""
+
+	var notesVal interface{}
+	var notesResult *string
+	if notes := strings.TrimSpace(payload.Notes); notes != "" {
+		notesVal = notes
+		notesResult = &notes
 	}
 
 	var seasonID interface{}
@@ -213,9 +219,9 @@ func (h *Handler) createOther(w http.ResponseWriter, r *http.Request) {
 	var o OtherLogistic
 	o.Name = name
 	o.ScheduledAt = scheduled
-	o.Coordinates = &coordVal
-	o.Notes = &notesVal
-	o.Description = &descriptionVal
+	o.Coordinates = coordResult
+	o.Notes = notesResult
+	o.Description = descriptionResult
 	valEvent := payload.EventID
 	o.EventID = &valEvent
 	if seasonID != nil {
@@ -639,14 +645,32 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, event_id, season_id, created_at
+		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at
          FROM logistics_transports WHERE id = $1`,
 		id,
 	)
 	var t Transport
-	if err := row.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &t.ScheduledAt, &t.EventID, &t.SeasonID, &t.CreatedAt); err != nil {
+	var scheduledAt sql.NullTime
+	var notes sql.NullString
+	var eventID sql.NullInt64
+	var seasonID sql.NullInt64
+	if err := row.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "transport not found")
 		return
+	}
+	if scheduledAt.Valid {
+		t.ScheduledAt = &scheduledAt.Time
+	}
+	if notes.Valid {
+		t.Notes = notes.String
+	}
+	if eventID.Valid {
+		val := eventID.Int64
+		t.EventID = &val
+	}
+	if seasonID.Valid {
+		val := seasonID.Int64
+		t.SeasonID = &val
 	}
 
 	vehicleRows, err := h.db.Query(r.Context(),
@@ -660,12 +684,23 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	defer vehicleRows.Close()
 	for vehicleRows.Next() {
 		var v TransportVehicle
-		var eventVehicleID *int64
-		if err := vehicleRows.Scan(&v.Name, &v.Driver, &v.PassengerCapacity, &v.Notes, &eventVehicleID); err != nil {
+		var driver sql.NullString
+		var notes sql.NullString
+		var eventVehicleID sql.NullInt64
+		if err := vehicleRows.Scan(&v.Name, &driver, &v.PassengerCapacity, &notes, &eventVehicleID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse vehicle")
 			return
 		}
-		v.EventVehicleID = eventVehicleID
+		if driver.Valid {
+			v.Driver = driver.String
+		}
+		if notes.Valid {
+			v.Notes = notes.String
+		}
+		if eventVehicleID.Valid {
+			val := eventVehicleID.Int64
+			v.EventVehicleID = &val
+		}
 		t.Vehicles = append(t.Vehicles, v)
 	}
 
@@ -684,8 +719,9 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		Destination    string             `json:"destination"`
 		PassengerCount int                `json:"passenger_count"`
 		ScheduledAt    string             `json:"scheduled_at"`
+		Notes          *string            `json:"notes"`
 		EventID        int64              `json:"event_id"`
-		VehicleIDs     []int64            `json:"vehicle_ids"`
+		VehicleIDs     *[]int64           `json:"vehicle_ids"`
 		Vehicles       []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
 	}
 
@@ -708,6 +744,15 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 	if payload.PassengerCount < 0 {
 		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
 		return
+	}
+	var notesVal interface{}
+	if payload.Notes != nil {
+		n := strings.TrimSpace(*payload.Notes)
+		if n != "" {
+			notesVal = n
+		} else {
+			notesVal = nil
+		}
 	}
 
 	var scheduledAt *time.Time
@@ -733,11 +778,21 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Preserve existing notes when not provided.
+	if notesVal == nil {
+		var existingNotes sql.NullString
+		if err := tx.QueryRow(r.Context(), `SELECT notes FROM logistics_transports WHERE id = $1`, id).Scan(&existingNotes); err == nil {
+			if existingNotes.Valid {
+				notesVal = existingNotes.String
+			}
+		}
+	}
+
 	tag, err := tx.Exec(r.Context(),
 		`UPDATE logistics_transports
-         SET pickup_location = $1, destination = $2, passenger_count = $3, scheduled_at = $4, event_id = $5, season_id = $6
-         WHERE id = $7`,
-		pickup, dest, payload.PassengerCount, scheduledAt, payload.EventID, seasonID, id,
+         SET pickup_location = $1, destination = $2, passenger_count = $3, scheduled_at = $4, notes = $5, event_id = $6, season_id = $7
+         WHERE id = $8`,
+		pickup, dest, payload.PassengerCount, scheduledAt, notesVal, payload.EventID, seasonID, id,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update transport")
@@ -748,20 +803,22 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// replace vehicles
-	if _, err := tx.Exec(r.Context(), `DELETE FROM logistics_transport_vehicles WHERE transport_id = $1`, id); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to clear vehicles")
-		return
-	}
-	if len(payload.VehicleIDs) > 0 {
-		eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, payload.VehicleIDs)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
+	// replace vehicles only when vehicle_ids are provided.
+	if payload.VehicleIDs != nil {
+		if _, err := tx.Exec(r.Context(), `DELETE FROM logistics_transport_vehicles WHERE transport_id = $1`, id); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to clear vehicles")
 			return
 		}
-		if err := h.attachEventVehicles(r.Context(), tx, id, eventVehicles); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "failed to save vehicles")
-			return
+		if len(*payload.VehicleIDs) > 0 {
+			eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, *payload.VehicleIDs)
+			if err != nil {
+				httpx.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := h.attachEventVehicles(r.Context(), tx, id, eventVehicles); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to save vehicles")
+				return
+			}
 		}
 	}
 
@@ -988,6 +1045,7 @@ type Transport struct {
 	Destination    string             `json:"destination"`
 	PassengerCount int                `json:"passenger_count"`
 	ScheduledAt    *time.Time         `json:"scheduled_at,omitempty"`
+	Notes          string             `json:"notes,omitempty"`
 	EventID        *int64             `json:"event_id,omitempty"`
 	SeasonID       *int64             `json:"season_id,omitempty"`
 	Vehicles       []TransportVehicle `json:"vehicles"`
@@ -995,7 +1053,7 @@ type Transport struct {
 }
 
 func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, scheduled_at, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list transports")
 		return
@@ -1007,9 +1065,27 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var t Transport
-		if err := rows.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &t.ScheduledAt, &t.EventID, &t.SeasonID, &t.CreatedAt); err != nil {
+		var notes sql.NullString
+		var eventID sql.NullInt64
+		var seasonID sql.NullInt64
+		var scheduledAt sql.NullTime
+		if err := rows.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse transport")
 			return
+		}
+		if scheduledAt.Valid {
+			t.ScheduledAt = &scheduledAt.Time
+		}
+		if notes.Valid {
+			t.Notes = notes.String
+		}
+		if eventID.Valid {
+			val := eventID.Int64
+			t.EventID = &val
+		}
+		if seasonID.Valid {
+			val := seasonID.Int64
+			t.SeasonID = &val
 		}
 		transports = append(transports, t)
 		transportIDs = append(transportIDs, t.ID)
@@ -1036,12 +1112,23 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 	for vehicleRows.Next() {
 		var transportID int64
 		var v TransportVehicle
-		var eventVehicleID *int64
-		if err := vehicleRows.Scan(&transportID, &v.Name, &v.Driver, &v.PassengerCapacity, &v.Notes, &eventVehicleID); err != nil {
+		var driver sql.NullString
+		var notes sql.NullString
+		var eventVehicleID sql.NullInt64
+		if err := vehicleRows.Scan(&transportID, &v.Name, &driver, &v.PassengerCapacity, &notes, &eventVehicleID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse vehicle")
 			return
 		}
-		v.EventVehicleID = eventVehicleID
+		if driver.Valid {
+			v.Driver = driver.String
+		}
+		if notes.Valid {
+			v.Notes = notes.String
+		}
+		if eventVehicleID.Valid {
+			val := eventVehicleID.Int64
+			v.EventVehicleID = &val
+		}
 		vehicleMap[transportID] = append(vehicleMap[transportID], v)
 	}
 
@@ -1058,6 +1145,7 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		Destination    string             `json:"destination"`
 		PassengerCount int                `json:"passenger_count"`
 		ScheduledAt    string             `json:"scheduled_at"`
+		Notes          string             `json:"notes"`
 		EventID        int64              `json:"event_id"`
 		VehicleIDs     []int64            `json:"vehicle_ids"`
 		Vehicles       []TransportVehicle `json:"vehicles"`
@@ -1083,6 +1171,7 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
 		return
 	}
+	notes := strings.TrimSpace(payload.Notes)
 
 	var scheduledAt *time.Time
 	if payload.ScheduledAt != "" {
@@ -1109,10 +1198,10 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 
 	var transport Transport
 	row := tx.QueryRow(r.Context(),
-		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, scheduled_at, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, created_at`,
-		pickup, dest, payload.PassengerCount, scheduledAt, payload.EventID, seasonID,
+		pickup, dest, payload.PassengerCount, scheduledAt, notes, payload.EventID, seasonID,
 	)
 	if err := row.Scan(&transport.ID, &transport.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create transport")
@@ -1123,6 +1212,7 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	transport.Destination = dest
 	transport.PassengerCount = payload.PassengerCount
 	transport.ScheduledAt = scheduledAt
+	transport.Notes = notes
 	transport.EventID = &payload.EventID
 	transport.SeasonID = seasonID
 

@@ -4,6 +4,7 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { Meal, deleteMeal, getMeal, updateMeal } from '../api/logistics';
 import { Event, listEvents } from '../api/events';
+const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
 const LogisticsMealDetailPage = () => {
   const { mealId } = useParams();
@@ -22,6 +23,7 @@ const LogisticsMealDetailPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const complete = hasText(form.name) && hasText(form.location) && hasText(form.scheduled_at);
 
   const closestEventDate = (current?: string) => {
     const ev = events.find((e) => e.id === Number(form.event_id));
@@ -103,7 +105,7 @@ const LogisticsMealDetailPage = () => {
     setMessage(null);
     try {
       await deleteMeal(meal.id);
-      navigate('/logistics/meals');
+      navigate(-1);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to delete meal');
       setDeleting(false);
@@ -118,7 +120,17 @@ const LogisticsMealDetailPage = () => {
     <section className="stack">
       <header className="page-header">
         <div>
-          <h2>{meal.name}</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>{meal.name}</h2>
+            <span
+              className={`badge ${complete ? 'success' : 'danger'}`}
+              aria-label={complete ? 'Complete' : 'Missing info'}
+              title={complete ? 'Complete' : 'Missing info'}
+              style={{ minWidth: '2.4ch', textAlign: 'center' }}
+            >
+              {complete ? '✓' : '!'}
+            </span>
+          </div>
           {meal.location && <p className="muted">{meal.location}</p>}
         </div>
         <div className="card-actions">
@@ -159,7 +171,7 @@ const LogisticsMealDetailPage = () => {
               ))}
             </select>
           </label>
-          <label className="form-field">
+          <label className={`form-field ${!form.name.trim() ? 'field-missing' : ''}`}>
             <span>Name</span>
             <input
               type="text"

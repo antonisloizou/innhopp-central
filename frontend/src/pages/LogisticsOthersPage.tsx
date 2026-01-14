@@ -76,7 +76,14 @@ const LogisticsOthersPage = () => {
       </header>
 
       <article className="card">
-        <div className="form-grid">
+        <div
+          className="form-grid"
+          style={{
+            gridTemplateColumns: 'minmax(140px, 0.25fr) minmax(160px, 0.5fr)',
+            alignItems: 'end',
+            gap: '0.75rem'
+          }}
+        >
           <label className="form-field">
             <span>Season</span>
             <select
@@ -85,6 +92,7 @@ const LogisticsOthersPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
+              style={{ width: '100%', minWidth: '140px', maxWidth: '180px' }}
             >
               <option value="">All seasons</option>
               {seasons.map((s) => (
@@ -96,7 +104,11 @@ const LogisticsOthersPage = () => {
           </label>
           <label className="form-field">
             <span>Event</span>
-            <select value={selectedEvent} onChange={(e) => setSelectedEvent(e.target.value)}>
+            <select
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+              style={{ width: '100%', minWidth: '160px' }}
+            >
               <option value="">All events</option>
               {filteredEvents.map((ev) => (
                 <option key={ev.id} value={ev.id}>
@@ -126,21 +138,29 @@ const LogisticsOthersPage = () => {
         ) : (
           <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
             {filteredOthers.map((entry) => (
-              <li key={entry.id}>
+              <li key={entry.id} style={{ width: '100%' }}>
                 <Link
                   to={`/logistics/others/${entry.id}`}
                   className="card-link"
-                  style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr auto',
+                      alignItems: 'center',
+                      gap: '0.75rem'
+                    }}
+                  >
                     <strong>{entry.name}</strong>
-                    <span className="badge neutral">{entry.event_id ? events.find((e) => e.id === entry.event_id)?.name || `Event #${entry.event_id}` : 'Unassigned'}</span>
+                    <span
+                      className="badge"
+                      style={{ backgroundColor: '#2b8a3e', color: '#fff', justifySelf: 'center' }}
+                    >
+                      {entry.event_id ? events.find((e) => e.id === entry.event_id)?.name || `Event #${entry.event_id}` : 'Unassigned'}
+                    </span>
                   </div>
-                  <div className="muted" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                    {entry.coordinates ? `Coords: ${entry.coordinates}` : 'Coords: n/a'}
-                    {entry.scheduled_at ? `• ${formatDateTime(entry.scheduled_at)}` : ''}
-                  </div>
-                  {entry.description && <div className="muted">Description: {entry.description}</div>}
+                  <div className="muted">{entry.scheduled_at ? formatDateTime(entry.scheduled_at) : 'No date set'}</div>
                   {entry.notes && <div className="muted">Notes: {entry.notes}</div>}
                 </Link>
               </li>

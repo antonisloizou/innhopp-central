@@ -109,7 +109,6 @@ const LogisticsOtherCreatePage = () => {
               value={form.name}
               onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
               required
-              required
             />
           </label>
           <label className="form-field">

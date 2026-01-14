@@ -5,6 +5,8 @@ import 'flatpickr/dist/flatpickr.css';
 import { getOther, updateOther, deleteOther, createOther } from '../api/logistics';
 import { listEvents, Event } from '../api/events';
 
+const hasText = (value?: string | null) => !!value && value.trim().length > 0;
+
 const LogisticsOtherDetailPage = () => {
   const { otherId } = useParams();
   const navigate = useNavigate();
@@ -25,6 +27,8 @@ const LogisticsOtherDetailPage = () => {
   const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
   const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
+  const missingName = !form.name.trim();
+  const complete = hasText(form.name) && hasText(form.coordinates) && hasText(form.scheduled_at);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +113,7 @@ const LogisticsOtherDetailPage = () => {
     if (!window.confirm('Delete this entry?')) return;
     try {
       await deleteOther(Number(otherId));
-      navigate('/logistics/others');
+      navigate(-1);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to delete entry');
     }
@@ -121,9 +125,25 @@ const LogisticsOtherDetailPage = () => {
     <section className="stack">
       <header className="page-header">
         <div>
-          <h2>Other logistics</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>Other logistics</h2>
+            <span
+              className={`badge ${complete ? 'success' : 'danger'}`}
+              aria-label={complete ? 'Complete' : 'Missing info'}
+              title={complete ? 'Complete' : 'Missing info'}
+              style={{ minWidth: '2.4ch', textAlign: 'center' }}
+            >
+              {complete ? '✓' : '!'}
+            </span>
+          </div>
         </div>
         <div className="card-actions">
+          <button className="ghost" type="button" onClick={handleCopy} disabled={copying || submitting}>
+            {copying ? 'Copying…' : 'Make a copy'}
+          </button>
+          <button className="ghost danger" type="button" onClick={handleDelete}>
+            Delete
+          </button>
           <button
             className="ghost"
             type="button"
@@ -131,12 +151,6 @@ const LogisticsOtherDetailPage = () => {
             style={{ fontWeight: 700, fontSize: '1.05rem' }}
           >
             Back
-          </button>
-          <button className="ghost" type="button" onClick={handleCopy} disabled={copying || submitting}>
-            {copying ? 'Copying…' : 'Make a copy'}
-          </button>
-          <button className="ghost danger" type="button" onClick={handleDelete}>
-            Delete
           </button>
         </div>
       </header>
@@ -158,13 +172,12 @@ const LogisticsOtherDetailPage = () => {
               ))}
             </select>
           </label>
-          <label className="form-field">
+          <label className={`form-field ${missingName ? 'field-missing' : ''}`}>
             <span>Name</span>
             <input
               type="text"
               value={form.name}
               onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-              required
               required
             />
           </label>

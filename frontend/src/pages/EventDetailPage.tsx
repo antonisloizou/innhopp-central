@@ -7,11 +7,15 @@ import {
   Innhopp,
   EventStatus,
   InnhoppInput,
+  InnhoppImage,
+  Accommodation,
   LandOwner,
   LandingArea,
   Season,
+  copyEvent,
   deleteEvent,
   getEvent,
+  listEvents,
   listSeasons,
   updateEvent
 } from '../api/events';
@@ -24,8 +28,19 @@ import {
 import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '../api/airfields';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { roleOptions } from '../utils/roles';
+import { formatMetersWithFeet } from '../utils/units';
 import { createAccommodation, listAccommodations } from '../api/events';
-import { Transport, listTransports, createTransport, CreateTransportPayload, OtherLogistic, listOthers, createOther } from '../api/logistics';
+import {
+  Transport,
+  listTransports,
+  createTransport,
+  CreateTransportPayload,
+  OtherLogistic,
+  listOthers,
+  createOther,
+  Meal,
+  listMeals
+} from '../api/logistics';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -53,6 +68,7 @@ type InnhoppFormRow = {
   minimum_requirements?: string;
   land_owners: LandOwnerForm[];
   land_owner_permission?: boolean;
+  image_files: InnhoppImage[];
 };
 
 type LandingAreaForm = {
@@ -128,6 +144,8 @@ const formatDateTime24h = (value?: string | null) => {
   });
 };
 
+const normalizeName = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim().toLowerCase();
+
 const emptyLandingArea = (): LandingAreaForm => ({
   name: '',
   description: '',
@@ -200,7 +218,8 @@ const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
     rescue_boat: i.rescue_boat ?? undefined,
     minimum_requirements: i.minimum_requirements || '',
     land_owners: toLandOwnerForms(i.land_owners),
-    land_owner_permission: i.land_owner_permission ?? undefined
+    land_owner_permission: i.land_owner_permission ?? undefined,
+    image_files: Array.isArray(i.image_files) ? i.image_files.filter((img) => !!img?.data) : []
   }));
 };
 
@@ -213,6 +232,7 @@ const EventDetailPage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
+  const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [participantIds, setParticipantIds] = useState<number[]>([]);
   const [airfieldIds, setAirfieldIds] = useState<number[]>([]);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('');
@@ -258,6 +278,9 @@ const EventDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const highlightFrame = { boxShadow: 'inset 0 0 0 2px #3b82f6', borderRadius: '8px' };
+  const listItemPadding = { padding: '0.4rem 0.5rem', borderRadius: '8px' };
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
   const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
@@ -280,28 +303,38 @@ const EventDetailPage = () => {
     },
     []
   );
-  const currentSignature = useMemo(
-    () => buildSignature(eventForm, participantIds, airfieldIds, innhopps),
-    [buildSignature, eventForm, participantIds, airfieldIds, innhopps]
-  );
+const currentSignature = useMemo(
+  () => buildSignature(eventForm, participantIds, airfieldIds, innhopps),
+  [buildSignature, eventForm, participantIds, airfieldIds, innhopps]
+);
+  type AccommodationItem = {
+    id?: number;
+    name: string;
+    capacity?: number;
+    coordinates?: string | null;
+    booked?: boolean | null;
+    check_in_at?: string | null;
+    check_out_at?: string | null;
+    notes?: string | null;
+    created_at?: string;
+  };
   const [airfieldForm, setAirfieldForm] = useState({
     name: '',
     elevation: '',
     coordinates: '',
     description: ''
   });
-  const [accommodations, setAccommodations] = useState<
-    {
-      id?: number;
-      name: string;
-      capacity?: number;
-      coordinates?: string;
-      booked?: boolean;
-      check_in_at?: string;
-      check_out_at?: string;
-      notes?: string;
-    }[]
-  >([]);
+  const [accommodations, setAccommodations] = useState<AccommodationItem[]>([]);
+  const accommodationDefaults: AccommodationItem = {
+    name: '',
+    capacity: undefined,
+    coordinates: null,
+    booked: null,
+    check_in_at: null,
+    check_out_at: null,
+    notes: null,
+    created_at: ''
+  };
   const [showAccommodationForm, setShowAccommodationForm] = useState(false);
   const [accommodationForm, setAccommodationForm] = useState({
     name: '',
@@ -311,11 +344,12 @@ const EventDetailPage = () => {
     check_in_at: '',
     check_out_at: '',
     notes: ''
-  });
-  const [transports, setTransports] = useState<Transport[]>([]);
+});
+const [transports, setTransports] = useState<Transport[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
+  const [meals, setMeals] = useState<Meal[]>([]);
   const [showTransportForm, setShowTransportForm] = useState(false);
-  const [transportForm, setTransportForm] = useState({
+const [transportForm, setTransportForm] = useState({
     pickup_location: '',
     destination: '',
     passenger_count: '',
@@ -328,10 +362,48 @@ const EventDetailPage = () => {
     scheduled_at: '',
     description: '',
     notes: ''
-  });
-  const missingAirfieldCoords = !hasText(airfieldForm.coordinates);
-  const missingAccommodationCoords = !hasText(accommodationForm.coordinates);
-  const missingOtherCoords = !hasText(otherForm.coordinates);
+});
+const missingAirfieldCoords = !hasText(airfieldForm.coordinates);
+const missingAccommodationCoords = !hasText(accommodationForm.coordinates);
+const missingOtherCoords = !hasText(otherForm.coordinates);
+  const sortedAccommodations = useMemo(() => {
+    const list = Array.isArray(accommodations) ? [...accommodations] : [];
+    const timeValue = (acc: AccommodationItem) => {
+      const iso = acc.check_in_at || acc.check_out_at || acc.created_at || '';
+      const t = iso ? new Date(iso).getTime() : Number.POSITIVE_INFINITY;
+      return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+    };
+    return list.sort((a, b) => {
+      const diff = timeValue(a) - timeValue(b);
+      if (diff !== 0) return diff;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [accommodations]);
+  const sortedMeals = useMemo(() => {
+    const list = Array.isArray(meals) ? [...meals] : [];
+    return list.sort((a, b) => {
+      const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+      const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+      if (aTime !== bTime) return aTime - bTime;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [meals]);
+  const locationCoordinates = useCallback(
+    (name: string | null | undefined) => {
+      const target = normalizeName(name || '');
+      if (!target) return null;
+      const inn = eventData?.innhopps?.find((i) => normalizeName(i.name) === target);
+      if (inn?.coordinates) return inn.coordinates;
+      const acc = accommodations.find((a) => normalizeName(a.name || '') === target);
+      if (acc?.coordinates) return acc.coordinates;
+      const other = others.find((o) => normalizeName(o.name || '') === target);
+      if (other?.coordinates) return other.coordinates;
+      const af = airfields.find((a) => normalizeName(a.name || '') === target);
+      if (af?.coordinates) return af.coordinates;
+      return null;
+    },
+    [accommodations, airfields, eventData?.innhopps, others]
+  );
   type SectionKey =
     | 'details'
     | 'innhopps'
@@ -340,6 +412,7 @@ const EventDetailPage = () => {
     | 'staff'
     | 'accommodations'
     | 'transports'
+    | 'meals'
     | 'others';
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
     details: true,
@@ -349,6 +422,7 @@ const EventDetailPage = () => {
     staff: false,
     accommodations: false,
     transports: false,
+    meals: false,
     others: false
   });
   const openSectionsRef = useRef(openSections);
@@ -448,7 +522,8 @@ const EventDetailPage = () => {
         rescue_boat: copy.rescue_boat ?? undefined,
         minimum_requirements: copy.minimum_requirements || '',
         land_owners: toLandOwnerForms(copy.land_owners),
-        land_owner_permission: copy.land_owner_permission ?? undefined
+        land_owner_permission: copy.land_owner_permission ?? undefined,
+        image_files: Array.isArray(copy.image_files) ? copy.image_files.filter((img) => !!img?.data) : []
       }
     ]);
     copyInnhoppHandled.current = true;
@@ -484,6 +559,24 @@ const EventDetailPage = () => {
       setMessage(err instanceof Error ? err.message : 'Failed to create transport');
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadEvents = async () => {
+      try {
+        const resp = await listEvents();
+        if (!cancelled && Array.isArray(resp)) {
+          setAllEvents(resp);
+        }
+      } catch {
+        // ignore event list errors for dropdown grouping
+      }
+    };
+    loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const transportLocationGroups = useMemo(() => {
     const groups: { label: string; options: { value: string; label: string }[] }[] = [];
@@ -622,7 +715,7 @@ const EventDetailPage = () => {
     const loadTransportsAndOthers = async () => {
       if (!eventId) return;
       try {
-        const [transportData, otherData] = await Promise.all([listTransports(), listOthers()]);
+        const [transportData, otherData, mealData] = await Promise.all([listTransports(), listOthers(), listMeals()]);
         if (cancelled) return;
         setTransports(
           Array.isArray(transportData)
@@ -632,10 +725,12 @@ const EventDetailPage = () => {
         setOthers(
           Array.isArray(otherData) ? otherData.filter((o) => o.event_id === Number(eventId)) : []
         );
+        setMeals(Array.isArray(mealData) ? mealData.filter((m) => m.event_id === Number(eventId)) : []);
       } catch {
         if (!cancelled) {
           setTransports([]);
           setOthers([]);
+          setMeals([]);
         }
       }
     };
@@ -736,12 +831,35 @@ const EventDetailPage = () => {
   const participantLabel = (id: number) =>
     participants.find((p) => p.id === id)?.full_name || `Participant #${id}`;
 
-  const availableParticipants = participants.filter((p) => {
-    const roles = Array.isArray(p.roles) ? p.roles : [];
-    const isStaff = roles.includes('Staff');
-    return !participantIds.includes(p.id) && !isStaff;
-  });
+  const availableParticipants = participants
+    .filter((p) => {
+      const roles = Array.isArray(p.roles) ? p.roles : [];
+      const isStaff = roles.includes('Staff');
+      return !participantIds.includes(p.id) && !isStaff;
+    })
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
   const availableAirfields = airfields.filter((a) => !airfieldIds.includes(a.id));
+  const groupedTakeoffAirfields = useMemo(() => {
+    const groups = new Map<string, { label: string; options: { key: string; value: number; label: string }[] }>();
+    airfields.forEach((af) => {
+      const relatedEvents = allEvents.filter((ev) => Array.isArray(ev.airfield_ids) && ev.airfield_ids.includes(af.id));
+      const locations = relatedEvents.length
+        ? relatedEvents.map((ev) => ev.location || 'Location TBD')
+        : ['Unassigned location'];
+      locations.forEach((loc, idx) => {
+        const label = loc || 'Location TBD';
+        if (!groups.has(label)) {
+          groups.set(label, { label, options: [] });
+        }
+        groups.get(label)!.options.push({
+          key: `${af.id}-${idx}-${label}`,
+          value: af.id,
+          label: `${af.name}${af.elevation != null ? ` (${af.elevation} m)` : ''}`
+        });
+      });
+    });
+    return Array.from(groups.values());
+  }, [airfields, allEvents]);
 
   useEffect(() => {
     if (saved && currentSignature !== lastSavedSignature) {
@@ -793,7 +911,12 @@ const EventDetailPage = () => {
             rescue_boat: row.rescue_boat,
             minimum_requirements: row.minimum_requirements?.trim(),
             land_owners: formatLandOwnersForPayload(row.land_owners || []),
-            land_owner_permission: row.land_owner_permission
+            land_owner_permission: row.land_owner_permission,
+            image_files: (row.image_files || []).map((img) => ({
+              name: img.name?.trim() || undefined,
+              mime_type: img.mime_type?.trim() || undefined,
+              data: img.data
+            }))
           }))
       };
       const updated = await updateEvent(eventData.id, payload);
@@ -848,7 +971,7 @@ const EventDetailPage = () => {
       setTakeoffFormMode((prev) => {
         const next = { ...prev };
         delete next[index];
-        return next;
+        return next as Record<number, 'new' | 'existing'>;
       });
       return;
     }
@@ -863,7 +986,11 @@ const EventDetailPage = () => {
       delete next[index];
       return next;
     });
-    setTakeoffFormMode((prev) => ({ ...prev, [index]: undefined }));
+    setTakeoffFormMode((prev) => {
+      const next = { ...prev };
+      delete next[index];
+      return next as Record<number, 'new' | 'existing'>;
+    });
     const selected = airfields.find((a) => a.id === id);
     if (selected) {
       setTakeoffDrafts((prev) => ({
@@ -931,20 +1058,18 @@ const EventDetailPage = () => {
     await persistEvent(next, airfieldIds);
   };
 
-  const staffParticipants = useMemo(
-    () =>
-      participantIds.filter((id) => {
-        const roles = participants.find((p) => p.id === id)?.roles || [];
-        return roles.includes('Staff') && roles.includes('Skydiver');
-      }),
-    [participantIds, participants]
-  );
+  const staffParticipants = useMemo(() => {
+    const staffProfiles = participantIds
+      .map((id) => participants.find((p) => p.id === id))
+      .filter((p): p is ParticipantProfile => !!p && Array.isArray(p.roles) && p.roles.includes('Staff'));
+    return staffProfiles.sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
+  }, [participantIds, participants]);
 
   const availableStaff = useMemo(() => {
     return participants.filter((p) => {
       if (participantIds.includes(p.id)) return false;
       const roles = Array.isArray(p.roles) ? p.roles : [];
-      return roles.includes('Staff') && roles.includes('Skydiver');
+      return roles.includes('Staff');
     });
   }, [participants, participantIds]);
 
@@ -962,7 +1087,7 @@ const EventDetailPage = () => {
     setAddingStaff(true);
     setMessage(null);
     try {
-      const roles = staffForm.roles && staffForm.roles.length > 0 ? staffForm.roles : ['Participant', 'Skydiver', 'Staff'];
+      const roles = staffForm.roles && staffForm.roles.length > 0 ? staffForm.roles : ['Participant', 'Staff'];
       const payload: CreateParticipantPayload = {
         full_name: staffForm.full_name.trim(),
         email: staffForm.email.trim(),
@@ -972,18 +1097,20 @@ const EventDetailPage = () => {
         roles
       };
       const created = await createParticipantProfile(payload);
+      const nextParticipantIds = [...participantIds, created.id];
       setParticipants((prev) => [...prev, created]);
-      setParticipantIds((prev) => [...prev, created.id]);
+      setParticipantIds(nextParticipantIds);
+      await persistEvent(nextParticipantIds, airfieldIds);
       setStaffForm({
         full_name: '',
         email: '',
         phone: '',
         experience_level: '',
         emergency_contact: '',
-        roles: ['Participant', 'Skydiver', 'Staff']
+        roles: ['Participant', 'Staff']
       });
       setShowStaffForm(false);
-      setMessage('Staff participant added. Save to persist with event.');
+      setMessage('Staff participant added and saved to event.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add staff participant');
     } finally {
@@ -1061,7 +1188,8 @@ const EventDetailPage = () => {
         rescue_boat: undefined,
         minimum_requirements: '',
         land_owners: [],
-        land_owner_permission: undefined
+        land_owner_permission: undefined,
+        image_files: []
       }
     ]);
   };
@@ -1153,6 +1281,8 @@ const EventDetailPage = () => {
     return <p className="error-text">Event not found.</p>;
   }
 
+  const pastEvent = eventData.status === 'past';
+
   const handleDelete = async () => {
     if (!eventData || deleting) return;
     if (!window.confirm('Are you sure you want to delete this event?')) return;
@@ -1167,6 +1297,20 @@ const EventDetailPage = () => {
     }
   };
 
+  const handleCopy = async () => {
+    if (!eventData || copying) return;
+    setCopying(true);
+    setMessage(null);
+    try {
+      const cloned = await copyEvent(eventData.id);
+      navigate(`/events/${cloned.id}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to copy event');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   return (
     <section>
       <header className="page-header">
@@ -1175,20 +1319,21 @@ const EventDetailPage = () => {
             <h2 style={{ margin: 0 }}>{eventData.name}</h2>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-              {(() => {
-                const totalSlots = eventData.slots ?? 0;
-                const nonStaffCount = participantIds.reduce((acc, id) => {
-                  const roles = participants.find((p) => p.id === id)?.roles || [];
-                  return roles.includes('Staff') ? acc : acc + 1;
-                }, 0);
-                const remaining = Math.max(totalSlots - nonStaffCount, 0);
-                const isFull = totalSlots > 0 && remaining === 0;
-                return (
-                  <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                    {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                  </span>
-                );
-              })()}
+              {!pastEvent &&
+                (() => {
+                  const totalSlots = eventData.slots ?? 0;
+                  const nonStaffCount = participantIds.reduce((acc, id) => {
+                    const roles = participants.find((p) => p.id === id)?.roles || [];
+                    return roles.includes('Staff') ? acc : acc + 1;
+                  }, 0);
+                  const remaining = Math.max(totalSlots - nonStaffCount, 0);
+                  const isFull = remaining === 0;
+                  return (
+                    <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                      {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                    </span>
+                  );
+                })()}
             </div>
           </div>
           <p className="event-location">{eventData.location || 'Location TBD'}</p>
@@ -1199,21 +1344,28 @@ const EventDetailPage = () => {
             type="button"
             onClick={() => navigate(`/events/${eventData.id}`)}
           >
-            View schedule
+            Schedule
           </button>
           <button
             className="ghost"
             type="button"
             onClick={() => navigate(`/manifests?eventId=${eventData.id}`)}
           >
-            View manifest
+            Manifest
           </button>
-          <button className="ghost" type="button" onClick={() => navigate('/events')}>
-            Back to events
+          <button className="ghost" type="button" onClick={handleCopy} disabled={copying}>
+            {copying ? 'Copying…' : 'Copy'}
           </button>
-            <button className="ghost danger" type="button" onClick={handleDelete} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Delete event'}
-            </button>
+          <button className="ghost danger" type="button" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => navigate('/events')}
+          >
+            Back
+          </button>
         </div>
       </header>
 
@@ -1239,90 +1391,124 @@ const EventDetailPage = () => {
         </header>
         {openSections.details && (
           <form className="form-grid" onSubmit={handleSave}>
-          <label className="form-field">
-            <span>Season</span>
-            <select
-              value={eventForm.season_id}
-              onChange={(e) => setEventForm((prev) => ({ ...prev, season_id: e.target.value }))}
-              required
-            >
-              <option value="">Select season</option>
-              {seasons.map((season) => (
-                <option key={season.id} value={season.id}>
-                  {season.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Name</span>
-            <input
-              type="text"
-              value={eventForm.name}
-              onChange={(e) => setEventForm((prev) => ({ ...prev, name: e.target.value }))}
-              required
-            />
-          </label>
-          <label className="form-field">
-            <span>Location</span>
-            <input
-              type="text"
-              value={eventForm.location}
-              onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value }))}
-              placeholder="The overall location the event takes place"
-            />
-          </label>
-          <label className="form-field">
-            <span>Status</span>
-            <select
-              value={eventForm.status}
-              onChange={(e) => setEventForm((prev) => ({ ...prev, status: e.target.value as EventStatus }))}
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Slots</span>
-            <input
-              type="number"
-              min={0}
-              value={eventForm.slots}
-              onChange={(e) => setEventForm((prev) => ({ ...prev, slots: e.target.value }))}
-              placeholder="Total slots"
-            />
-          </label>
-          <label className="form-field">
-            <span>Starts on</span>
-            <Flatpickr
-              value={eventForm.starts_at ? new Date(`${eventForm.starts_at}T00:00:00`) : undefined}
-              options={{ dateFormat: 'Y-m-d', allowInput: true }}
-              onChange={(dates) => {
-                const date = dates[0];
-                setEventForm((prev) => ({ ...prev, starts_at: date ? formatDateOnly(date) : '' }));
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns:
+                  'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr)',
+                gap: '0.75rem',
+                gridColumn: '1 / -1',
+                alignItems: 'end'
               }}
-            />
-          </label>
-          <label className="form-field">
-            <span>Ends on</span>
-            <Flatpickr
-              value={eventForm.ends_at ? new Date(`${eventForm.ends_at}T00:00:00`) : undefined}
-              options={{ dateFormat: 'Y-m-d', allowInput: true }}
-              onChange={(dates) => {
-                const date = dates[0];
-                setEventForm((prev) => ({ ...prev, ends_at: date ? formatDateOnly(date) : '' }));
-              }}
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className={saveButtonClass} disabled={saving || saved}>
-              {saveButtonLabel}
-            </button>
-            {message && <span className="muted">{message}</span>}
-          </div>
+            >
+              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={eventForm.name}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, name: e.target.value }))}
+                  required
+                />
+              </label>
+              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
+              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 5' }}>
+                <span>Season</span>
+                <select
+                  style={{ width: '100%', minWidth: '120px' }}
+                  value={eventForm.season_id}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, season_id: e.target.value }))}
+                  required
+                >
+                  <option value="">Select season</option>
+                  {seasons.map((season) => (
+                    <option key={season.id} value={season.id}>
+                      {season.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div aria-hidden="true" style={{ gridColumn: '5 / 7' }} />
+
+              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+                <span>Location</span>
+                <input
+                  type="text"
+                  value={eventForm.location}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, location: e.target.value }))}
+                  placeholder="The overall location the event takes place"
+                />
+              </label>
+              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
+              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 5' }}>
+                <span>Status</span>
+                <select
+                  value={eventForm.status}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, status: e.target.value as EventStatus }))}
+                >
+                  {statusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label
+                className="form-field"
+                style={{ margin: 0, gridColumn: '5 / 6', maxWidth: '220px', justifySelf: 'start', width: '100%' }}
+              >
+                <span>Slots</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={eventForm.slots}
+                  onChange={(e) => setEventForm((prev) => ({ ...prev, slots: e.target.value }))}
+                  placeholder="Total slots"
+                  style={{ width: '100%', maxWidth: '220px' }}
+              />
+            </label>
+              <div aria-hidden="true" style={{ gridColumn: '6 / 7' }} />
+
+              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+                <span>Starts on</span>
+                <Flatpickr
+                  value={eventForm.starts_at ? new Date(`${eventForm.starts_at}T00:00:00`) : undefined}
+                  options={{
+                    dateFormat: 'Y-m-d',
+                    altInput: true,
+                    altFormat: 'M j, Y',
+                    allowInput: true
+                  }}
+                  onChange={(dates) => {
+                    const date = dates[0];
+                    setEventForm((prev) => ({ ...prev, starts_at: date ? formatDateOnly(date) : '' }));
+                  }}
+                />
+              </label>
+              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
+              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 6' }}>
+                <span>Ends on</span>
+                <Flatpickr
+                  value={eventForm.ends_at ? new Date(`${eventForm.ends_at}T00:00:00`) : undefined}
+                  options={{
+                    dateFormat: 'Y-m-d',
+                    altInput: true,
+                    altFormat: 'M j, Y',
+                    allowInput: true
+                  }}
+                  onChange={(dates) => {
+                    const date = dates[0];
+                    setEventForm((prev) => ({ ...prev, ends_at: date ? formatDateOnly(date) : '' }));
+                  }}
+                />
+              </label>
+              <div aria-hidden="true" style={{ gridColumn: '6 / 7' }} />
+            </div>
+            <div className="form-actions">
+              <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+                {saveButtonLabel}
+              </button>
+              {message && <span className="muted">{message}</span>}
+            </div>
         </form>
         )}
       </article>
@@ -1363,11 +1549,7 @@ const EventDetailPage = () => {
                   <li
                     key={row.id}
                     id={`innhopp-${row.id}`}
-                    style={
-                      highlightId === `innhopp-${row.id}`
-                        ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                        : undefined
-                    }
+                    style={{ ...listItemPadding, ...(highlightId === `innhopp-${row.id}` ? highlightFrame : {}) }}
                   >
                     <Link
                       to={`/events/${eventData.id}/innhopps/${row.id}`}
@@ -1394,7 +1576,7 @@ const EventDetailPage = () => {
                         <div className="muted">{formatInnhoppSchedule(row.scheduled_at)}</div>
                       )}
                       {row.elevation !== undefined && row.elevation !== null && (
-                        <div className="muted">Elevation: {row.elevation} m</div>
+                        <div className="muted">Elevation: {formatMetersWithFeet(row.elevation)}</div>
                       )}
                       <div className="muted">
                         Takeoff: {takeoff ? takeoff.name : row.takeoff_airfield_id ? `Airfield #${row.takeoff_airfield_id}` : 'Not set'}
@@ -1455,11 +1637,14 @@ const EventDetailPage = () => {
                     >
                       <option value="">Select airfield</option>
                       <option value="__new__">Create new airfield…</option>
-                      {airfields.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                          {a.elevation != null ? ` (${a.elevation} m)` : ''}
-                        </option>
+                      {groupedTakeoffAirfields.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.options.map((opt) => (
+                            <option key={opt.key} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </label>
@@ -1658,11 +1843,7 @@ const EventDetailPage = () => {
                 <li
                   key={id}
                   id={`airfield-${id}`}
-                  style={
-                    highlightId === `airfield-${id}`
-                      ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                      : undefined
-                  }
+                  style={{ ...listItemPadding, ...(highlightId === `airfield-${id}` ? highlightFrame : {}) }}
                 >
                   <Link
                     to={`/airfields/${id}`}
@@ -1682,10 +1863,9 @@ const EventDetailPage = () => {
                     <strong>{airfield?.name || `Airfield #${id}`}</strong>
                     {airfield?.coordinates && <div className="muted">Coords: {airfield.coordinates}</div>}
                   <div className="muted">
-                      Elevation:{' '}
-                      {airfield?.elevation !== undefined ? `${airfield.elevation} m` : 'Unknown'}
-                      {airfield?.description ? ` • ${airfield.description}` : ''}
-                    </div>
+                    Elevation: {airfield?.elevation !== undefined ? formatMetersWithFeet(airfield.elevation) : 'Unknown'}
+                    {airfield?.description ? ` • ${airfield.description}` : ''}
+                  </div>
                   </Link>
                   <button
                     type="button"
@@ -1717,11 +1897,16 @@ const EventDetailPage = () => {
             >
               <option value="">Choose an airfield</option>
               <option value="__new__">Create new airfield…</option>
-              {availableAirfields.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                  {a.coordinates ? ` (${a.coordinates})` : ''}
-                </option>
+              {groupedTakeoffAirfields.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options
+                    .filter((opt) => availableAirfields.some((af) => af.id === opt.value))
+                    .map((opt) => (
+                      <option key={opt.key} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                </optgroup>
               ))}
             </select>
           </label>
@@ -1857,21 +2042,28 @@ const EventDetailPage = () => {
           ) : (
             <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
               {participantIds
-                .filter((id) => {
-                  const roles = participants.find((p) => p.id === id)?.roles || [];
-                  return !roles.includes('Staff');
-                })
-                .map((id) => {
-                  const profile = participants.find((p) => p.id === id);
+                .map((id) => participants.find((p) => p.id === id))
+                .filter(
+                  (profile): profile is ParticipantProfile =>
+                    !!profile && !(Array.isArray(profile.roles) && profile.roles.includes('Staff'))
+                )
+                .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }))
+                .map((profile) => {
+                  const id = profile.id;
+                  const roles = Array.isArray(profile.roles) ? profile.roles : [];
+                  const hasJumpLeader = roles.includes('Jump Leader');
+                  const hasJumpMaster = roles.includes('Jump Master');
+                  const extraRoles = roles.filter((role) => {
+                    if (role === 'Participant' || role === 'Staff') return false;
+                    if (hasJumpLeader && (role === 'Jump Master' || role === 'Skydiver')) return false;
+                    if (hasJumpMaster && role === 'Skydiver') return false;
+                    return true;
+                  });
                   return (
                     <li
                       key={id}
                       id={`participant-${id}`}
-                      style={
-                        highlightId === `participant-${id}`
-                          ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                          : undefined
-                      }
+                      style={{ ...listItemPadding, ...(highlightId === `participant-${id}` ? highlightFrame : {}) }}
                     >
                       <Link
                         to={`/participants/${id}`}
@@ -1893,10 +2085,19 @@ const EventDetailPage = () => {
                         }}
                       >
                         <strong>{participantLabel(id)}</strong>
-                        <div className="muted">{profile?.email || 'No email on file'}</div>
+                        <div className="muted">{profile.email || 'No email on file'}</div>
                         <div className="muted">
-                          Experience: {profile?.experience_level || 'Not provided'}
+                          Experience: {profile.experience_level || 'Not provided'}
                         </div>
+                        {extraRoles.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                            {extraRoles.map((role) => (
+                              <span key={role} className="badge neutral">
+                                {role}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </Link>
                       <button
                         type="button"
@@ -2071,18 +2272,23 @@ const EventDetailPage = () => {
         {openSections.staff && (staffParticipants.length === 0 ? (
           <p className="muted">No staff yet.</p>
         ) : (
-          <ul className="status-list">
-            {staffParticipants.map((id) => {
-              const profile = participants.find((p) => p.id === id);
+          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+            {staffParticipants.map((profile) => {
+              const id = profile.id;
+              const roles = Array.isArray(profile.roles) ? profile.roles : [];
+              const hasJumpLeader = roles.includes('Jump Leader');
+              const hasJumpMaster = roles.includes('Jump Master');
+              const extraRoles = roles.filter((role) => {
+                if (role === 'Participant' || role === 'Staff') return false;
+                if (hasJumpLeader && (role === 'Jump Master' || role === 'Skydiver')) return false;
+                if (hasJumpMaster && role === 'Skydiver') return false;
+                return true;
+              });
               return (
                 <li
                   key={id}
                   id={`staff-${id}`}
-                  style={
-                    highlightId === `staff-${id}`
-                      ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                      : undefined
-                  }
+                  style={{ ...listItemPadding, ...(highlightId === `staff-${id}` ? highlightFrame : {}) }}
                 >
                   <Link
                     to={`/participants/${id}`}
@@ -2100,9 +2306,18 @@ const EventDetailPage = () => {
                     }}
                     state={{ fromEventId: eventId, highlightId: `staff-${id}` }}
                   >
-                    <strong>{participantLabel(id)}</strong>
-                    <div className="muted">{profile?.email || 'No email on file'}</div>
-                    <div className="muted">Experience: {profile?.experience_level || 'Not provided'}</div>
+                    <strong>{profile.full_name || participantLabel(id)}</strong>
+                    <div className="muted">{profile.email || 'No email on file'}</div>
+                    <div className="muted">Experience: {profile.experience_level || 'Not provided'}</div>
+                    {extraRoles.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                        {extraRoles.map((role) => (
+                          <span key={role} className="badge neutral">
+                            {role}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </Link>
                   <button
                     type="button"
@@ -2122,8 +2337,20 @@ const EventDetailPage = () => {
         <div className="form-grid" style={{ marginTop: '1rem' }}>
           <label className="form-field">
             <span>Select staff</span>
-            <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)}>
+            <select
+              value={selectedStaffId}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === '__new__') {
+                  setShowStaffForm(true);
+                  setSelectedStaffId('');
+                } else {
+                  setSelectedStaffId(val);
+                }
+              }}
+            >
               <option value="">Choose staff</option>
+              <option value="__new__">Create new staff…</option>
               {availableStaff.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.full_name} ({p.email || 'No email'})
@@ -2131,7 +2358,7 @@ const EventDetailPage = () => {
               ))}
             </select>
           </label>
-          <div className="form-actions">
+          <div className="form-actions" style={{ gap: '0.5rem', alignItems: 'center' }}>
             <button
               type="button"
               className="primary"
@@ -2140,15 +2367,16 @@ const EventDetailPage = () => {
             >
               Add
             </button>
-          </div>
-        </div>
-        {!showStaffForm && (
-          <div className="form-actions" style={{ marginTop: '1rem' }}>
-            <button type="button" className="ghost" onClick={() => setShowStaffForm(true)}>
-              Create new staff
+            <button
+              type="button"
+              className={saveButtonClass}
+              onClick={handleSaveAll}
+              disabled={saving || saved}
+            >
+              {saveButtonLabel}
             </button>
           </div>
-        )}
+        </div>
         {showStaffForm && (
           <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateStaffParticipant}>
             <label className="form-field">
@@ -2201,30 +2429,30 @@ const EventDetailPage = () => {
             <div className="form-field" style={{ gridColumn: '1 / -1' }}>
               <span>Roles</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {roleOptions.map((role) => {
-                  const checked = staffForm.roles?.includes(role);
-                  const locked = role === 'Participant' || role === 'Staff';
-                  return (
-                    <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={locked}
-                        onChange={(e) => {
-                          setStaffForm((prev) => {
-                            const current = new Set(prev.roles || []);
-                            if (e.target.checked) {
-                              current.add(role);
-                            } else {
-                              current.delete(role);
-                            }
-                            const next = Array.from(current);
-                            return { ...prev, roles: next.length > 0 ? next : ['Participant', 'Staff'] };
-                          });
-                        }}
-                      />
-                      {role}
-                    </label>
+            {roleOptions.map((role) => {
+              const checked = staffForm.roles?.includes(role);
+              const locked = role === 'Participant' || role === 'Staff';
+              return (
+                <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={locked}
+                    onChange={(e) => {
+                      setStaffForm((prev) => {
+                        const current = new Set(prev.roles || []);
+                        if (e.target.checked) {
+                          current.add(role);
+                        } else {
+                          current.delete(role);
+                        }
+                        const next = Array.from(current);
+                        return { ...prev, roles: next.length > 0 ? next : ['Participant', 'Staff'] };
+                      });
+                    }}
+                  />
+                  {role}
+                </label>
                   );
                 })}
               </div>
@@ -2244,11 +2472,6 @@ const EventDetailPage = () => {
             </div>
           </form>
         )}
-        <div className="form-actions" style={{ marginTop: '0.75rem' }}>
-          <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
-            {saveButtonLabel}
-          </button>
-        </div>
           </>
         )}
       </article>
@@ -2279,16 +2502,15 @@ const EventDetailPage = () => {
         {openSections.accommodations && (
           <>
             {accommodations.length > 0 ? (
-              <ul className="status-list">
-                {accommodations.map((acc, idx) => (
+              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                {sortedAccommodations.map((acc, idx) => (
                   <li
                     key={acc.id || idx}
                     id={`accommodation-${acc.id}`}
-                    style={
-                      highlightId === `accommodation-${acc.id}`
-                        ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                        : undefined
-                    }
+                    style={{
+                      ...listItemPadding,
+                      ...(highlightId === `accommodation-${acc.id}` ? highlightFrame : {})
+                    }}
                   >
                     <Link
                       to={`/events/${eventId}/accommodations/${acc.id}`}
@@ -2327,13 +2549,21 @@ const EventDetailPage = () => {
                           {acc.booked && hasText(acc.coordinates) ? '✓' : 'NOT BOOKED'}
                         </span>
                     </div>
-                    <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+                    <div className="muted" style={{ marginTop: '0.2rem' }}>
                       {acc.capacity ? `Capacity: ${acc.capacity}` : 'Capacity: n/a'}
-                      {acc.check_in_at ? ` • Check-in: ${formatDateTime24h(acc.check_in_at)}` : ''}
-                      {acc.check_out_at ? ` • Check-out: ${formatDateTime24h(acc.check_out_at)}` : ''}
-                      {acc.coordinates ? ` • ${acc.coordinates}` : ''}
-                      {acc.notes ? ` • ${acc.notes}` : ''}
                     </div>
+                    {(acc.check_in_at || acc.check_out_at) && (
+                      <div className="muted" style={{ marginTop: '0.1rem' }}>
+                        {acc.check_in_at ? `${formatDateTime24h(acc.check_in_at)}` : ''}
+                        {acc.check_in_at && acc.check_out_at ? ' — ' : ''}
+                        {acc.check_out_at ? `${formatDateTime24h(acc.check_out_at)}` : ''}
+                      </div>
+                    )}
+                    {acc.notes ? (
+                      <div className="muted" style={{ marginTop: '0.1rem' }}>
+                        {acc.notes}
+                      </div>
+                    ) : null}
                     </Link>
                   </li>
                 ))}
@@ -2534,7 +2764,7 @@ const EventDetailPage = () => {
         {openSections.transports && (
           <>
             {transports.length > 0 ? (
-              <ul className="status-list">
+              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
                 {transports
                   .slice()
                   .sort((a, b) => {
@@ -2542,16 +2772,25 @@ const EventDetailPage = () => {
                     const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
                     return aTime - bTime;
                   })
-                  .map((t) => (
-                  <li
-                    key={t.id}
-                    id={`transport-${t.id}`}
-                    style={
-                      highlightId === `transport-${t.id}`
-                        ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                        : undefined
-                    }
-                  >
+                  .map((t) => {
+                    const pickupCoords = locationCoordinates(t.pickup_location);
+                    const destCoords = locationCoordinates(t.destination);
+                    const hasPassengers = Number.isFinite(t.passenger_count) && t.passenger_count >= 0;
+                    const hasVehicles = Array.isArray((t as any).vehicles) && (t as any).vehicles.length > 0;
+                    const transportComplete =
+                      hasText(t.pickup_location) &&
+                      hasText(t.destination) &&
+                      hasText(t.scheduled_at) &&
+                      hasPassengers &&
+                      hasVehicles &&
+                      hasText(pickupCoords) &&
+                      hasText(destCoords);
+                    return (
+                    <li
+                      key={t.id}
+                      id={`transport-${t.id}`}
+                      style={{ ...listItemPadding, ...(highlightId === `transport-${t.id}` ? highlightFrame : {}) }}
+                    >
                     <Link
                       to={`/logistics/${t.id}`}
                       state={{ fromEventId: eventId, highlightId: `transport-${t.id}` }}
@@ -2588,16 +2827,31 @@ const EventDetailPage = () => {
                         <strong style={{ display: 'block' }}>
                           {t.pickup_location} → {t.destination}
                         </strong>
-                        <span className="badge neutral" style={{ flexShrink: 0 }}>
-                          {t.passenger_count} PAX
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
+                          <span className={`badge ${transportComplete ? 'success' : 'danger'}`} style={{ minWidth: '2.4ch', textAlign: 'center' }}>
+                            {transportComplete ? '✓' : '!'}
+                          </span>
+                          <span className="badge neutral">
+                            {t.passenger_count} PAX
+                          </span>
+                        </div>
                       </div>
                       <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        {t.scheduled_at ? `Scheduled: ${formatDateTime24h(t.scheduled_at)}` : 'Unscheduled'}
+                        {t.scheduled_at ? `${formatDateTime24h(t.scheduled_at)}` : 'Unscheduled'}
                       </div>
+                      {Array.isArray((t as any).vehicles) && (t as any).vehicles.length > 0 ? (
+                        <div className="muted" style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                          {(t as any).vehicles.map((v: any, idx: number) => (
+                            <div key={idx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <strong>{v.name}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </Link>
                   </li>
-                ))}
+                    );
+                  })}
               </ul>
             ) : (
               <p className="muted">No transport routes yet.</p>
@@ -2689,7 +2943,82 @@ const EventDetailPage = () => {
           </button>
         </div>
       </>
-    )}
+        )}
+      </article>
+
+      <article className="card">
+        <header
+          className="card-header"
+          onClick={() => toggleSection('meals')}
+          style={{ cursor: 'pointer' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+            <button
+              className="ghost"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection('meals');
+              }}
+            >
+              {openSections.meals ? '▾' : '▸'}
+            </button>
+            <h3 style={{ margin: 0 }}>Meals</h3>
+          </div>
+          <span className="badge neutral">{meals.length} MEALS</span>
+        </header>
+        {openSections.meals && (
+          <>
+            {meals.length > 0 ? (
+              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                {sortedMeals.map((m) => {
+                  const mealComplete = hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at);
+                  return (
+                        <li
+                          key={m.id}
+                          id={`meal-${m.id}`}
+                          style={{ ...listItemPadding, ...(highlightId === `meal-${m.id}` ? highlightFrame : {}) }}
+                        >
+                      <Link
+                        to={`/logistics/meals/${m.id}`}
+                        state={{ fromEventId: eventId, highlightId: `meal-${m.id}` }}
+                        className="card-link"
+                        style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.2rem', flex: 1 }}
+                        onClick={() => {
+                          if (eventId) {
+                            try {
+                              sessionStorage.setItem(`event-detail-highlight:${eventId}`, `meal-${m.id}`);
+                            } catch {
+                              // ignore
+                            }
+                          }
+                          saveDetailState();
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <strong style={{ flex: 1 }}>{m.name}</strong>
+                          <span
+                            className={`badge ${mealComplete ? 'success' : 'danger'}`}
+                            style={{ minWidth: '2.4ch', textAlign: 'center', flexShrink: 0 }}
+                          >
+                            {mealComplete ? '✓' : '!'}
+                          </span>
+                        </div>
+                        <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          {m.location ? m.location : 'Location required'}
+                          {m.scheduled_at ? `• ${formatDateTime24h(m.scheduled_at)}` : ''}
+                        </div>
+                        {m.notes ? <div className="muted">{m.notes}</div> : null}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="muted">No meals yet.</p>
+            )}
+          </>
+        )}
       </article>
 
       <article className="card">
@@ -2716,22 +3045,27 @@ const EventDetailPage = () => {
         {openSections.others && (
           <>
             {others.length > 0 ? (
-              <ul className="status-list">
-                {others.map((o) => (
-                  <li
-                    key={o.id}
-                    id={`other-${o.id}`}
-                    style={
-                      highlightId === `other-${o.id}`
-                        ? { backgroundColor: '#fff3c4', borderRadius: '6px', padding: '0.25rem' }
-                        : undefined
-                    }
-                  >
+              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                {others
+                  .slice()
+                  .sort((a, b) => {
+                    const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+                    const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+                    return aTime - bTime;
+                  })
+                  .map((o) => {
+                    const otherComplete = hasText(o.name) && hasText(o.coordinates) && hasText(o.scheduled_at);
+                    return (
+                    <li
+                      key={o.id}
+                      id={`other-${o.id}`}
+                      style={{ ...listItemPadding, ...(highlightId === `other-${o.id}` ? highlightFrame : {}) }}
+                    >
                     <Link
                       to={`/logistics/others/${o.id}`}
                       state={{ fromEventId: eventId, highlightId: `other-${o.id}` }}
                       className="card-link"
-                      style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}
+                      style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.25rem', flex: 1 }}
                       onClick={() => {
                         if (eventId) {
                           try {
@@ -2745,16 +3079,21 @@ const EventDetailPage = () => {
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
                         <strong>{o.name}</strong>
+                        <span
+                          className={`badge ${otherComplete ? 'success' : 'danger'}`}
+                          style={{ minWidth: '2.4ch', textAlign: 'center', marginLeft: 'auto', flexShrink: 0 }}
+                        >
+                          {otherComplete ? '✓' : '!'}
+                        </span>
                       </div>
                       <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        {o.coordinates ? `Coords: ${o.coordinates}` : 'Coords required'}
-                        {o.scheduled_at ? `• ${formatDateTime24h(o.scheduled_at)}` : ''}
+                        {o.scheduled_at ? formatDateTime24h(o.scheduled_at) : 'Unscheduled'}
                       </div>
-                      {o.description && <div className="muted">Description: {o.description}</div>}
                       {o.notes && <div className="muted">Notes: {o.notes}</div>}
                     </Link>
                   </li>
-                ))}
+                    );
+                  })}
               </ul>
             ) : (
               <p className="muted">No other logistics yet.</p>

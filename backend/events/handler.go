@@ -55,6 +55,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events", h.createEvent)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events/{eventID}", h.getEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/events/{eventID}", h.updateEvent)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events/{eventID}/copy", h.copyEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/events/{eventID}", h.deleteEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events/{eventID}/innhopps", h.createInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/accommodations", h.listAllAccommodations)
@@ -126,32 +127,39 @@ type LandOwner struct {
 	Email     string `json:"email,omitempty"`
 }
 
+type InnhoppImage struct {
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	Data     string `json:"data,omitempty"`
+}
+
 type Innhopp struct {
-	ID                   int64       `json:"id"`
-	EventID              int64       `json:"event_id"`
-	Sequence             int         `json:"sequence"`
-	Name                 string      `json:"name"`
-	Coordinates          string      `json:"coordinates,omitempty"`
-	TakeoffAirfieldID    *int64      `json:"takeoff_airfield_id,omitempty"`
-	Elevation            *int        `json:"elevation,omitempty"`
-	ScheduledAt          *time.Time  `json:"scheduled_at,omitempty"`
-	Notes                string      `json:"notes,omitempty"`
-	ReasonForChoice      string      `json:"reason_for_choice,omitempty"`
-	AdjustAltimeterAAD   string      `json:"adjust_altimeter_aad,omitempty"`
-	Notam                string      `json:"notam,omitempty"`
-	DistanceByAir        *float64    `json:"distance_by_air,omitempty"`
-	DistanceByRoad       *float64    `json:"distance_by_road,omitempty"`
-	PrimaryLandingArea   LandingArea `json:"primary_landing_area"`
-	SecondaryLandingArea LandingArea `json:"secondary_landing_area"`
-	RiskAssessment       string      `json:"risk_assessment,omitempty"`
-	SafetyPrecautions    string      `json:"safety_precautions,omitempty"`
-	Jumprun              string      `json:"jumprun,omitempty"`
-	Hospital             string      `json:"hospital,omitempty"`
-	RescueBoat           *bool       `json:"rescue_boat,omitempty"`
-	MinimumRequirements  string      `json:"minimum_requirements,omitempty"`
-	LandOwners           []LandOwner `json:"land_owners,omitempty"`
-	LandOwnerPermission  *bool       `json:"land_owner_permission,omitempty"`
-	CreatedAt            time.Time   `json:"created_at"`
+	ID                   int64          `json:"id"`
+	EventID              int64          `json:"event_id"`
+	Sequence             int            `json:"sequence"`
+	Name                 string         `json:"name"`
+	Coordinates          string         `json:"coordinates,omitempty"`
+	TakeoffAirfieldID    *int64         `json:"takeoff_airfield_id,omitempty"`
+	Elevation            *int           `json:"elevation,omitempty"`
+	ScheduledAt          *time.Time     `json:"scheduled_at,omitempty"`
+	Notes                string         `json:"notes,omitempty"`
+	ReasonForChoice      string         `json:"reason_for_choice,omitempty"`
+	AdjustAltimeterAAD   string         `json:"adjust_altimeter_aad,omitempty"`
+	Notam                string         `json:"notam,omitempty"`
+	DistanceByAir        *float64       `json:"distance_by_air,omitempty"`
+	DistanceByRoad       *float64       `json:"distance_by_road,omitempty"`
+	PrimaryLandingArea   LandingArea    `json:"primary_landing_area"`
+	SecondaryLandingArea LandingArea    `json:"secondary_landing_area"`
+	RiskAssessment       string         `json:"risk_assessment,omitempty"`
+	SafetyPrecautions    string         `json:"safety_precautions,omitempty"`
+	Jumprun              string         `json:"jumprun,omitempty"`
+	Hospital             string         `json:"hospital,omitempty"`
+	RescueBoat           *bool          `json:"rescue_boat,omitempty"`
+	MinimumRequirements  string         `json:"minimum_requirements,omitempty"`
+	LandOwners           []LandOwner    `json:"land_owners,omitempty"`
+	LandOwnerPermission  *bool          `json:"land_owner_permission,omitempty"`
+	ImageFiles           []InnhoppImage `json:"image_files,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
 type Manifest struct {
@@ -215,6 +223,7 @@ type innhoppPayload struct {
 	MinimumRequirements  string             `json:"minimum_requirements"`
 	LandOwners           []landOwnerPayload `json:"land_owners"`
 	LandOwnerPermission  *bool              `json:"land_owner_permission"`
+	ImageFiles           []InnhoppImage     `json:"image_files"`
 }
 
 type innhoppInput struct {
@@ -241,6 +250,7 @@ type innhoppInput struct {
 	MinimumRequirements  string
 	LandOwners           []LandOwner
 	LandOwnerPermission  *bool
+	ImageFiles           []InnhoppImage
 }
 
 func decodeEventJSON(r *http.Request, dest any) error {
@@ -644,6 +654,266 @@ func (h *Handler) deleteEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
+	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
+	if err != nil || eventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	ctx := r.Context()
+	original, err := h.fetchEvent(ctx, eventID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "event not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load event")
+		}
+		return
+	}
+
+	innhoppWithImages, err := h.fetchInnhoppsForEvents(ctx, []int64{eventID}, true)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load innhopps")
+		return
+	}
+	if withImages, ok := innhoppWithImages[eventID]; ok {
+		original.Innhopps = withImages
+	}
+
+	accommodations, err := h.fetchAccommodationsForEvent(ctx, eventID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load accommodations")
+		return
+	}
+
+	manifests, err := h.fetchManifestsForEvent(ctx, eventID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load manifests")
+		return
+	}
+
+	logisticsData, err := h.fetchLogisticsForEvent(ctx, eventID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load logistics")
+		return
+	}
+
+	innhoppsInput := make([]innhoppInput, len(original.Innhopps))
+	for i, inn := range original.Innhopps {
+		innhoppsInput[i] = innhoppInput{
+			Sequence:             inn.Sequence,
+			Name:                 strings.TrimSpace(inn.Name),
+			Coordinates:          strings.TrimSpace(inn.Coordinates),
+			Elevation:            inn.Elevation,
+			TakeoffAirfieldID:    inn.TakeoffAirfieldID,
+			ScheduledAt:          inn.ScheduledAt,
+			Notes:                strings.TrimSpace(inn.Notes),
+			ReasonForChoice:      strings.TrimSpace(inn.ReasonForChoice),
+			AdjustAltimeterAAD:   strings.TrimSpace(inn.AdjustAltimeterAAD),
+			Notam:                strings.TrimSpace(inn.Notam),
+			DistanceByAir:        inn.DistanceByAir,
+			DistanceByRoad:       inn.DistanceByRoad,
+			PrimaryLandingArea:   inn.PrimaryLandingArea,
+			SecondaryLandingArea: inn.SecondaryLandingArea,
+			RiskAssessment:       strings.TrimSpace(inn.RiskAssessment),
+			SafetyPrecautions:    strings.TrimSpace(inn.SafetyPrecautions),
+			Jumprun:              strings.TrimSpace(inn.Jumprun),
+			Hospital:             strings.TrimSpace(inn.Hospital),
+			RescueBoat:           inn.RescueBoat,
+			MinimumRequirements:  strings.TrimSpace(inn.MinimumRequirements),
+			LandOwners:           inn.LandOwners,
+			LandOwnerPermission:  inn.LandOwnerPermission,
+			ImageFiles:           inn.ImageFiles,
+		}
+	}
+
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy event")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	newName := strings.TrimSpace(original.Name) + " (Copy)"
+	row := tx.QueryRow(ctx,
+		`INSERT INTO events (season_id, name, location, status, starts_at, ends_at, slots)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, created_at`,
+		original.SeasonID, newName, strings.TrimSpace(original.Location), original.Status, original.StartsAt, original.EndsAt, original.Slots,
+	)
+
+	var created Event
+	created.SeasonID = original.SeasonID
+	created.Name = newName
+	created.Location = strings.TrimSpace(original.Location)
+	created.Status = original.Status
+	created.StartsAt = original.StartsAt
+	created.EndsAt = original.EndsAt
+	created.Slots = original.Slots
+
+	if err := row.Scan(&created.ID, &created.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy event")
+		return
+	}
+
+	if err := replaceEventParticipantsTx(ctx, tx, created.ID, original.ParticipantIDs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy participants")
+		return
+	}
+
+	if err := replaceEventAirfieldsTx(ctx, tx, created.ID, original.AirfieldIDs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy airfields")
+		return
+	}
+
+	if err := replaceEventInnhoppsTx(ctx, tx, created.ID, innhoppsInput); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy innhopps")
+		return
+	}
+
+	for _, acc := range accommodations {
+		var booked interface{}
+		if acc.Booked != nil {
+			booked = *acc.Booked
+		}
+		var coords interface{}
+		if acc.Coordinates != nil && strings.TrimSpace(*acc.Coordinates) != "" {
+			val := strings.TrimSpace(*acc.Coordinates)
+			coords = val
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO event_accommodation (event_id, name, capacity, booked, coordinates, check_in_at, check_out_at, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			created.ID, strings.TrimSpace(acc.Name), acc.Capacity, booked, coords, acc.CheckInAt, acc.CheckOutAt, strings.TrimSpace(acc.Notes),
+		); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy accommodations")
+			return
+		}
+	}
+
+	for _, manifest := range manifests {
+		var newManifestID int64
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO manifests (event_id, load_number, capacity, staff_slots, notes)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id`,
+			created.ID, manifest.LoadNumber, manifest.Capacity, manifest.StaffSlots, strings.TrimSpace(manifest.Notes),
+		).Scan(&newManifestID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy manifests")
+			return
+		}
+		if err := replaceManifestParticipantsTx(ctx, tx, newManifestID, manifest.ParticipantIDs); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy manifest participants")
+			return
+		}
+	}
+
+	vehicleIDMap := make(map[int64]int64)
+	for _, vehicle := range logisticsData.EventVehicles {
+		var newVehicleID int64
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO logistics_event_vehicles (event_id, name, driver, passenger_capacity, notes)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id`,
+			created.ID, strings.TrimSpace(vehicle.Name), strings.TrimSpace(vehicle.Driver), vehicle.PassengerCapacity, strings.TrimSpace(vehicle.Notes),
+		).Scan(&newVehicleID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy vehicles")
+			return
+		}
+		vehicleIDMap[vehicle.ID] = newVehicleID
+	}
+
+	for _, transport := range logisticsData.Transports {
+		var newTransportID int64
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id`,
+			strings.TrimSpace(transport.PickupLocation), strings.TrimSpace(transport.Destination), transport.PassengerCount, transport.ScheduledAt, strings.TrimSpace(transport.Notes), created.ID, created.SeasonID,
+		).Scan(&newTransportID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy transports")
+			return
+		}
+		for _, vehicle := range transport.Vehicles {
+			var mappedEventVehicle interface{}
+			if vehicle.EventVehicleID != nil {
+				if mappedID, ok := vehicleIDMap[*vehicle.EventVehicleID]; ok {
+					mappedEventVehicle = mappedID
+				}
+			}
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO logistics_transport_vehicles (transport_id, name, driver, passenger_capacity, notes, event_vehicle_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+				newTransportID, strings.TrimSpace(vehicle.Name), strings.TrimSpace(vehicle.Driver), vehicle.PassengerCapacity, strings.TrimSpace(vehicle.Notes), mappedEventVehicle,
+			); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to copy transport vehicles")
+				return
+			}
+		}
+	}
+
+	for _, other := range logisticsData.Others {
+		var coords interface{}
+		if other.Coordinates != nil && strings.TrimSpace(*other.Coordinates) != "" {
+			val := strings.TrimSpace(*other.Coordinates)
+			coords = val
+		}
+		var description interface{}
+		if other.Description != nil && strings.TrimSpace(*other.Description) != "" {
+			val := strings.TrimSpace(*other.Description)
+			description = val
+		}
+		var notes interface{}
+		if other.Notes != nil && strings.TrimSpace(*other.Notes) != "" {
+			val := strings.TrimSpace(*other.Notes)
+			notes = val
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO logistics_other (name, coordinates, scheduled_at, description, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			strings.TrimSpace(other.Name), coords, other.ScheduledAt, description, notes, created.ID, created.SeasonID,
+		); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy logistics entries")
+			return
+		}
+	}
+
+	for _, meal := range logisticsData.Meals {
+		var location interface{}
+		if meal.Location != nil && strings.TrimSpace(*meal.Location) != "" {
+			val := strings.TrimSpace(*meal.Location)
+			location = val
+		}
+		var notes interface{}
+		if meal.Notes != nil && strings.TrimSpace(*meal.Notes) != "" {
+			val := strings.TrimSpace(*meal.Notes)
+			notes = val
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO logistics_meals (name, location, scheduled_at, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+			strings.TrimSpace(meal.Name), location, meal.ScheduledAt, notes, created.ID, created.SeasonID,
+		); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to copy meals")
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy event")
+		return
+	}
+
+	cloned, err := h.fetchEvent(ctx, created.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load copied event")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusCreated, cloned)
 }
 
 func (h *Handler) listAccommodations(w http.ResponseWriter, r *http.Request) {
@@ -1217,6 +1487,320 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 	return events[0], nil
 }
 
+type eventVehicleSnapshot struct {
+	ID                int64
+	Name              string
+	Driver            string
+	PassengerCapacity int
+	Notes             string
+}
+
+type transportVehicleSnapshot struct {
+	Name              string
+	Driver            string
+	PassengerCapacity int
+	Notes             string
+	EventVehicleID    *int64
+}
+
+type transportSnapshot struct {
+	PickupLocation string
+	Destination    string
+	PassengerCount int
+	ScheduledAt    *time.Time
+	Notes          string
+	Vehicles       []transportVehicleSnapshot
+}
+
+type otherLogisticSnapshot struct {
+	Name        string
+	Coordinates *string
+	ScheduledAt *time.Time
+	Description *string
+	Notes       *string
+}
+
+type mealSnapshot struct {
+	Name        string
+	Location    *string
+	ScheduledAt *time.Time
+	Notes       *string
+}
+
+type eventLogisticsSnapshot struct {
+	EventVehicles []eventVehicleSnapshot
+	Transports    []transportSnapshot
+	Others        []otherLogisticSnapshot
+	Meals         []mealSnapshot
+}
+
+func (h *Handler) fetchAccommodationsForEvent(ctx context.Context, eventID int64) ([]Accommodation, error) {
+	rows, err := h.db.Query(ctx,
+		`SELECT id, event_id, name, capacity, booked, coordinates, check_in_at, check_out_at, notes, created_at
+         FROM event_accommodation
+         WHERE event_id = $1
+         ORDER BY created_at ASC`,
+		eventID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var accs []Accommodation
+	for rows.Next() {
+		var a Accommodation
+		var coords sql.NullString
+		var booked sql.NullBool
+		if err := rows.Scan(&a.ID, &a.EventID, &a.Name, &a.Capacity, &booked, &coords, &a.CheckInAt, &a.CheckOutAt, &a.Notes, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		if booked.Valid {
+			val := booked.Bool
+			a.Booked = &val
+		}
+		if coords.Valid {
+			val := coords.String
+			a.Coordinates = &val
+		}
+		accs = append(accs, a)
+	}
+
+	return accs, rows.Err()
+}
+
+func (h *Handler) fetchManifestsForEvent(ctx context.Context, eventID int64) ([]Manifest, error) {
+	rows, err := h.db.Query(ctx,
+		`SELECT id, event_id, load_number, capacity, staff_slots, notes, created_at
+         FROM manifests
+         WHERE event_id = $1
+         ORDER BY load_number ASC`,
+		eventID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var manifests []Manifest
+	for rows.Next() {
+		var m Manifest
+		var staff sql.NullInt32
+		if err := rows.Scan(&m.ID, &m.EventID, &m.LoadNumber, &m.Capacity, &staff, &m.Notes, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		if staff.Valid {
+			val := int(staff.Int32)
+			m.StaffSlots = &val
+		}
+		manifests = append(manifests, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(manifests) == 0 {
+		return manifests, nil
+	}
+
+	return h.attachManifestParticipants(ctx, manifests)
+}
+
+func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (eventLogisticsSnapshot, error) {
+	var snapshot eventLogisticsSnapshot
+
+	vehicleRows, err := h.db.Query(ctx,
+		`SELECT id, name, driver, passenger_capacity, notes
+         FROM logistics_event_vehicles
+         WHERE event_id = $1
+         ORDER BY created_at ASC`,
+		eventID,
+	)
+	if err != nil {
+		return snapshot, err
+	}
+	defer vehicleRows.Close()
+
+	for vehicleRows.Next() {
+		var v eventVehicleSnapshot
+		var driver sql.NullString
+		var notes sql.NullString
+		if err := vehicleRows.Scan(&v.ID, &v.Name, &driver, &v.PassengerCapacity, &notes); err != nil {
+			return snapshot, err
+		}
+		if driver.Valid {
+			v.Driver = driver.String
+		}
+		if notes.Valid {
+			v.Notes = notes.String
+		}
+		snapshot.EventVehicles = append(snapshot.EventVehicles, v)
+	}
+	if err := vehicleRows.Err(); err != nil {
+		return snapshot, err
+	}
+
+	transportRows, err := h.db.Query(ctx,
+		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes
+         FROM logistics_transports
+         WHERE event_id = $1
+         ORDER BY created_at ASC`,
+		eventID,
+	)
+	if err != nil {
+		return snapshot, err
+	}
+	defer transportRows.Close()
+
+	var transportIDs []int64
+	for transportRows.Next() {
+		var t transportSnapshot
+		var id int64
+		var scheduled sql.NullTime
+		var notes sql.NullString
+		if err := transportRows.Scan(&id, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduled, &notes); err != nil {
+			return snapshot, err
+		}
+		if scheduled.Valid {
+			ts := scheduled.Time
+			t.ScheduledAt = &ts
+		}
+		if notes.Valid {
+			t.Notes = notes.String
+		}
+		snapshot.Transports = append(snapshot.Transports, t)
+		transportIDs = append(transportIDs, id)
+	}
+	if err := transportRows.Err(); err != nil {
+		return snapshot, err
+	}
+
+	if len(transportIDs) > 0 {
+		vehicleRows, err := h.db.Query(ctx,
+			`SELECT transport_id, name, driver, passenger_capacity, notes, event_vehicle_id
+             FROM logistics_transport_vehicles
+             WHERE transport_id = ANY($1)`,
+			transportIDs,
+		)
+		if err != nil {
+			return snapshot, err
+		}
+		defer vehicleRows.Close()
+
+		vehicleMap := make(map[int64][]transportVehicleSnapshot)
+		for vehicleRows.Next() {
+			var transportID int64
+			var v transportVehicleSnapshot
+			var driver sql.NullString
+			var notes sql.NullString
+			var eventVehicleID sql.NullInt64
+			if err := vehicleRows.Scan(&transportID, &v.Name, &driver, &v.PassengerCapacity, &notes, &eventVehicleID); err != nil {
+				return snapshot, err
+			}
+			if driver.Valid {
+				v.Driver = driver.String
+			}
+			if notes.Valid {
+				v.Notes = notes.String
+			}
+			if eventVehicleID.Valid {
+				val := eventVehicleID.Int64
+				v.EventVehicleID = &val
+			}
+			vehicleMap[transportID] = append(vehicleMap[transportID], v)
+		}
+		if err := vehicleRows.Err(); err != nil {
+			return snapshot, err
+		}
+		for i := range snapshot.Transports {
+			snapshot.Transports[i].Vehicles = vehicleMap[transportIDs[i]]
+		}
+	}
+
+	otherRows, err := h.db.Query(ctx,
+		`SELECT name, coordinates, scheduled_at, description, notes
+         FROM logistics_other
+         WHERE event_id = $1
+         ORDER BY created_at ASC`,
+		eventID,
+	)
+	if err != nil {
+		return snapshot, err
+	}
+	defer otherRows.Close()
+
+	for otherRows.Next() {
+		var o otherLogisticSnapshot
+		var coords sql.NullString
+		var scheduled sql.NullTime
+		var description sql.NullString
+		var notes sql.NullString
+		if err := otherRows.Scan(&o.Name, &coords, &scheduled, &description, &notes); err != nil {
+			return snapshot, err
+		}
+		if coords.Valid {
+			val := coords.String
+			o.Coordinates = &val
+		}
+		if scheduled.Valid {
+			t := scheduled.Time
+			o.ScheduledAt = &t
+		}
+		if description.Valid {
+			val := description.String
+			o.Description = &val
+		}
+		if notes.Valid {
+			val := notes.String
+			o.Notes = &val
+		}
+		snapshot.Others = append(snapshot.Others, o)
+	}
+	if err := otherRows.Err(); err != nil {
+		return snapshot, err
+	}
+
+	mealRows, err := h.db.Query(ctx,
+		`SELECT name, location, scheduled_at, notes
+         FROM logistics_meals
+         WHERE event_id = $1
+         ORDER BY created_at ASC`,
+		eventID,
+	)
+	if err != nil {
+		return snapshot, err
+	}
+	defer mealRows.Close()
+
+	for mealRows.Next() {
+		var m mealSnapshot
+		var location sql.NullString
+		var scheduled sql.NullTime
+		var notes sql.NullString
+		if err := mealRows.Scan(&m.Name, &location, &scheduled, &notes); err != nil {
+			return snapshot, err
+		}
+		if location.Valid {
+			val := location.String
+			m.Location = &val
+		}
+		if scheduled.Valid {
+			t := scheduled.Time
+			m.ScheduledAt = &t
+		}
+		if notes.Valid {
+			val := notes.String
+			m.Notes = &val
+		}
+		snapshot.Meals = append(snapshot.Meals, m)
+	}
+	if err := mealRows.Err(); err != nil {
+		return snapshot, err
+	}
+
+	return snapshot, nil
+}
+
 func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]Event, error) {
 	if len(events) == 0 {
 		return events, nil
@@ -1232,7 +1816,7 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 		return nil, err
 	}
 
-	innhoppMap, err := h.fetchInnhoppsForEvents(ctx, ids)
+	innhoppMap, err := h.fetchInnhoppsForEvents(ctx, ids, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1587,7 +2171,7 @@ func (h *Handler) getManifestByID(ctx context.Context, manifestID int64) (Manife
 	return manifest, nil
 }
 
-func scanInnhopp(row pgx.Row) (Innhopp, error) {
+func scanInnhopp(row pgx.Row, includeImages bool) (Innhopp, error) {
 	var innhopp Innhopp
 	var scheduled sql.NullTime
 	var elevation sql.NullInt32
@@ -1613,6 +2197,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 	var secondarySize sql.NullString
 	var secondaryObstacles sql.NullString
 	var landOwnersRaw []byte
+	var imageFilesRaw []byte
 
 	if err := row.Scan(
 		&innhopp.ID,
@@ -1643,6 +2228,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		&hospital,
 		&rescueBoat,
 		&minimum,
+		&imageFilesRaw,
 		&landOwnersRaw,
 		&landOwnerPermission,
 		&innhopp.CreatedAt,
@@ -1694,6 +2280,16 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		innhopp.RescueBoat = &val
 	}
 
+	if includeImages && len(imageFilesRaw) > 0 {
+		var files []InnhoppImage
+		if err := json.Unmarshal(imageFilesRaw, &files); err != nil {
+			return innhopp, err
+		}
+		if normalized := normalizeImageFiles(files); len(normalized) > 0 {
+			innhopp.ImageFiles = normalized
+		}
+	}
+
 	if len(landOwnersRaw) > 0 {
 		var owners []LandOwner
 		if err := json.Unmarshal(landOwnersRaw, &owners); err != nil {
@@ -1712,14 +2308,14 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 	return innhopp, nil
 }
 
-func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]Innhopp, error) {
+func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64, includeImages bool) (map[int64][]Innhopp, error) {
 	result := make(map[int64][]Innhopp, len(eventIDs))
 	rows, err := h.db.Query(ctx,
 		`SELECT id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission,
+                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                 created_at
          FROM event_innhopps
          WHERE event_id = ANY($1)
@@ -1732,7 +2328,7 @@ func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64) 
 	defer rows.Close()
 
 	for rows.Next() {
-		innhopp, scanErr := scanInnhopp(rows)
+		innhopp, scanErr := scanInnhopp(rows, includeImages)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -1869,6 +2465,43 @@ func encodeLandOwners(owners []LandOwner) ([]byte, error) {
 	return json.Marshal(owners)
 }
 
+func normalizeImageFiles(raw []InnhoppImage) []InnhoppImage {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	images := make([]InnhoppImage, 0, len(raw))
+	for _, entry := range raw {
+		name := strings.TrimSpace(entry.Name)
+		data := strings.TrimSpace(entry.Data)
+		mime := strings.TrimSpace(entry.MimeType)
+		if data == "" {
+			continue
+		}
+		key := data
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		images = append(images, InnhoppImage{
+			Name:     name,
+			MimeType: mime,
+			Data:     data,
+		})
+	}
+	if len(images) == 0 {
+		return nil
+	}
+	return images
+}
+
+func encodeImageFiles(files []InnhoppImage) ([]byte, error) {
+	if len(files) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(files)
+}
+
 func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
 	if err != nil || eventID <= 0 {
@@ -1898,6 +2531,11 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid land owners")
 		return
 	}
+	imageFilesJSON, err := encodeImageFiles(in.ImageFiles)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid images")
+		return
+	}
 
 	var created Innhopp
 	row := h.db.QueryRow(r.Context(),
@@ -1906,26 +2544,26 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
             reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
             primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
             secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-            risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission
+            risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8,
             $9, $10, $11, $12, $13,
             $14, $15, $16, $17,
             $18, $19, $20, $21,
-            $22, $23, $24, $25, $26, $27, $28, $29
+            $22, $23, $24, $25, $26, $27, $28, $29, $30
         )
         RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                   primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                   secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-                  risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission,
+                  risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                   created_at`,
 		eventID, in.Sequence, in.Name, in.Coordinates, in.TakeoffAirfieldID, in.Elevation, in.ScheduledAt, strings.TrimSpace(payload.Notes),
 		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad,
 		in.PrimaryLandingArea.Name, in.PrimaryLandingArea.Description, in.PrimaryLandingArea.Size, in.PrimaryLandingArea.Obstacles,
 		in.SecondaryLandingArea.Name, in.SecondaryLandingArea.Description, in.SecondaryLandingArea.Size, in.SecondaryLandingArea.Obstacles,
-		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, ownersJSON, in.LandOwnerPermission,
+		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, imageFilesJSON, ownersJSON, in.LandOwnerPermission,
 	)
 
 	var coords sql.NullString
@@ -1951,6 +2589,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	var hospital sql.NullString
 	var rescueBoat sql.NullBool
 	var minimum sql.NullString
+	var imageFilesRaw []byte
 	var ownersRaw []byte
 	var landOwnerPermission sql.NullBool
 
@@ -1983,6 +2622,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		&hospital,
 		&rescueBoat,
 		&minimum,
+		&imageFilesRaw,
 		&ownersRaw,
 		&landOwnerPermission,
 		&created.CreatedAt,
@@ -2053,6 +2693,14 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	}
 	if minimum.Valid {
 		created.MinimumRequirements = minimum.String
+	}
+	if len(imageFilesRaw) > 0 {
+		var files []InnhoppImage
+		if err := json.Unmarshal(imageFilesRaw, &files); err == nil {
+			if normalized := normalizeImageFiles(files); len(normalized) > 0 {
+				created.ImageFiles = normalized
+			}
+		}
 	}
 	if len(ownersRaw) > 0 {
 		var owners []LandOwner
@@ -2174,6 +2822,7 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 			MinimumRequirements:  strings.TrimSpace(payload.MinimumRequirements),
 			LandOwners:           normalizeLandOwnersPayload(payload.LandOwners),
 			LandOwnerPermission:  payload.LandOwnerPermission,
+			ImageFiles:           normalizeImageFiles(payload.ImageFiles),
 		})
 	}
 
@@ -2247,19 +2896,23 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		if err != nil {
 			return err
 		}
+		imageFilesJSON, err := encodeImageFiles(innhopp.ImageFiles)
+		if err != nil {
+			return err
+		}
 
 		batch.Queue(`INSERT INTO event_innhopps (
                 event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission
+                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8,
                 $9, $10, $11, $12, $13,
                 $14, $15, $16, $17,
                 $18, $19, $20, $21,
-                $22, $23, $24, $25, $26, $27, $28, $29
+                $22, $23, $24, $25, $26, $27, $28, $29, $30
             )`,
 			eventID,
 			innhopp.Sequence,
@@ -2288,6 +2941,7 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			innhopp.Hospital,
 			innhopp.RescueBoat,
 			innhopp.MinimumRequirements,
+			imageFilesJSON,
 			landOwnersJSON,
 			innhopp.LandOwnerPermission,
 		)

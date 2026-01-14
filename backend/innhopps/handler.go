@@ -38,6 +38,12 @@ type LandOwner struct {
 	Email     string `json:"email,omitempty"`
 }
 
+type InnhoppImage struct {
+	Name     string `json:"name,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	Data     string `json:"data,omitempty"`
+}
+
 type Innhopp struct {
 	ID                   int64       `json:"id"`
 	EventID              int64       `json:"event_id"`
@@ -63,6 +69,7 @@ type Innhopp struct {
 	MinimumRequirements  string      `json:"minimum_requirements,omitempty"`
 	LandOwners           []LandOwner `json:"land_owners,omitempty"`
 	LandOwnerPermission  *bool       `json:"land_owner_permission,omitempty"`
+	ImageFiles           []InnhoppImage `json:"image_files,omitempty"`
 	CreatedAt            time.Time   `json:"created_at"`
 }
 
@@ -102,6 +109,7 @@ type payload struct {
 	MinimumRequirements  string             `json:"minimum_requirements"`
 	LandOwners           []landOwnerPayload `json:"land_owners"`
 	LandOwnerPermission  *bool              `json:"land_owner_permission"`
+	ImageFiles           []InnhoppImage     `json:"image_files"`
 }
 
 func normalizeLandingAreaPayload(p landingAreaPayload) LandingArea {
@@ -136,6 +144,43 @@ func normalizeLandOwnersPayload(raw []landOwnerPayload) []LandOwner {
 		return nil
 	}
 	return owners
+}
+
+func normalizeImageFiles(raw []InnhoppImage) []InnhoppImage {
+	if len(raw) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(raw))
+	images := make([]InnhoppImage, 0, len(raw))
+	for _, entry := range raw {
+		name := strings.TrimSpace(entry.Name)
+		data := strings.TrimSpace(entry.Data)
+		mime := strings.TrimSpace(entry.MimeType)
+		if data == "" {
+			continue
+		}
+		key := data
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		images = append(images, InnhoppImage{
+			Name:     name,
+			MimeType: mime,
+			Data:     data,
+		})
+	}
+	if len(images) == 0 {
+		return nil
+	}
+	return images
+}
+
+func encodeImageFiles(files []InnhoppImage) ([]byte, error) {
+	if len(files) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(files)
 }
 
 func encodeLandOwners(owners []LandOwner) ([]byte, error) {
@@ -179,6 +224,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 	var secondarySize sql.NullString
 	var secondaryObstacles sql.NullString
 	var landOwnersRaw []byte
+	var imageFilesRaw []byte
 
 	if err := row.Scan(
 		&innhopp.ID,
@@ -209,6 +255,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		&hospital,
 		&rescueBoat,
 		&minimum,
+		&imageFilesRaw,
 		&landOwnersRaw,
 		&landOwnerPermission,
 		&innhopp.CreatedAt,
@@ -260,6 +307,16 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		innhopp.RescueBoat = &val
 	}
 
+	if len(imageFilesRaw) > 0 {
+		var files []InnhoppImage
+		if err := json.Unmarshal(imageFilesRaw, &files); err != nil {
+			return innhopp, err
+		}
+		if normalized := normalizeImageFiles(files); len(normalized) > 0 {
+			innhopp.ImageFiles = normalized
+		}
+	}
+
 	if len(landOwnersRaw) > 0 {
 		var owners []LandOwner
 		if err := json.Unmarshal(landOwnersRaw, &owners); err != nil {
@@ -290,7 +347,7 @@ func (h *Handler) getInnhopp(w http.ResponseWriter, r *http.Request) {
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission,
+                risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                 created_at
          FROM event_innhopps WHERE id = $1`,
 		innhoppID,
@@ -394,6 +451,12 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to encode land owners")
 		return
 	}
+	imageFiles := normalizeImageFiles(p.ImageFiles)
+	imageFilesJSON, err := encodeImageFiles(imageFiles)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to encode images")
+		return
+	}
 
 	reason := strings.TrimSpace(p.ReasonForChoice)
 	adjust := strings.TrimSpace(p.AdjustAltimeterAAD)
@@ -412,19 +475,19 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
              primary_landing_area_name = $13, primary_landing_area_description = $14, primary_landing_area_size = $15, primary_landing_area_obstacles = $16,
              secondary_landing_area_name = $17, secondary_landing_area_description = $18, secondary_landing_area_size = $19, secondary_landing_area_obstacles = $20,
              risk_assessment = $21, safety_precautions = $22, jumprun = $23, hospital = $24, rescue_boat = $25, minimum_requirements = $26,
-             land_owners = $27, land_owner_permission = $28
-         WHERE id = $29
+             image_files = $27, land_owners = $28, land_owner_permission = $29
+         WHERE id = $30
          RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                    reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                    primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                    secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
-                   risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, land_owners, land_owner_permission,
+                   risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                    created_at`,
 		seq, name, coords, p.TakeoffAirfieldID, elevation, scheduled, strings.TrimSpace(p.Notes),
 		reason, adjust, notam, distanceByAir, distanceByRoad,
 		primaryLanding.Name, primaryLanding.Description, primaryLanding.Size, primaryLanding.Obstacles,
 		secondaryLanding.Name, secondaryLanding.Description, secondaryLanding.Size, secondaryLanding.Obstacles,
-		risk, safety, jumprun, hospital, p.RescueBoat, minimum, ownersJSON, p.LandOwnerPermission, innhoppID,
+		risk, safety, jumprun, hospital, p.RescueBoat, minimum, imageFilesJSON, ownersJSON, p.LandOwnerPermission, innhoppID,
 	)
 
 	innhopp, scanErr := scanInnhopp(row)

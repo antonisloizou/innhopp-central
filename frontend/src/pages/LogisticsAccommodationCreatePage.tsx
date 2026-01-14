@@ -11,6 +11,7 @@ const LogisticsAccommodationCreatePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<number | null>(null);
   const [form, setForm] = useState(() => {
     const state = (location.state as any)?.copyAccommodation;
     return {
@@ -53,17 +54,33 @@ const LogisticsAccommodationCreatePage = () => {
     setSubmitting(true);
     setMessage(null);
     try {
-        await createAccommodation(Number(form.event_id), {
-          name: form.name.trim(),
-          capacity: Number(form.capacity) || 0,
-          coordinates: form.coordinates.trim() || undefined,
-          check_in_at: form.check_in_at || undefined,
-          check_out_at: form.check_out_at || undefined,
-          booked: form.booked,
-          notes: form.notes.trim() || undefined
-        });
+      const created = await createAccommodation(Number(form.event_id), {
+        name: form.name.trim(),
+        capacity: Number(form.capacity) || 0,
+        coordinates: form.coordinates.trim() || undefined,
+        check_in_at: form.check_in_at || undefined,
+        check_out_at: form.check_out_at || undefined,
+        booked: form.booked,
+        notes: form.notes.trim() || undefined
+      });
+      setCreatedId(created.id);
       setMessage('Accommodation created');
-      navigate('/logistics/accommodations');
+      const isCopy = !!(location.state as any)?.copyAccommodation;
+      if (isCopy) {
+        if (created.id && form.event_id) {
+          try {
+            sessionStorage.setItem(
+              `event-schedule-highlight:${form.event_id}`,
+              `acc-in-${created.id}`
+            );
+          } catch {
+            // ignore
+          }
+        }
+        navigate(-2);
+      } else {
+        navigate('/logistics/accommodations', { state: { highlightAccommodationId: created.id } });
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create accommodation');
     } finally {

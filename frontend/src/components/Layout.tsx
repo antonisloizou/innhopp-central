@@ -10,6 +10,11 @@ const navItems = [
 
 const Layout = () => {
   const [navOpen, setNavOpen] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark';
+    const stored = window.localStorage.getItem('innhopp-theme');
+    return stored === 'light' ? 'light' : 'dark';
+  });
 
   useEffect(() => {
     const preventNumberScroll = (event: WheelEvent) => {
@@ -23,17 +28,20 @@ const Layout = () => {
     return () => window.removeEventListener('wheel', preventNumberScroll);
   }, []);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.setAttribute('data-theme', theme);
+    window.localStorage.setItem('innhopp-theme', theme);
+  }, [theme]);
+
   const handleNavClick = () => setNavOpen(false);
+  const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div className="brand">
           <img src={logo} alt="Innhopp Central logo" className="brand-logo" />
-          <div className="brand-text">
-            <h1 className="brand-title">Innhopp Central</h1>
-            <p className="brand-subtitle">Events, Participants, and Logistics all in one place</p>
-          </div>
         </div>
         <div className="header-actions">
           <button
@@ -69,6 +77,16 @@ const Layout = () => {
               </li>
             ))}
           </ul>
+          <div className="nav-footer">
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              aria-pressed={theme === 'light'}
+            >
+              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+            </button>
+          </div>
         </nav>
         {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
         <main className="app-content">

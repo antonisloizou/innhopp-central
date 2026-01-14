@@ -40,7 +40,6 @@ const SeasonCreatePage = () => {
       <header className="page-header">
         <div>
           <h2>Create season</h2>
-          <p>Define the operational window for upcoming innhopp activity.</p>
         </div>
         <button className="ghost" type="button" onClick={() => navigate('/events')}>
           Back to events

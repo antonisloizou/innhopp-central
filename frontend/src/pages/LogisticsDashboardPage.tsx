@@ -96,7 +96,14 @@ const LogisticsDashboardPage = () => {
 
       <div className="stack">
         <article className="card">
-          <div className="form-grid">
+          <div
+            className="form-grid"
+            style={{
+              gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))',
+              alignItems: 'end',
+              gap: '0.75rem'
+            }}
+          >
             <label className="form-field">
               <span>Season</span>
               <select
@@ -105,6 +112,7 @@ const LogisticsDashboardPage = () => {
                   setSelectedSeason(e.target.value);
                   setSelectedEvent('');
                 }}
+                style={{ width: '100%', minWidth: '180px', maxWidth: '25%' }}
               >
                 <option value="">All seasons</option>
                 {[...seasons].sort((a, b) => b.name.localeCompare(a.name)).map((season) => (
@@ -116,7 +124,11 @@ const LogisticsDashboardPage = () => {
             </label>
             <label className="form-field">
               <span>Event</span>
-              <select value={selectedEvent} onChange={(e) => setSelectedEvent(e.target.value)}>
+              <select
+                value={selectedEvent}
+                onChange={(e) => setSelectedEvent(e.target.value)}
+                style={{ width: '100%', minWidth: '180px' }}
+              >
                 <option value="">All events</option>
                 {filteredEvents.map((event) => (
                   <option key={event.id} value={event.id}>

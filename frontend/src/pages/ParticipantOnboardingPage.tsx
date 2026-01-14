@@ -17,6 +17,9 @@ type ParticipantCard = {
 const sortSeasonsDesc = (seasons: Season[]) =>
   [...seasons].sort((a, b) => b.name.localeCompare(a.name));
 
+const sortParticipantsByName = (participants: ParticipantCard[]) =>
+  [...participants].sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
+
 const ParticipantOnboardingPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -151,7 +154,7 @@ const ParticipantOnboardingPage = () => {
       (Array.isArray(event.participant_ids) ? event.participant_ids : []).forEach((id) =>
         addParticipant(id, result, seen)
       );
-      return result;
+      return sortParticipantsByName(result);
     }
 
     if (selectedSeason) {
@@ -160,11 +163,11 @@ const ParticipantOnboardingPage = () => {
           addParticipant(id, result, seen)
         );
       });
-      return result;
+      return sortParticipantsByName(result);
     }
 
     participants.forEach((p) => addParticipant(p.id, result, seen));
-    return result;
+    return sortParticipantsByName(result);
   }, [
     selectedEvent,
     selectedSeason,
@@ -188,145 +191,165 @@ const ParticipantOnboardingPage = () => {
   }, [selectedSeason, selectedEvent, selectedRoles, nameQuery]);
 
   return (
-    <section>
-      <header className="page-header">
+    <section className="stack">
+      <header className="page-header" style={{ position: 'relative', paddingRight: '10rem' }}>
         <div>
           <h2>Participants</h2>
         </div>
-        <Link className="primary button-link" to="/participants/new">
+        <Link
+          className="primary button-link"
+          to="/participants/new"
+          style={{ position: 'absolute', right: 0, top: 0 }}
+        >
           Add participant
         </Link>
       </header>
 
-      <div className="stack">
-        <article className="card">
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Season</span>
-              <select
-                value={selectedSeason}
-                onChange={(e) => {
-                  setSelectedSeason(e.target.value);
-                  setSelectedEvent('');
-                }}
-              >
-                <option value="">All seasons</option>
-                {sortSeasonsDesc(seasons).map((season) => (
-                  <option key={season.id} value={season.id}>
-                    {season.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Event</span>
-              <select value={selectedEvent} onChange={(e) => setSelectedEvent(e.target.value)}>
-                <option value="">All events</option>
-                {filteredEvents.map((event) => (
-                  <option key={event.id} value={event.id}>
-                    {event.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field" style={{ gridColumn: '1 / -1' }}>
-              <span>Name</span>
-              <input
-                type="text"
-                placeholder="Search by name"
-                value={nameQuery}
-                onChange={(e) => setNameQuery(e.target.value)}
-              />
-            </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-              <span>Roles</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                {roleOptions
-                  .filter((role) => role !== 'Participant')
-                  .map((role) => {
-                  const checked = selectedRoles.includes(role);
-                  return (
-                    <label
-                      key={role}
-                      className="badge neutral"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          setSelectedRoles((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) {
-                              next.add(role);
-                            } else {
-                              next.delete(role);
-                            }
-                            return Array.from(next);
-                          });
-                        }}
-                      />
-                      {role}
-                    </label>
-                  );
-                })}
-                {selectedRoles.length > 0 && (
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => setSelectedRoles([])}
-                    style={{ padding: '0.2rem 0.6rem' }}
+      <article className="card">
+        <div
+          className="form-grid"
+          style={{
+            gridTemplateColumns: 'minmax(140px, 0.5fr) minmax(160px, 1fr) minmax(220px, 1.6fr)',
+            alignItems: 'end'
+          }}
+        >
+          <label className="form-field">
+            <span>Season</span>
+            <select
+              value={selectedSeason}
+              onChange={(e) => {
+                setSelectedSeason(e.target.value);
+                setSelectedEvent('');
+              }}
+              style={{ width: '100%', minWidth: '140px' }}
+            >
+              <option value="">All seasons</option>
+              {sortSeasonsDesc(seasons).map((season) => (
+                <option key={season.id} value={season.id}>
+                  {season.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Event</span>
+            <select
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+              style={{ width: '100%', minWidth: '160px' }}
+            >
+              <option value="">All events</option>
+              {filteredEvents.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="form-field">
+            <span>Name</span>
+            <input
+              type="text"
+              placeholder="Search by name"
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+            />
+          </label>
+          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <span>Roles</span>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                width: '100%'
+              }}
+            >
+              {roleOptions
+                .filter((role) => role !== 'Participant')
+                .map((role) => {
+                const checked = selectedRoles.includes(role);
+                return (
+                  <label
+                    key={role}
+                    className="badge neutral"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                   >
-                    Clear
-                  </button>
-                )}
-              </div>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        setSelectedRoles((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) {
+                            next.add(role);
+                          } else {
+                            next.delete(role);
+                          }
+                          return Array.from(next);
+                        });
+                      }}
+                    />
+                    {role}
+                  </label>
+                );
+              })}
+              {selectedRoles.length > 0 && (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setSelectedRoles([])}
+                  style={{ padding: '0.2rem 0.6rem' }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
           </div>
-          {selectedSeason && filteredEvents.length === 0 && (
-            <p className="muted">No events for this season.</p>
-          )}
-        </article>
+        </div>
+        {selectedSeason && filteredEvents.length === 0 && (
+          <p className="muted">No events for this season.</p>
+        )}
+      </article>
 
-        <article className="card">
-          <header className="card-header">
-            <div>
-              <h3>Participants</h3>
-            </div>
-            <span className="badge neutral">
-              {filteredParticipants.length} {filteredParticipants.length === 1 ? 'participant' : 'participants'}
-            </span>
-          </header>
-          {loading ? (
-            <p className="muted">Loading participants…</p>
-          ) : error ? (
-            <p className="error-text">{error}</p>
-          ) : filteredParticipants.length === 0 ? (
-            <p className="muted">No participants match the selected filters.</p>
-          ) : (
-            <ul className="status-list">
-              {filteredParticipants.map((p) => (
-                <li key={p.id}>
-                  <Link
-                    to={{ pathname: `/participants/${p.id}`, search: queryString }}
-                    className="card-link"
-                    style={{ flex: 1 }}
-                  >
-                    <strong>{highlightName(p.full_name)}</strong>
-                    <div className="muted">{p.email || 'No email on file'}</div>
-                    <div className="muted">
-                      Experience: {p.experience_level || 'Not provided'}
-                    </div>
-                  </Link>
-                  <span className="badge neutral">
-                    {p.eventCount} {p.eventCount === 1 ? 'event' : 'events'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </article>
-      </div>
+      <article className="card">
+        <header className="card-header">
+          <div>
+            <h3>Participants</h3>
+          </div>
+          <span className="badge neutral">
+            {filteredParticipants.length} {filteredParticipants.length === 1 ? 'participant' : 'participants'}
+          </span>
+        </header>
+        {loading ? (
+          <p className="muted">Loading participants…</p>
+        ) : error ? (
+          <p className="error-text">{error}</p>
+        ) : filteredParticipants.length === 0 ? (
+          <p className="muted">No participants match the selected filters.</p>
+        ) : (
+          <ul className="status-list">
+            {filteredParticipants.map((p) => (
+              <li key={p.id}>
+                <Link
+                  to={{ pathname: `/participants/${p.id}`, search: queryString }}
+                  className="card-link"
+                  style={{ flex: 1 }}
+                >
+                  <strong>{highlightName(p.full_name)}</strong>
+                  <div className="muted">{p.email || 'No email on file'}</div>
+                  <div className="muted">
+                    Experience: {p.experience_level || 'Not provided'}
+                  </div>
+                </Link>
+                <span className="badge neutral">
+                  {p.eventCount} {p.eventCount === 1 ? 'event' : 'events'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </article>
     </section>
   );
 };

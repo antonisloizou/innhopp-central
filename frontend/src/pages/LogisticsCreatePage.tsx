@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import {
@@ -168,6 +168,7 @@ const LogisticsCreatePage = () => {
     event.preventDefault();
     setSubmitting(true);
     setMessage(null);
+    const isCopy = !!copyTransport;
     try {
       let vehicleIds = [...selectedVehicleIds];
       // Always hydrate vehicle ids from copied data if present
@@ -195,14 +196,14 @@ const LogisticsCreatePage = () => {
         }
       }
 
-      const payload: CreateTransportPayload & { vehicle_ids?: number[] } = {
+      const payload: CreateTransportPayload = {
         pickup_location: form.pickup_location.trim(),
         destination: form.destination.trim(),
         passenger_count: Number(form.passenger_count) || 0,
         scheduled_at: form.scheduled_at ? form.scheduled_at : undefined,
-        event_id: Number(selectedEventId)
+        event_id: Number(selectedEventId),
+        vehicle_ids: [...vehicleIds]
       };
-      payload.vehicle_ids = vehicleIds;
       if (showVehicleForm && newVehicle.name.trim()) {
         const created = await createEventVehicle({
           event_id: Number(selectedEventId),
@@ -212,11 +213,18 @@ const LogisticsCreatePage = () => {
           notes: newVehicle.notes.trim() || undefined
         });
         vehicleIds.push(created.id);
-        payload.vehicle_ids = vehicleIds;
+        payload.vehicle_ids = [...vehicleIds];
       }
-      await createTransport(payload);
+      const created = await createTransport(payload);
       setMessage('Transport route created');
-      navigate(-1);
+      if (created?.id && selectedEventId) {
+        try {
+          sessionStorage.setItem(`event-schedule-highlight:${selectedEventId}`, `t-${created.id}`);
+        } catch {
+          // ignore highlight persistence errors
+        }
+      }
+      navigate(isCopy ? -2 : -1);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create transport');
     } finally {
@@ -236,7 +244,7 @@ const LogisticsCreatePage = () => {
     const seen = new Set<string>();
     const event = events.find((e) => e.id === Number(selectedEventId));
 
-    const innhoppOptions =
+    const innhoppOptions: LocationOption[] =
       event?.innhopps?.length && Array.isArray(event.innhopps)
         ? event.innhopps.map((inn) => ({
             valueKey: buildOptionKey(
@@ -260,7 +268,7 @@ const LogisticsCreatePage = () => {
       eventAirfields.forEach((af) => seen.add(af.name || `Airfield #${af.id}`));
       groups.push({
         label: 'Airfields',
-        options: eventAirfields.map((af) => ({
+        options: eventAirfields.map<LocationOption>((af) => ({
           valueKey: buildOptionKey('Airfield', af.name || `Airfield #${af.id}`),
           label: af.name || `Airfield #${af.id}`,
           type: 'Airfield'
@@ -272,7 +280,7 @@ const LogisticsCreatePage = () => {
       accommodations.forEach((acc) => seen.add(acc.name || `Accommodation #${acc.id}`));
       groups.push({
         label: 'Accommodations',
-        options: accommodations.map((acc) => ({
+        options: accommodations.map<LocationOption>((acc) => ({
           valueKey: buildOptionKey('Accommodation', acc.name || `Accommodation #${acc.id}`),
           label: acc.name || `Accommodation #${acc.id}`,
           type: 'Accommodation'
@@ -284,7 +292,7 @@ const LogisticsCreatePage = () => {
       others.forEach((o) => seen.add(o.name || `Other #${o.id}`));
       groups.push({
         label: 'Other',
-        options: others.map((o) => ({
+        options: others.map<LocationOption>((o) => ({
           valueKey: buildOptionKey('Other', o.name || `Other #${o.id}`),
           label: o.name || `Other #${o.id}`,
           type: 'Other'
@@ -296,7 +304,7 @@ const LogisticsCreatePage = () => {
       meals.forEach((meal) => seen.add(meal.name || `Meal #${meal.id}`));
       groups.push({
         label: 'Meals',
-        options: meals.map((meal) => ({
+        options: meals.map<LocationOption>((meal) => ({
           valueKey: buildOptionKey('Meal', meal.name || `Meal #${meal.id}`),
           label: meal.name || `Meal #${meal.id}`,
           type: 'Meal'
@@ -556,14 +564,18 @@ const LogisticsCreatePage = () => {
                           width: '100%'
                         }}
                       >
-                        <div style={{ flex: 1 }}>
+                        <Link
+                          to={`/logistics/vehicles/${v.id}`}
+                          className="card-link"
+                          style={{ flex: 1, textDecoration: 'none' }}
+                        >
                           <strong>{v.name}</strong>
                           <div className="muted">
                             {v.driver ? `Driver: ${v.driver} • ` : ''}
-                            Cap: {v.passenger_capacity}
-                            {v.notes ? ` • ${v.notes}` : ''}
+                            Capacity: {v.passenger_capacity}
                           </div>
-                        </div>
+                          {v.notes && <div className="muted">Notes: {v.notes}</div>}
+                        </Link>
                         <button type="button" className="ghost danger" onClick={() => handleRemoveVehicle(id)}>
                           Remove
                         </button>

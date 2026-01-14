@@ -4,10 +4,11 @@ import {
   CreateParticipantPayload,
   ParticipantProfile,
   getParticipantProfile,
-  updateParticipantProfile
+  updateParticipantProfile,
+  deleteParticipantProfile
 } from '../api/participants';
 
-const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Driver', 'Pilot', 'COP'] as const;
+const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Photo', 'Pilot', 'COP', 'Driver'] as const;
 
 const ParticipantDetailPage = () => {
   const { participantId } = useParams();
@@ -27,6 +28,7 @@ const ParticipantDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,24 +107,50 @@ const ParticipantDetailPage = () => {
           <h2>{profile.full_name}</h2>
           <p className="muted">{profile.email}</p>
         </div>
-        <button
-          className="ghost"
-          type="button"
-          onClick={() => {
-            const fromEventId = (location.state as any)?.fromEventId;
-            const highlightId = (location.state as any)?.highlightId;
-            if (fromEventId && highlightId) {
-              try {
-                sessionStorage.setItem(`event-detail-highlight:${fromEventId}`, highlightId);
-              } catch {
-                // ignore storage issues
+        <div className="card-actions">
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => {
+              const fromEventId = (location.state as any)?.fromEventId;
+              const highlightId = (location.state as any)?.highlightId;
+              if (fromEventId && highlightId) {
+                try {
+                  sessionStorage.setItem(`event-detail-highlight:${fromEventId}`, highlightId);
+                } catch {
+                  // ignore storage issues
+                }
               }
+              navigate(-1);
+            }}
+          >
+            Back
+          </button>
+          <button
+            className="ghost danger"
+            type="button"
+            disabled={deleting}
+            onClick={async () => {
+            if (!participantId) return;
+            if (!window.confirm('Delete this participant? This cannot be undone.')) return;
+            try {
+              setDeleting(true);
+              await deleteParticipantProfile(Number(participantId));
+              navigate(-1);
+            } catch (err) {
+              const status = (err as any)?.status;
+              if (status === 404) {
+                  navigate(-1);
+                  return;
+                }
+              setMessage(err instanceof Error ? err.message : 'Failed to delete participant');
+              setDeleting(false);
             }
-            navigate(-1);
-          }}
-        >
-          Back
-        </button>
+            }}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
       </header>
 
       <article className="card">

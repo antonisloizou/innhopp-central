@@ -7,6 +7,8 @@ import {
   getAirfield,
   updateAirfield
 } from '../api/airfields';
+import { metersToFeet } from '../utils/units';
+import { formatMetersWithFeet } from '../utils/units';
 
 const AirfieldDetailPage = () => {
   const { airfieldId } = useParams();
@@ -23,6 +25,7 @@ const AirfieldDetailPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const missingName = !form.name.trim();
 
   useEffect(() => {
     let cancelled = false;
@@ -110,12 +113,13 @@ const AirfieldDetailPage = () => {
     return <p className="error-text">Airfield not found.</p>;
   }
 
+  const elevationFeet = Number.isFinite(form.elevation) ? metersToFeet(form.elevation) : null;
+
   return (
     <section>
       <header className="page-header">
         <div>
           <h2>{airfield.name}</h2>
-          {airfield.coordinates && <p className="muted">{airfield.coordinates}</p>}
         </div>
         <div className="card-actions">
           <button
@@ -147,7 +151,7 @@ const AirfieldDetailPage = () => {
 
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
-          <label className="form-field">
+          <label className={`form-field ${missingName ? 'field-missing' : ''}`}>
             <span>Name</span>
             <input
               type="text"
@@ -158,14 +162,19 @@ const AirfieldDetailPage = () => {
           </label>
           <label className="form-field">
             <span>Elevation (m)</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={form.elevation}
-              onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
-              required
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={form.elevation}
+                onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
+                required
+              />
+              <span className="muted" style={{ whiteSpace: 'nowrap' }}>
+                {elevationFeet !== null ? `${elevationFeet} ft` : '— ft'}
+              </span>
+            </div>
           </label>
           <label className="form-field">
             <span>Coordinates</span>

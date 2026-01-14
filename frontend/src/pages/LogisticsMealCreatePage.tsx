@@ -3,16 +3,18 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { Event, listEvents } from '../api/events';
-import { createMeal } from '../api/logistics';
+import { Meal, createMeal } from '../api/logistics';
 
 const LogisticsMealCreatePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const copy = (location.state as any)?.copyMeal;
+  const isCopy = !!copy;
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [createdMeal, setCreatedMeal] = useState<Meal | null>(null);
   const [form, setForm] = useState({
     event_id: copy?.event_id ? String(copy.event_id) : '',
     name: copy?.name || '',
@@ -69,15 +71,18 @@ const LogisticsMealCreatePage = () => {
     setSubmitting(true);
     setMessage(null);
     try {
-      await createMeal({
+      const meal = await createMeal({
         event_id: Number(form.event_id),
         name: form.name.trim(),
         location: form.location.trim() || undefined,
         scheduled_at: form.scheduled_at || undefined,
         notes: form.notes.trim() || undefined
       });
+      setCreatedMeal(meal);
       setMessage('Meal created');
-      navigate('/logistics/meals');
+      if (!isCopy) {
+        navigate('/logistics/meals', { state: { highlightMealId: meal.id } });
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create meal');
     } finally {
@@ -92,11 +97,33 @@ const LogisticsMealCreatePage = () => {
     <section className="stack">
       <header className="page-header">
         <div>
-          <h2>Create meal</h2>
+          <h2>{isCopy ? 'Copy meal' : 'Create meal'}</h2>
         </div>
         <div className="card-actions">
-          <button className="ghost" type="button" onClick={() => navigate('/logistics/meals')}>
-            Back to meals
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => {
+              if (isCopy) {
+                if (createdMeal?.id) {
+                  const eventId = createdMeal.event_id || (form.event_id ? Number(form.event_id) : undefined);
+                  if (eventId) {
+                    try {
+                      sessionStorage.setItem(`event-schedule-highlight:${eventId}`, `meal-${createdMeal.id}`);
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  navigate(-2);
+                } else {
+                  navigate(-2);
+                }
+                return;
+              }
+              navigate('/logistics/meals');
+            }}
+          >
+            Back
           </button>
         </div>
       </header>

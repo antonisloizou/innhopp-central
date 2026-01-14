@@ -194,6 +194,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     hospital TEXT,
     rescue_boat BOOLEAN,
     minimum_requirements TEXT,
+    image_urls JSONB DEFAULT '[]'::jsonb,
+    image_files JSONB DEFAULT '[]'::jsonb,
     land_owners JSONB,
     land_owner_permission BOOLEAN,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -221,6 +223,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS hospital TEXT`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS rescue_boat BOOLEAN`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS minimum_requirements TEXT`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS image_urls JSONB DEFAULT '[]'::jsonb`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS image_files JSONB DEFAULT '[]'::jsonb`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owners JSONB DEFAULT '[]'::jsonb`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owner_permission BOOLEAN`,
 		`CREATE TABLE IF NOT EXISTS manifest_participants (
@@ -282,12 +286,14 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             destination TEXT NOT NULL,
             passenger_count INTEGER NOT NULL,
             scheduled_at TIMESTAMPTZ,
+            notes TEXT,
             event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
             season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`CREATE TABLE IF NOT EXISTS logistics_other (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,

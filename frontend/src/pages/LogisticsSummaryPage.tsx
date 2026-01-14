@@ -122,7 +122,14 @@ const LogisticsSummaryPage = () => {
       </header>
 
       <article className="card">
-        <div className="form-grid">
+        <div
+          className="form-grid"
+          style={{
+            gridTemplateColumns: 'minmax(140px, 0.25fr) minmax(160px, 0.5fr)',
+            alignItems: 'end',
+            gap: '0.75rem'
+          }}
+        >
           <label className="form-field">
             <span>Season</span>
             <select
@@ -131,6 +138,7 @@ const LogisticsSummaryPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
+              style={{ width: '100%', minWidth: '140px', maxWidth: '180px' }}
             >
               <option value="">All seasons</option>
               {seasons.map((s) => (
@@ -142,7 +150,11 @@ const LogisticsSummaryPage = () => {
           </label>
           <label className="form-field">
             <span>Event</span>
-            <select value={selectedEvent} onChange={(e) => setSelectedEvent(e.target.value)}>
+            <select
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+              style={{ width: '100%', minWidth: '160px' }}
+            >
               <option value="">All events</option>
               {filteredEvents.map((ev) => (
                 <option key={ev.id} value={ev.id}>

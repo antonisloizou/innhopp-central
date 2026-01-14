@@ -12,6 +12,7 @@ import {
 const AccommodationDetailPage = () => {
   const { eventId, accommodationId } = useParams();
   const navigate = useNavigate();
+  const [saved, setSaved] = useState(false);
   const [form, setForm] = useState({
     name: '',
     capacity: '',
@@ -24,7 +25,10 @@ const AccommodationDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
+  const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
+  const missingName = !form.name.trim();
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +48,7 @@ const AccommodationDetailPage = () => {
           check_out_at: acc.check_out_at || '',
           notes: acc.notes || ''
         });
+        setSaved(false);
       } catch (err) {
         if (!cancelled) {
           setMessage(err instanceof Error ? err.message : 'Failed to load accommodation');
@@ -73,6 +78,7 @@ const AccommodationDetailPage = () => {
         check_out_at: form.check_out_at || undefined,
         notes: form.notes.trim() || undefined
       });
+      setSaved(true);
       setMessage('Accommodation updated');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update accommodation');
@@ -93,6 +99,10 @@ const AccommodationDetailPage = () => {
   };
 
   if (loading) return <p className="muted">Loading accommodation…</p>;
+
+  const markDirty = () => {
+    if (saved) setSaved(false);
+  };
 
   return (
     <section className="stack">
@@ -126,22 +136,25 @@ const AccommodationDetailPage = () => {
           >
             Make a copy
           </button>
-          <button className="ghost" type="button" onClick={() => navigate(-1)}>
-            Back
-          </button>
           <button className="ghost danger" type="button" onClick={handleDelete}>
             Delete
+          </button>
+          <button className="ghost" type="button" onClick={() => navigate(-1)}>
+            Back
           </button>
         </div>
       </header>
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
-          <label className="form-field">
+          <label className={`form-field ${missingName ? 'field-missing' : ''}`}>
             <span>Name</span>
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                markDirty();
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+              }}
               required
             />
           </label>
@@ -151,7 +164,10 @@ const AccommodationDetailPage = () => {
               type="number"
               min={0}
               value={form.capacity}
-              onChange={(e) => setForm((prev) => ({ ...prev, capacity: e.target.value }))}
+              onChange={(e) => {
+                markDirty();
+                setForm((prev) => ({ ...prev, capacity: e.target.value }));
+              }}
             />
           </label>
           <label className={`form-field ${missingCoordinates ? 'field-missing' : ''}`}>
@@ -160,7 +176,10 @@ const AccommodationDetailPage = () => {
               <input
                 type="text"
                 value={form.coordinates}
-                onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
+                onChange={(e) => {
+                  markDirty();
+                  setForm((prev) => ({ ...prev, coordinates: e.target.value }));
+                }}
               />
               <button
                 type="button"
@@ -185,11 +204,14 @@ const AccommodationDetailPage = () => {
               <input
                 type="checkbox"
                 checked={form.booked}
-                onChange={(e) => setForm((prev) => ({ ...prev, booked: e.target.checked }))}
-              />
-              <span>Mark as booked</span>
-            </div>
-          </label>
+              onChange={(e) => {
+                markDirty();
+                setForm((prev) => ({ ...prev, booked: e.target.checked }));
+              }}
+            />
+            <span>Mark as booked</span>
+          </div>
+        </label>
           <label className="form-field">
             <span>Check-in</span>
             <Flatpickr
@@ -197,6 +219,7 @@ const AccommodationDetailPage = () => {
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
+                markDirty();
                 setForm((prev) => ({ ...prev, check_in_at: d ? d.toISOString() : '' }));
               }}
             />
@@ -208,6 +231,7 @@ const AccommodationDetailPage = () => {
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
+                markDirty();
                 setForm((prev) => ({ ...prev, check_out_at: d ? d.toISOString() : '' }));
               }}
             />
@@ -217,12 +241,15 @@ const AccommodationDetailPage = () => {
             <input
               type="text"
               value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              onChange={(e) => {
+                markDirty();
+                setForm((prev) => ({ ...prev, notes: e.target.value }));
+              }}
             />
           </label>
           <div className="form-actions">
-            <button type="submit" className="primary" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save'}
+            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+              {saveButtonLabel}
             </button>
             {message && <span className="muted">{message}</span>}
           </div>

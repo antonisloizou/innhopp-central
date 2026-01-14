@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, useRef, useCallback, DragEvent } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback, DragEvent, MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   Accommodation,
   Event,
+  copyEvent,
   deleteEvent,
   getEvent,
   listAccommodations,
@@ -23,8 +25,10 @@ import {
   updateMeal,
   getMeal
 } from '../api/logistics';
+import { listAirfields, Airfield } from '../api/airfields';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { formatMetersWithFeet } from '../utils/units';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
@@ -56,6 +60,27 @@ type ScheduleEntry = {
   missingCoordinates?: boolean;
   otherComplete?: boolean;
   mealComplete?: boolean;
+  transportComplete?: boolean;
+  coordinates?: string | null;
+  location?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  innhoppReason?: string | null;
+  innhoppElevation?: number | null;
+  innhoppCoordinates?: string | null;
+  innhoppTakeoffName?: string | null;
+  innhoppElevationDiff?: number | null;
+  innhoppPrimaryName?: string | null;
+  innhoppPrimarySize?: string | null;
+  innhoppSecondaryName?: string | null;
+  innhoppSecondarySize?: string | null;
+  innhoppRisk?: string | null;
+  innhoppMinimumRequirements?: string | null;
+  innhoppRescueBoat?: boolean | null;
+  innhoppLandOwnerPermission?: boolean | null;
+  transportRouteOrigin?: string | null;
+  transportRouteDestination?: string | null;
+  vehicles?: { name: string; driver?: string; passenger_capacity: number }[];
   to?: string;
   scheduledAt?: string | null;
 };
@@ -65,25 +90,54 @@ const formatDayLabel = (date: Date) =>
   date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
 const parseTimeParts = (iso?: string | null) => {
+  return extractLocalHM(iso);
+};
+
+const extractLocalHM = (iso?: string | null) => {
   if (!iso) return null;
-  const match = iso.match(/T(\d{2}):(\d{2})/);
-  if (match) {
-    return { hour: Number(match[1]), minute: Number(match[2]) };
+  const date = new Date(iso);
+  if (!Number.isNaN(date.getTime())) {
+    return { hour: date.getHours(), minute: date.getMinutes() };
   }
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return { hour: d.getHours(), minute: d.getMinutes() };
+  const m = iso.match(/(?:T|\s)(\d{2}):(\d{2})/);
+  if (m) {
+    const hour = Number(m[1]);
+    const minute = Number(m[2]);
+    if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
+      return { hour, minute };
+    }
+  }
+  return null;
 };
 
 const formatTimeLabel = (iso?: string | null) => {
-  const parts = parseTimeParts(iso);
+  if (!iso) return 'Unscheduled';
+  const parts = extractLocalHM(iso);
   if (!parts) return 'Unscheduled';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(parts.hour)}:${pad(parts.minute)}`;
 };
 
+const formatDateTime = (iso?: string | null) => {
+  if (!iso) return '';
+  const parts = extractLocalHM(iso);
+  if (!parts) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })}, ${pad(parts.hour)}:${pad(parts.minute)}`;
+};
+
 const extractDateKey = (iso?: string | null) => {
   if (!iso) return '';
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const year = d.getFullYear();
@@ -106,17 +160,16 @@ const buildDays = (event: Event): Date[] => {
   return days;
 };
 
-const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
-
 const minutesSinceMidnight = (iso?: string | null) => {
-  const parts = parseTimeParts(iso);
+  const parts = extractLocalHM(iso);
   if (!parts) return Number.POSITIVE_INFINITY;
   return parts.hour * 60 + parts.minute;
 };
 
 const buildDayIso = (day: Date, minutes: number) => {
-  const d = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 0, 0, 0, 0));
-  d.setUTCMinutes(minutes);
+  const d = new Date(day);
+  d.setHours(0, 0, 0, 0);
+  d.setMinutes(minutes);
   return d.toISOString();
 };
 
@@ -134,6 +187,7 @@ const EventSchedulePage = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [dragging, setDragging] = useState<{ id: string; dayKey: string } | null>(null);
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
   const [dragHoverIndex, setDragHoverIndex] = useState<number | null>(null);
@@ -141,14 +195,68 @@ const EventSchedulePage = () => {
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const dragGhostTimeRef = useRef<HTMLElement | null>(null);
   const dragShimRef = useRef<HTMLElement | null>(null);
+  const expandAllDaysRef = useRef(false);
+  type AnchorRect = {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+    width: number;
+    height: number;
+  };
+  const snapshotAnchorRect = (el: HTMLElement | null): AnchorRect | null => {
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return {
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height
+    };
+  };
   const [timePicker, setTimePicker] = useState<{
     entry: ScheduleEntry;
     day: DayBucket;
     anchor: HTMLElement | null;
+    anchorRect: AnchorRect | null;
   } | null>(null);
   const timePickerRef = useRef<Flatpickr | null>(null);
   const [pendingPickerDate, setPendingPickerDate] = useState<Date | null>(null);
   const pickerPortalRef = useRef<HTMLDivElement | null>(null);
+  const [previewEntry, setPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
+  const previewCardStyle = useMemo(() => {
+    if (!previewEntry) return undefined;
+    return {
+      width: 'min(720px, 92vw)',
+      maxHeight: '85vh',
+      overflowY: 'auto' as const,
+      boxShadow: '0 18px 48px rgba(0,0,0,0.4), 0 0 0 1px var(--modal-border)',
+      cursor: 'pointer',
+      backgroundColor: 'var(--modal-surface)',
+      border: '1px solid var(--modal-border)',
+      color: 'var(--text-strong)'
+    };
+  }, [previewEntry]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const hasOverlay = !!previewEntry || !!timePicker;
+    if (hasOverlay) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      if (hasOverlay) {
+        document.body.style.overflow = '';
+      }
+    };
+  }, [previewEntry, timePicker]);
+  const [airfields, setAirfields] = useState<Airfield[]>([]);
+  const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
+  const normalizeName = (val: string | null | undefined) => cleanLocation(val || '').toLowerCase();
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
     const rect = rowNode.getBoundingClientRect();
     const ghost = document.createElement('div');
@@ -211,6 +319,22 @@ const EventSchedulePage = () => {
     Other: true,
     Meal: true
   });
+  const locationCoordinates = useCallback(
+    (name: string | null | undefined) => {
+      const target = normalizeName(name);
+      if (!target) return null;
+      const inn = eventData?.innhopps?.find((i) => normalizeName(i.name) === target);
+      if (inn?.coordinates) return inn.coordinates;
+      const acc = accommodations.find((a) => normalizeName(a.name) === target);
+      if (acc?.coordinates) return acc.coordinates;
+      const other = others.find((o) => normalizeName(o.name) === target);
+      if (other?.coordinates) return other.coordinates;
+      const af = airfields.find((a) => normalizeName(a.name) === target);
+      if (af?.coordinates) return af.coordinates;
+      return null;
+    },
+    [accommodations, airfields, eventData?.innhopps, others]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -219,13 +343,14 @@ const EventSchedulePage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [evt, transportList, accList, participantList, otherList, mealList] = await Promise.all([
+        const [evt, transportList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
           getEvent(Number(eventId)),
           listTransports(),
           listAccommodations(Number(eventId)),
           listParticipantProfiles(),
           listOthers(),
-          listMeals()
+          listMeals(),
+          listAirfields()
         ]);
         if (cancelled) return;
         setEventData(evt);
@@ -234,6 +359,7 @@ const EventSchedulePage = () => {
         setParticipants(Array.isArray(participantList) ? participantList : []);
         setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
         setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
+        setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load schedule');
@@ -258,13 +384,14 @@ const EventSchedulePage = () => {
       }
     setMessage(null);
     try {
-      const [evt, transportList, accList, participantList, otherList, mealList] = await Promise.all([
+      const [evt, transportList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
         getEvent(Number(eventId)),
         listTransports(),
         listAccommodations(Number(eventId)),
         listParticipantProfiles(),
         listOthers(),
-        listMeals()
+        listMeals(),
+        listAirfields()
       ]);
       setEventData(evt);
       setTransports(Array.isArray(transportList) ? transportList.filter((t) => t.event_id === Number(eventId)) : []);
@@ -272,6 +399,7 @@ const EventSchedulePage = () => {
       setParticipants(Array.isArray(participantList) ? participantList : []);
       setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
       setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
+      setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load schedule');
     } finally {
@@ -372,6 +500,20 @@ const EventSchedulePage = () => {
     }
   };
 
+  const handleCopy = async () => {
+    if (!eventId || copying) return;
+    setCopying(true);
+    setMessage(null);
+    try {
+      const cloned = await copyEvent(Number(eventId));
+      navigate(`/events/${cloned.id}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to copy event');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
   const expandedDaysRef = useRef(expandedDays);
   const scheduleStateRestored = useRef(false);
@@ -419,7 +561,14 @@ const EventSchedulePage = () => {
     if (!eventId || scheduleStateRestored.current) return;
     const key = `event-schedule-state:${eventId}`;
     const saved = sessionStorage.getItem(key);
-    if (saved) {
+    const suppressHighlight = !!(location.state as any)?.suppressHighlight;
+    if (suppressHighlight) {
+      expandAllDaysRef.current = true;
+      const nextState = { ...(location.state as any) };
+      delete (nextState as any).suppressHighlight;
+      navigate('.', { replace: true, state: Object.keys(nextState).length ? nextState : null });
+    }
+    if (saved && !suppressHighlight) {
       try {
         const parsed = JSON.parse(saved);
         if (parsed?.expandedDays) {
@@ -432,14 +581,18 @@ const EventSchedulePage = () => {
         // ignore
       }
     }
-    const savedHighlight = sessionStorage.getItem(`event-schedule-highlight:${eventId}`);
-    if (savedHighlight) {
-      setHighlightId(savedHighlight);
-      sessionStorage.removeItem(`event-schedule-highlight:${eventId}`);
-    }
-    const navHighlight = (location.state as any)?.highlightId;
-    if (navHighlight) {
-      setHighlightId(navHighlight);
+    if (suppressHighlight) {
+      setTimeout(() => window.scrollTo(0, 0), 0);
+    } else {
+      const savedHighlight = sessionStorage.getItem(`event-schedule-highlight:${eventId}`);
+      if (savedHighlight) {
+        setHighlightId(savedHighlight);
+        sessionStorage.removeItem(`event-schedule-highlight:${eventId}`);
+      }
+      const navHighlight = (location.state as any)?.highlightId;
+      if (navHighlight) {
+        setHighlightId(navHighlight);
+      }
     }
     scheduleStateRestored.current = true;
   }, [eventId, location.state]);
@@ -530,7 +683,7 @@ const EventSchedulePage = () => {
   };
 
   const buildIsoFromPickerDate = (date: Date) => {
-    return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours(), date.getMinutes(), 0, 0)).toISOString();
+    return date.toISOString();
   };
 
   const applyLocalUpdate = useCallback(
@@ -549,7 +702,7 @@ const EventSchedulePage = () => {
       } else if (entry.type === 'Transport') {
         setTransports((prev) =>
           Array.isArray(prev)
-            ? prev.map((t) => (t.id === Number(entry.id.split('-').pop()) ? { ...t, scheduled_at: newIso || null } : t))
+            ? prev.map((t) => (t.id === Number(entry.id.split('-').pop()) ? { ...t, scheduled_at: newIso ?? undefined } : t))
             : prev
         );
       } else if (entry.type === 'Other') {
@@ -609,12 +762,19 @@ const EventSchedulePage = () => {
     setExpandedDays((prev) => {
       const next = { ...prev };
       dayBuckets.forEach((day) => {
+        if (expandAllDaysRef.current) {
+          next[day.key] = true;
+          return;
+        }
         if (typeof next[day.key] === 'boolean') return;
         const isPast = day.date < today;
         next[day.key] = !isPast;
       });
       return next;
     });
+    if (expandAllDaysRef.current) {
+      expandAllDaysRef.current = false;
+    }
   }, [dayBuckets]);
 
   const updateScheduledAt = useCallback(
@@ -651,17 +811,20 @@ const EventSchedulePage = () => {
           await updateInnhopp(numericId, payload);
         } else if (entry.type === 'Transport') {
           const full = await getTransport(numericId);
+          const vehicleIds =
+            Array.isArray((full as any).vehicles)
+              ? (full as any).vehicles
+                  .map((v: any) => v.event_vehicle_id || v.id)
+                  .filter((id: any) => typeof id === 'number')
+              : [];
           await updateTransport(numericId, {
             pickup_location: full.pickup_location,
             destination: full.destination,
             passenger_count: full.passenger_count,
             scheduled_at: newIso || undefined,
+            notes: full.notes || undefined,
             event_id: Number(full.event_id),
-            vehicle_ids: Array.isArray((full as any).vehicles)
-              ? (full as any).vehicles
-                  .map((v: any) => v.event_vehicle_id || v.id)
-                  .filter((id: any) => typeof id === 'number')
-              : []
+            vehicle_ids: vehicleIds.length > 0 ? vehicleIds : undefined
           });
         } else if (entry.type === 'Other') {
           const full = await getOther(numericId);
@@ -808,7 +971,8 @@ const EventSchedulePage = () => {
       }, 0)
     : 0;
   const remaining = Math.max(totalSlots - nonStaffCount, 0);
-  const isFull = totalSlots > 0 && remaining === 0;
+  const isFull = remaining === 0;
+  const pastEvent = eventData.status === 'past';
   const actionButtonStyle = {
     fontSize: '1.05rem',
     fontWeight: 700,
@@ -823,9 +987,11 @@ const EventSchedulePage = () => {
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <h2 style={{ margin: 0 }}>{eventData.name}</h2>
             <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-            <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-              {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-            </span>
+            {!pastEvent && (
+              <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+              </span>
+            )}
           </div>
           <p className="event-location">{eventData.location || 'Location TBD'}</p>
         </div>
@@ -836,7 +1002,7 @@ const EventSchedulePage = () => {
             style={actionButtonStyle}
             onClick={() => navigate(`/events/${eventData.id}/details`)}
           >
-            View details
+            Details
           </button>
           <button
             className="ghost"
@@ -844,7 +1010,16 @@ const EventSchedulePage = () => {
             style={actionButtonStyle}
             onClick={() => navigate(`/manifests?eventId=${eventData.id}`)}
           >
-            View manifest
+            Manifest
+          </button>
+          <button
+            className="ghost"
+            type="button"
+            style={actionButtonStyle}
+            onClick={handleCopy}
+            disabled={copying}
+          >
+            {copying ? 'Copying…' : 'Copy'}
           </button>
           <button
             className="ghost danger"
@@ -853,10 +1028,10 @@ const EventSchedulePage = () => {
             onClick={handleDelete}
             disabled={deleting}
           >
-            {deleting ? 'Deleting…' : 'Delete event'}
+            {deleting ? 'Deleting…' : 'Delete'}
           </button>
           <button className="ghost" type="button" style={actionButtonStyle} onClick={() => navigate('/events')}>
-            Back to events
+            Back
           </button>
         </div>
       </header>
@@ -1030,6 +1205,11 @@ const EventSchedulePage = () => {
             {expandedDays[day.key] === false ? null : (() => {
               const entries: ScheduleEntry[] = [];
               day.innhopps.forEach((i) => {
+                const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
+                const elevationDiff =
+                  typeof i.elevation === 'number' && typeof takeoff?.elevation === 'number'
+                    ? i.elevation - takeoff.elevation
+                    : null;
                 entries.push({
                   id: `i-${i.id}`,
                   hourKey: formatTimeLabel(i.scheduled_at),
@@ -1043,10 +1223,44 @@ const EventSchedulePage = () => {
                   to: `/events/${eventData.id}/innhopps/${i.id}`,
                   ready: isInnhoppReady(i),
                   missingCoordinates: !hasText(i.coordinates),
+                  description: i.reason_for_choice || i.primary_landing_area?.description || null,
+                  notes: i.notes || undefined,
+                  innhoppReason: i.reason_for_choice || null,
+                  innhoppElevation: i.elevation ?? null,
+                  innhoppCoordinates: i.coordinates || null,
+                  innhoppTakeoffName: takeoff?.name || null,
+                  innhoppElevationDiff: elevationDiff,
+                  innhoppPrimaryName: i.primary_landing_area?.name || null,
+                  innhoppPrimarySize: i.primary_landing_area?.size || null,
+                  innhoppSecondaryName: i.secondary_landing_area?.name || null,
+                  innhoppSecondarySize: i.secondary_landing_area?.size || null,
+                  innhoppRisk: i.risk_assessment || null,
+                  innhoppMinimumRequirements: i.minimum_requirements || null,
+                  innhoppRescueBoat: i.rescue_boat ?? null,
+                  innhoppLandOwnerPermission: i.land_owner_permission ?? null,
                   scheduledAt: i.scheduled_at
                 });
               });
               day.transports.forEach((t) => {
+                const pickupCoords = locationCoordinates(t.pickup_location);
+                const destCoords = locationCoordinates(t.destination);
+                const hasPassengers = Number.isFinite(t.passenger_count) && t.passenger_count >= 0;
+                const hasVehicles = Array.isArray(t.vehicles) && t.vehicles.length > 0;
+                const complete =
+                  hasText(t.pickup_location) &&
+                  hasText(t.destination) &&
+                  hasText(t.scheduled_at) &&
+                  hasPassengers &&
+                  hasVehicles &&
+                  hasText(pickupCoords) &&
+                  hasText(destCoords);
+                const vehicles = Array.isArray(t.vehicles)
+                  ? t.vehicles.map((v) => ({
+                      name: v.name,
+                      driver: v.driver || '',
+                      passenger_capacity: v.passenger_capacity
+                    }))
+                  : [];
                 entries.push({
                   id: `t-${t.id}`,
                   hourKey: formatTimeLabel(t.scheduled_at),
@@ -1058,6 +1272,12 @@ const EventSchedulePage = () => {
                   subtitle: '',
                   type: 'Transport',
                   to: `/logistics/${t.id}`,
+                  transportComplete: complete,
+                  missingCoordinates: !pickupCoords || !destCoords,
+                  transportRouteOrigin: pickupCoords || null,
+                  transportRouteDestination: destCoords || null,
+                  notes: t.notes || null,
+                  vehicles,
                   scheduledAt: t.scheduled_at || undefined
                 });
               });
@@ -1074,6 +1294,9 @@ const EventSchedulePage = () => {
                   type: 'Other',
                   to: `/logistics/others/${o.id}`,
                   missingCoordinates: !hasText(o.coordinates),
+                  coordinates: o.coordinates || null,
+                  description: o.description || null,
+                  notes: o.notes || null,
                   otherComplete: hasText(o.name) && hasText(o.coordinates) && hasText(o.scheduled_at),
                   scheduledAt: o.scheduled_at || undefined
                 });
@@ -1091,6 +1314,8 @@ const EventSchedulePage = () => {
                   type: 'Meal',
                   to: `/logistics/meals/${m.id}`,
                   mealComplete: hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at),
+                  location: m.location || null,
+                  notes: m.notes || null,
                   scheduledAt: m.scheduled_at || undefined
                 });
               });
@@ -1107,8 +1332,10 @@ const EventSchedulePage = () => {
                     subtitle: '',
                     type: 'Accommodation',
                     booked: !!a.booked,
+                    coordinates: a.coordinates || null,
                     to: `/events/${eventId}/accommodations/${a.id}`,
                     missingCoordinates: !hasText(a.coordinates),
+                    notes: a.notes || null,
                     scheduledAt: a.check_in_at
                   });
                 }
@@ -1124,8 +1351,10 @@ const EventSchedulePage = () => {
                     subtitle: '',
                     type: 'Accommodation',
                     booked: !!a.booked,
+                    coordinates: a.coordinates || null,
                     to: `/events/${eventId}/accommodations/${a.id}`,
                     missingCoordinates: !hasText(a.coordinates),
+                    notes: a.notes || null,
                     scheduledAt: a.check_out_at
                   });
                 }
@@ -1138,6 +1367,7 @@ const EventSchedulePage = () => {
                     subtitle: '',
                     type: 'Accommodation',
                     booked: !!a.booked,
+                    coordinates: a.coordinates || null,
                     to: `/events/${eventId}/accommodations/${a.id}`,
                     missingCoordinates: !hasText(a.coordinates),
                     scheduledAt: null
@@ -1208,7 +1438,7 @@ const EventSchedulePage = () => {
               const renderEntry = (entry: Entry, index: number) => {
                 const badgeStyle = typeBadgeStyles[entry.type];
                 const missingCoords = !!entry.missingCoordinates;
-                const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center', display: 'inline-block' as const };
+                const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
                 let statusBadge: JSX.Element | null = null;
                 if (entry.type === 'Accommodation') {
                   statusBadge =
@@ -1251,6 +1481,16 @@ const EventSchedulePage = () => {
                       !
                     </span>
                   );
+                } else if (entry.type === 'Transport') {
+                  statusBadge = entry.transportComplete ? (
+                    <span className="badge success" style={compactBadgeStyle}>
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="badge danger" style={compactBadgeStyle}>
+                      !
+                    </span>
+                  );
                 } else if (missingCoords) {
                   statusBadge = (
                     <span className="badge danger" style={compactBadgeStyle} title="Coordinates missing" aria-label="Coordinates missing">
@@ -1266,7 +1506,7 @@ const EventSchedulePage = () => {
                         style={{
                           marginLeft: 'auto',
                           display: 'grid',
-                          gridTemplateColumns: 'minmax(56px, 80px) minmax(110px, 150px)',
+                          gridTemplateColumns: 'minmax(56px, 80px) minmax(130px, 190px)',
                           alignItems: 'center',
                           justifyItems: 'center',
                           columnGap: '0.5rem'
@@ -1274,8 +1514,8 @@ const EventSchedulePage = () => {
                       >
                         {statusBadge || <span style={{ visibility: 'hidden', ...compactBadgeStyle }}>!</span>}
                         <span
-                          className="badge"
-                          style={{ ...badgeStyle, borderLeft: '1px solid #d7dfe7', paddingLeft: '0.65rem' }}
+                          className="badge schedule-type-badge"
+                          style={badgeStyle}
                           aria-label={entry.type}
                         >
                           {entry.type}
@@ -1285,6 +1525,18 @@ const EventSchedulePage = () => {
                     {entry.subtitle && <div className="muted">{entry.subtitle}</div>}
                   </div>
                 );
+                const handleEntryClick = (e: MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setPreviewEntry({ entry, day });
+                };
+                const isHighlighted = entry.id === highlightId;
+                const highlightedFrame = isHighlighted
+                  ? {
+                      boxShadow: 'inset 0 0 0 2px #3b82f6',
+                      borderRadius: '8px'
+                    }
+                  : undefined;
                 const commonProps = {
                   draggable: entry.type !== 'Accommodation',
                   onDragStart: (e: DragEvent) => {
@@ -1342,15 +1594,10 @@ const EventSchedulePage = () => {
                     display: 'block',
                     width: '100%',
                     flex: 1,
-                    padding: '0.25rem 0.4rem',
-                    margin: '-0.25rem -0.4rem',
-                    ...(entry.id === highlightId
-                      ? {
-                          boxShadow: '0 0 0 2px #3b82f6',
-                          borderRadius: '8px'
-                        }
-                      : undefined)
-                  }
+                    padding: '0.5rem 0.8rem',
+                    margin: '-0.25rem -1.6rem'
+                  },
+                  onClick: handleEntryClick
                 };
                 return entry.to ? (
                   <Link
@@ -1358,7 +1605,8 @@ const EventSchedulePage = () => {
                     to={entry.to}
                     className="card-link"
                     {...commonProps}
-                    onClick={() => {
+                    onClick={(e) => {
+                      handleEntryClick(e);
                       if (eventData?.id) {
                         try {
                           sessionStorage.setItem(`event-schedule-highlight:${eventData.id}`, entry.id);
@@ -1378,14 +1626,7 @@ const EventSchedulePage = () => {
                       display: 'block',
                       width: '100%',
                       flex: 1,
-                      padding: '0.25rem 0.4rem',
-                      margin: '-0.25rem -0.4rem',
-                      ...(entry.id === highlightId
-                        ? {
-                            boxShadow: '0 0 0 2px #3b82f6',
-                            borderRadius: '8px'
-                          }
-                        : undefined)
+                      padding: '0.25rem 0.4rem'
                     }}
                   >
                     {content}
@@ -1418,11 +1659,26 @@ const EventSchedulePage = () => {
                   Nothing scheduled.
                 </p>
               ) : (
-                <ul className="status-list" style={{ margin: 0 }}>
-                  {orderedEntries.map((item, idx) => (
+                <ul className="status-list schedule-list" style={{ margin: 0 }}>
+                  {orderedEntries.map((item, idx) => {
+                    const isHighlighted = item.id === highlightId;
+                    const isTimeEditing = timePicker?.entry.id === item.id;
+                    const highlightedFrame = isHighlighted || isTimeEditing
+                      ? {
+                          boxShadow: 'inset 0 0 0 2px #3b82f6',
+                          borderRadius: '8px'
+                        }
+                      : undefined;
+                    return (
                     <li
                       key={item.id}
-                      style={{ padding: '0.35rem 0', borderBottom: '1px solid #e1e7ee', width: '100%' }}
+                      style={{
+                        display: 'block',
+                        padding: '0.5rem 0',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+                        width: '100%',
+                        overflow: 'hidden'
+                      }}
                       onDragOver={(e) => {
                         if (!dragging) return;
                         e.preventDefault();
@@ -1441,141 +1697,564 @@ const EventSchedulePage = () => {
                         handleDrop(idx);
                       }}
                     >
-                      <div style={{ display: 'grid', gridTemplateColumns: '5.5rem 1fr', gap: '0.5rem', alignItems: 'center', width: '100%' }}>
+                      <div
+                        className="schedule-entry"
+                        style={highlightedFrame}
+                      >
                         <div
                           style={{ fontWeight: 600 }}
-                          className={`muted schedule-time ${
-                            timePicker && timePicker.entry.id === item.id ? 'schedule-time-active' : ''
-                          }`}
+                          className="muted schedule-time"
                           data-ghost-time="time"
                           role="button"
                           tabIndex={0}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setTimePicker({ entry: item, day, anchor: e.currentTarget });
+                            setTimePicker({
+                              entry: item,
+                              day,
+                              anchor: e.currentTarget,
+                              anchorRect: snapshotAnchorRect(e.currentTarget)
+                            });
                           }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               e.stopPropagation();
-                              setTimePicker({ entry: item, day, anchor: e.currentTarget });
+                              setTimePicker({
+                                entry: item,
+                                day,
+                                anchor: e.currentTarget,
+                                anchorRect: snapshotAnchorRect(e.currentTarget)
+                              });
                             }
                           }}
                           title="Edit time"
                         >
                           {item.hourKey}
                         </div>
-                        <div style={{ width: '100%' }}>{renderEntry(item, idx)}</div>
+                        <div className="schedule-entry-content">{renderEntry(item, idx)}</div>
                       </div>
                     </li>
-                  ))}
+                  );
+                  })}
                 </ul>
               );
             })()}
           </article>
         ))
       )}
-      {timePicker ? (
-        <div
-          ref={pickerPortalRef}
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 9998,
-            background: 'rgba(0,0,0,0.08)'
-          }}
-          onClick={() => {
-            setTimePicker(null);
-            setPendingPickerDate(null);
-          }}
-        >
-          {(() => {
-            const rect = timePicker.anchor?.getBoundingClientRect();
-            const pad = 12;
-            const estWidth = 340;
-            const estHeight = 360;
-            const viewW = typeof window !== 'undefined' ? window.innerWidth : estWidth;
-            const viewH = typeof window !== 'undefined' ? window.innerHeight : estHeight;
-            const viewportLeft = pad;
-            const viewportRight = viewW - pad;
-            const viewportTop = pad;
-            const viewportBottom = viewH - pad;
+      {timePicker && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              ref={pickerPortalRef}
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 9998,
+                background: 'var(--overlay-scrim-subtle)'
+              }}
+              onClick={() => {
+                setTimePicker(null);
+                setPendingPickerDate(null);
+              }}
+            >
+              {(() => {
+                const rect = timePicker.anchorRect || snapshotAnchorRect(timePicker.anchor);
+                const pad = 12;
+                const estWidth = 340;
+                const estHeight = 360;
+                const viewW = typeof window !== 'undefined' ? window.innerWidth : estWidth;
+                const viewH = typeof window !== 'undefined' ? window.innerHeight : estHeight;
+                const viewportLeft = pad;
+                const viewportRight = viewW - pad;
+                const viewportTop = pad;
+                const viewportBottom = viewH - pad;
 
-            const baseLeft = rect ? rect.right + 12 : viewportLeft;
-            const spaceAbove = rect ? rect.top - viewportTop : estHeight;
-            const spaceBelow = rect ? viewportBottom - rect.bottom : estHeight;
-            const preferAbove = spaceAbove >= estHeight || spaceAbove > spaceBelow;
-            const baseTop = rect
-              ? preferAbove
-                ? rect.top - estHeight - 12
-                : rect.bottom + 12
-              : viewportTop + 24;
-            const left = Math.min(Math.max(baseLeft, viewportLeft), viewportRight - estWidth);
-            const top = Math.min(Math.max(baseTop, viewportTop), viewportBottom - estHeight);
-            return (
-              <div
-                style={{
-                  position: 'fixed',
-                  top,
-                  left,
-                  background: '#fff',
-                  border: '1px solid #d7dfe7',
-                  borderRadius: '10px',
-                  boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
-                  padding: '0.85rem',
-                  display: 'inline-flex',
-                  flexDirection: 'column',
-                  gap: '0.6rem',
-                  minWidth: '280px',
-                  maxWidth: '90vw'
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="schedule-time-picker"
-              >
-                <Flatpickr
-                  ref={timePickerRef}
-                  options={{
-                    enableTime: true,
-                    time_24hr: true,
-                    dateFormat: 'Y-m-d H:i',
-                    allowInput: true,
-                    enableMobile: true,
-                    inline: true,
-                    clickOpens: false,
-                    closeOnSelect: false
-                  }}
-                  onChange={(dates) => setPendingPickerDate(dates[0] ?? null)}
-                  onValueUpdate={(dates) => setPendingPickerDate(dates[0] ?? null)}
-                />
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => handleTimeChange()}
-                    style={{ padding: '0.35rem 0.9rem' }}
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => {
-                      setTimePicker(null);
-                      setPendingPickerDate(null);
+                const baseLeft = rect ? rect.right + 12 : viewportLeft;
+                const spaceAbove = rect ? rect.top - viewportTop : estHeight;
+                const spaceBelow = rect ? viewportBottom - rect.bottom : estHeight;
+                const preferAbove = spaceAbove >= estHeight || spaceAbove > spaceBelow;
+                const baseTop = rect
+                  ? preferAbove
+                    ? rect.top - estHeight - 12
+                    : rect.bottom + 12
+                  : viewportTop + 24;
+                const left = Math.min(Math.max(baseLeft, viewportLeft), viewportRight - estWidth);
+                const top = Math.min(Math.max(baseTop, viewportTop), viewportBottom - estHeight);
+                return (
+                  <div
+                    style={{
+                      position: 'fixed',
+                      top,
+                      left,
+                      background: 'var(--modal-surface)',
+                      border: '1px solid var(--modal-border)',
+                      borderRadius: '10px',
+                      boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
+                      padding: '0.85rem',
+                      display: 'inline-flex',
+                      flexDirection: 'column',
+                      gap: '0.6rem',
+                      minWidth: '280px',
+                      maxWidth: '90vw'
                     }}
-                    style={{ padding: '0.35rem 0.9rem' }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="schedule-time-picker"
                   >
-                    Cancel
-                  </button>
-                </div>
+                    <Flatpickr
+                      ref={timePickerRef}
+                      options={{
+                        enableTime: true,
+                        time_24hr: true,
+                        dateFormat: 'Y-m-d H:i',
+                        allowInput: true,
+                        inline: true,
+                        clickOpens: false,
+                        closeOnSelect: false
+                      }}
+                      onChange={(dates) => setPendingPickerDate(dates[0] ?? null)}
+                      onValueUpdate={(dates) => setPendingPickerDate(dates[0] ?? null)}
+                    />
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => handleTimeChange()}
+                        style={{ padding: '0.35rem 0.9rem' }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          setTimePicker(null);
+                          setPendingPickerDate(null);
+                        }}
+                        style={{ padding: '0.35rem 0.9rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>,
+            document.body
+          )
+        : null}
+      {previewEntry &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            onClick={() => {
+              setPreviewEntry(null);
+            }}
+            role="button"
+            tabIndex={-1}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'var(--overlay-scrim)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 9999,
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem 1rem'
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setPreviewEntry(null);
+              } else if (e.key === 'Enter' && previewEntry.entry.to) {
+                navigate(previewEntry.entry.to);
+                setPreviewEntry(null);
+              }
+            }}
+          >
+            <div
+              className="card"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (previewEntry.entry.to) {
+                  setHighlightId(previewEntry.entry.id);
+                  navigate(previewEntry.entry.to);
+                }
+                setPreviewEntry(null);
+              }}
+              style={previewCardStyle}
+            >
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0 }}>{previewEntry.entry.title}</h3>
+              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                {(() => {
+                  const badgeStyle = typeBadgeStyles[previewEntry.entry.type];
+                  const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
+                  if (previewEntry.entry.type === 'Transport') {
+                    return (
+                      <>
+                        <span
+                          className={`badge ${previewEntry.entry.transportComplete ? 'success' : 'danger'}`}
+                          style={compactBadgeStyle}
+                        >
+                          {previewEntry.entry.transportComplete ? '✓' : '!'}
+                        </span>
+                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                          {previewEntry.entry.type}
+                        </span>
+                      </>
+                    );
+                  }
+                  if (previewEntry.entry.type === 'Accommodation') {
+                    return (
+                      <>
+                        <span
+                          className={`badge ${
+                            previewEntry.entry.booked && !previewEntry.entry.missingCoordinates ? 'success' : 'danger'
+                          }`}
+                          style={compactBadgeStyle}
+                        >
+                          {previewEntry.entry.booked && !previewEntry.entry.missingCoordinates ? '✓' : '!'}
+                        </span>
+                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                          {previewEntry.entry.type}
+                        </span>
+                      </>
+                    );
+                  }
+                  if (previewEntry.entry.type === 'Innhopp') {
+                    return (
+                      <>
+                        <span
+                          className={`badge ${previewEntry.entry.ready ? 'success' : 'danger'}`}
+                          style={compactBadgeStyle}
+                        >
+                          {previewEntry.entry.ready ? '✓' : '!'}
+                        </span>
+                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                          {previewEntry.entry.type}
+                        </span>
+                      </>
+                    );
+                  }
+                  if (previewEntry.entry.type === 'Other') {
+                    return (
+                      <>
+                        <span
+                          className={`badge ${previewEntry.entry.otherComplete ? 'success' : 'danger'}`}
+                          style={compactBadgeStyle}
+                        >
+                          {previewEntry.entry.otherComplete ? '✓' : '!'}
+                        </span>
+                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                          {previewEntry.entry.type}
+                        </span>
+                      </>
+                    );
+                  }
+                  if (previewEntry.entry.type === 'Meal') {
+                    return (
+                      <>
+                        <span
+                          className={`badge ${previewEntry.entry.mealComplete ? 'success' : 'danger'}`}
+                          style={compactBadgeStyle}
+                        >
+                          {previewEntry.entry.mealComplete ? '✓' : '!'}
+                        </span>
+                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                          {previewEntry.entry.type}
+                        </span>
+                      </>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
-            );
-          })()}
-        </div>
-      ) : null}
+            </div>
+            <div
+              className="card-body"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.1rem' }}
+            >
+              {(() => {
+                const renderField = (key: string, label: string, value: React.ReactNode) => (
+                  <div key={key}>
+                    <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>{label}</div>
+                    <div>{value ?? '—'}</div>
+                  </div>
+                );
+
+                if (previewEntry.entry.type === 'Innhopp') {
+                  const fields: React.ReactNode[] = [];
+                  if (previewEntry.entry.scheduledAt) {
+                    fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(previewEntry.entry.scheduledAt)));
+                  }
+                  fields.push(renderField('reason', 'REASON FOR CHOICE', previewEntry.entry.innhoppReason || '—'));
+                  fields.push(
+                    renderField(
+                      'elevation',
+                      'ELEVATION',
+                      previewEntry.entry.innhoppElevation != null
+                        ? formatMetersWithFeet(previewEntry.entry.innhoppElevation)
+                        : '—'
+                    )
+                  );
+                  fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', previewEntry.entry.innhoppTakeoffName || '—'));
+                  fields.push(
+                    renderField(
+                      'elevation_diff',
+                      'ELEVATION DIFFERENCE',
+                      previewEntry.entry.innhoppElevationDiff != null
+                        ? formatMetersWithFeet(previewEntry.entry.innhoppElevationDiff)
+                        : '—'
+                    )
+                  );
+                  fields.push(
+                    renderField(
+                      'rescue_boat',
+                      'RESCUE BOAT',
+                      previewEntry.entry.innhoppRescueBoat == null
+                        ? '—'
+                        : previewEntry.entry.innhoppRescueBoat
+                        ? 'Yes'
+                        : 'No'
+                    )
+                  );
+                  fields.push(
+                    renderField(
+                      'primary',
+                      'PRIMARY AREA',
+                      previewEntry.entry.innhoppPrimaryName
+                        ? `${previewEntry.entry.innhoppPrimaryName}${
+                            previewEntry.entry.innhoppPrimarySize ? ` (${previewEntry.entry.innhoppPrimarySize})` : ''
+                          }`
+                        : '—'
+                    )
+                  );
+                  fields.push(
+                    renderField(
+                      'secondary',
+                      'SECONDARY AREA',
+                      previewEntry.entry.innhoppSecondaryName
+                        ? `${previewEntry.entry.innhoppSecondaryName}${
+                            previewEntry.entry.innhoppSecondarySize ? ` (${previewEntry.entry.innhoppSecondarySize})` : ''
+                          }`
+                        : '—'
+                    )
+                  );
+                  fields.push(renderField('risk', 'RISK ASSESSMENT', previewEntry.entry.innhoppRisk || '—'));
+                  fields.push(
+                    renderField('minimum', 'MINIMUM REQUIREMENTS', previewEntry.entry.innhoppMinimumRequirements || '—')
+                  );
+                  fields.push(renderField('notes', 'NOTES', (previewEntry.entry as any).notes || '—'));
+                  fields.push(
+                    renderField(
+                      'landowners',
+                      'LANDOWNERS PERMISSION',
+                      previewEntry.entry.innhoppLandOwnerPermission == null
+                        ? '—'
+                        : previewEntry.entry.innhoppLandOwnerPermission
+                        ? 'Yes'
+                        : 'No'
+                    )
+                  );
+                  if (previewEntry.entry.innhoppCoordinates) {
+                    fields.push(
+                      <div
+                        key="open-maps"
+                        style={{
+                          gridColumn: '1 / -1',
+                          display: 'grid',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          textAlign: 'center'
+                        }}
+                      >
+                        <div>
+                          <button
+                            type="button"
+                            className="link-button"
+                            style={{ fontSize: '1rem' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                  previewEntry.entry.innhoppCoordinates || ''
+                                )}`,
+                                '_blank'
+                              );
+                            }}
+                          >
+                            Open in Maps
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return fields;
+                }
+
+                return (
+                  <>
+                    {previewEntry.entry.type === 'Accommodation' ? (
+                      <>
+                        <div key="booked">
+                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>BOOKED</div>
+                          <div>{previewEntry.entry.booked ? 'Yes' : 'No'}</div>
+                        </div>
+                        {previewEntry.entry.scheduledAt ? (
+                          <div key="scheduled">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                            <div>{formatDateTime(previewEntry.entry.scheduledAt)}</div>
+                          </div>
+                        ) : null}
+                        <div key="notes">
+                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                          <div>{(previewEntry.entry as any).notes || '—'}</div>
+                        </div>
+                        <div
+                          style={{
+                            gridColumn: '1 / -1',
+                            display: 'flex',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {previewEntry.entry.coordinates ? (
+                            <button
+                              type="button"
+                              className="link-button"
+                              style={{ fontSize: '1rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(
+                                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                    previewEntry.entry.coordinates || ''
+                                  )}`,
+                                  '_blank'
+                                );
+                              }}
+                            >
+                              Open in Maps
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {previewEntry.entry.subtitle ? (
+                          <div key="subtitle">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SUBTITLE</div>
+                            <div>{previewEntry.entry.subtitle}</div>
+                          </div>
+                        ) : null}
+                        {previewEntry.entry.type === 'Meal' && (
+                          <div key="meal-location">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>LOCATION</div>
+                            <div>{(previewEntry.entry as any).location || '—'}</div>
+                          </div>
+                        )}
+                        {previewEntry.entry.scheduledAt ? (
+                          <div key="scheduled">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                            <div>{formatDateTime(previewEntry.entry.scheduledAt)}</div>
+                          </div>
+                        ) : null}
+                        <div key="notes">
+                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                          <div>{(previewEntry.entry as any).notes || '—'}</div>
+                        </div>
+                        {previewEntry.entry.type === 'Transport' && (previewEntry.entry as any).vehicles ? (
+                          <div key="vehicles">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
+                            <div style={{ marginTop: '0.15rem' }}>
+                              {((previewEntry.entry as any).vehicles as any[]).length === 0 ? (
+                                <div className="muted">—</div>
+                              ) : (
+                                ((previewEntry.entry as any).vehicles as any[]).map((v, idx) => (
+                                  <div key={idx} className="muted">
+                                    <strong>{v.name}</strong>
+                                    {v.driver ? ` (Driver: ${v.driver})` : ''}
+                                    {typeof v.passenger_capacity === 'number' ? ` • Capacity: ${v.passenger_capacity}` : ''}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                        {previewEntry.entry.type === 'Transport' &&
+                        (previewEntry.entry as any).transportRouteOrigin &&
+                        (previewEntry.entry as any).transportRouteDestination ? (
+                          <div
+                            key="route"
+                            style={{
+                              gridColumn: '1 / -1',
+                              display: 'flex',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="link-button"
+                              style={{ fontSize: '1rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const origin = (previewEntry.entry as any).transportRouteOrigin || '';
+                                const dest = (previewEntry.entry as any).transportRouteDestination || '';
+                                window.open(
+                                  `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+                                    origin
+                                  )}&destination=${encodeURIComponent(dest)}`,
+                                  '_blank'
+                                );
+                              }}
+                            >
+                              Open route
+                            </button>
+                          </div>
+                        ) : null}
+                        {previewEntry.entry.type === 'Other' && previewEntry.entry.coordinates ? (
+                          <div
+                            key="other-maps"
+                            style={{
+                              gridColumn: '1 / -1',
+                              display: 'flex',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            <button
+                              type="button"
+                              className="link-button"
+                              style={{ fontSize: '1rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(
+                                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                    previewEntry.entry.coordinates || ''
+                                  )}`,
+                                  '_blank'
+                                );
+                              }}
+                            >
+                              Open in Maps
+                            </button>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>,
+          document.body
+        )}
     </section>
   );
 };

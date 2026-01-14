@@ -1,12 +1,14 @@
 package participants
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
@@ -30,6 +32,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles", h.createProfile)
 	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles/{profileID}", h.getProfile)
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Put("/profiles/{profileID}", h.updateProfile)
+	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Delete("/profiles/{profileID}", h.deleteProfile)
 	return r
 }
 
@@ -54,6 +57,7 @@ var allowedRoles = map[string]struct{}{
 	"Driver":      {},
 	"Pilot":       {},
 	"COP":         {},
+	"Photo":       {},
 }
 
 func normalizeRoles(input []string) []string {
@@ -140,6 +144,11 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 	profile.Roles = roles
 
 	if err := row.Scan(&profile.ID, &profile.CreatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if ok := errors.As(err, &pgErr); ok && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "a participant with that email already exists")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to create participant")
 		return
 	}
@@ -206,6 +215,11 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		fullName, email, payload.Phone, payload.ExperienceLevel, payload.EmergencyContact, roles, profileID,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if ok := errors.As(err, &pgErr); ok && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "a participant with that email already exists")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to update participant")
 		return
 	}
@@ -228,4 +242,18 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	profile.Roles = normalizeRoles(profile.Roles)
 
 	httpx.WriteJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) deleteProfile(w http.ResponseWriter, r *http.Request) {
+	profileID, err := strconv.ParseInt(chi.URLParam(r, "profileID"), 10, 64)
+	if err != nil || profileID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid profile id")
+		return
+	}
+
+	if _, execErr := h.db.Exec(r.Context(), `DELETE FROM participant_profiles WHERE id = $1`, profileID); execErr != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to delete participant")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

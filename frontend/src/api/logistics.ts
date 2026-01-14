@@ -14,6 +14,7 @@ export type Transport = {
   destination: string;
   passenger_count: number;
   scheduled_at?: string;
+  notes?: string | null;
   event_id?: number | null;
   season_id?: number | null;
   vehicles: TransportVehicle[];
@@ -28,8 +29,13 @@ export type CreateTransportPayload = {
   destination: string;
   passenger_count: number;
   scheduled_at?: string;
+  notes?: string;
   event_id: number;
   vehicle_ids: number[];
+};
+
+export type UpdateTransportPayload = Omit<CreateTransportPayload, 'vehicle_ids'> & {
+  vehicle_ids?: number[];
 };
 
 export const createTransport = (payload: CreateTransportPayload) =>
@@ -38,7 +44,7 @@ export const createTransport = (payload: CreateTransportPayload) =>
     body: JSON.stringify(payload)
   });
 
-export const updateTransport = (id: number, payload: CreateTransportPayload) =>
+export const updateTransport = (id: number, payload: UpdateTransportPayload) =>
   apiRequest<Transport>(`/logistics/transports/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
