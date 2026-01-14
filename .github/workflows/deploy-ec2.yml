@@ -1,0 +1,84 @@
+name: Deploy to EC2 (ECR + Compose)
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_BACKEND: ${{ secrets.ECR_BACKEND }}
+  ECR_FRONTEND: ${{ secrets.ECR_FRONTEND }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tags
+        id: vars
+        run: |
+          echo "registry=${{ steps.login-ecr.outputs.registry }}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.registry }}/${{ env.ECR_BACKEND }}:${{ steps.vars.outputs.sha_tag }}
+            ${{ steps.vars.outputs.registry }}/${{ env.ECR_BACKEND }}:latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ steps.vars.outputs.sha_tag }}
+            ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:latest
+
+      - name: Upload compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "deploy/docker-compose.ec2.yml"
+          target: "/home/ec2-user/app"
+
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            mkdir -p /home/ec2-user/app
+            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+              | docker login --username AWS --password-stdin \
+                ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+            export IMAGE_TAG=${{ steps.vars.outputs.sha_tag }}
+            export ECR_REGISTRY=${{ steps.vars.outputs.registry }}
+            docker compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml pull
+            docker compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml up -d

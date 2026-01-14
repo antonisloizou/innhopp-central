@@ -1,0 +1,12 @@
+services:
+  backend:
+    image: ${ECR_REGISTRY}/innhopp-backend:${IMAGE_TAG:-latest}
+    env_file:
+      - ../.env
+    environment:
+      PORT: "8080"
+
+  frontend:
+    image: ${ECR_REGISTRY}/innhopp-frontend:${IMAGE_TAG:-latest}
+    ports:
+      - "80:80"
