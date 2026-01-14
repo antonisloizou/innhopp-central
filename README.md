@@ -3,16 +3,19 @@
 Full-stack operations hub for planning and running innhopp events. The frontend is a React + TypeScript (Vite) single-page app; the backend is a Go service with PostgreSQL for persistence, RBAC enforcement, and OIDC login.
 
 ## Vision
-Create a single source of truth for operational data that keeps the team synchronized across planning, execution, and post-event follow-up while maintaining high standards for safety, compliance, and customer satisfaction.
+Create a single source of truth for operational data that keeps the team synchronized across planning, execution, and post-event follow-up while maintaining high standards for safety and customer satisfaction.
 
-## Core capabilities
-- Operations planning for seasons, event templates, manifests, aircraft/boat needs, and landing zones.
-- Participant lifecycle tracking: registrations, payments, waivers, certifications, gear checks, and health declarations.
-- Logistics coordination for transport legs, gear, accommodation, and notifications (check-in, briefings, packing lists).
-- Driver route visibility via read-only pages with timing and segment details.
-- Safety and compliance with centralized NOTAMs, risk assessments, and regulatory filings.
-- Crew management: scheduling, availability capture, and role coverage checks per operation.
-- Analytics/reporting foundations for jump volume, demographics, gear usage, and safety metrics.
+## Current scope (MVP)
+- Operations planning for seasons, events, innhopps, manifests, and landing zones.
+- Participant roster and event assignments, including crew roles per manifest.
+- Logistics tracking for transports, vehicles, accommodations, meals, and ad-hoc logistics items.
+- Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
+- RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.
+
+## Not yet implemented
+- Payments, waivers, certifications, and health declarations.
+- Automated notifications, check-in flows, or public driver route pages.
+- Analytics dashboards beyond raw data access.
 
 ## User roles
 
@@ -23,23 +26,22 @@ Create a single source of truth for operational data that keeps the team synchro
 | **Jump Master** | Go/no-go, safety decisions | Mission briefs, weather intel, gear status, incident reports |
 | **Jump Leader** | Leads assigned groups and debriefs | Assigned manifests, readiness, gear allocations, notes |
 | **Ground Crew** | Landing zone readiness, transport, recovery | LZ checklists, transport schedules, real-time updates |
-| **Driver** | Executes transport routes | Read-only route pages with timings and descriptions |
-| **Packer** | Parachute packing and maintenance logs | Packing queues, gear history, maintenance records |
-| **Participant** | Registers, completes paperwork, receives briefs | Profile, waiver status, schedule, receipts |
+| **Driver** | Executes transport routes | Transport assignments and schedules |
+| **Packer** | Parachute packing and maintenance logs | Gear assets, packing queues, maintenance notes |
+| **Participant** | Participates in events | Profile, event assignments, schedules |
 
 RBAC ensures each user only sees the modules and actions needed for their duties; sensitive operations are logged for compliance.
 
 ## Workflows
-1. **Event planning**: Clone templates, auto-populate logistics, dispatch crew availability requests, and run safety checks before publishing.
-2. **Participant intake**: Registrations capture waivers, certificates, and payments; Staff review flagged items (e.g., expired licenses).
-3. **Operational execution**: Jump Master go/no-go; Jump Leaders brief; Ground Crew verifies LZ; Packers process gear queues; updates broadcast live.
-4. **Post-event closeout**: Finalize incident reports, reconcile financials, send feedback surveys, and refresh analytics dashboards.
+1. **Event planning**: Create seasons/events, define innhopps with landing and safety details, and publish manifests.
+2. **Participant coordination**: Maintain the roster, attach participants to events, and assign crew roles per manifest.
+3. **Logistics tracking**: Capture transports, vehicles, accommodations, meals, and other logistics items per event.
 
 ## What you can do today
 - Build seasons and events, including detailed innhopp plans with landing areas, NOTAM notes, risk mitigation, and hospital/boat coverage metadata.
 - Register airfields, attach them to events, and manage manifests with capacity, staff slots, and participant assignments.
 - Maintain a participant roster (roles, experience, contacts), add people to events/manifests, and track crew roles such as Jump Master/Leader, Ground Crew, Driver, and Packer.
-- Coordinate logistics transports and vehicles for each operation.
+- Coordinate transports, vehicles, accommodations, meals, and other logistics items per operation.
 - Authenticate via OIDC (authorization code flow), persist sessions in secure cookies, and enforce role-based permissions seeded on startup (Admin, Staff, Jump Master, Jump Leader, Ground Crew, Driver, Packer, Participant). Set `DEV_ALLOW_ALL=true` to bypass auth locally.
 - Use the frontend pages for login, events, manifests, participants, logistics, seasons, innhopp details, and airfield details (see `frontend/src/pages/` and `frontend/src/components/Layout.tsx` for the routes).
 
