@@ -358,6 +358,7 @@ button.ghost {
 .logout-link {
   color: var(--header-color);
   font-weight: 600;
+  text-align: center;
 }
 
 .app-body {
@@ -408,8 +409,13 @@ button.ghost {
   color: #fff;
 }
 
-.nav-footer {
+.nav-bottom {
   margin-top: auto;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.nav-footer {
   padding-top: 1rem;
   border-top: 1px solid var(--divider-color);
   display: grid;
@@ -491,6 +497,10 @@ button.ghost {
   z-index: 9;
 }
 
+.event-schedule-badges {
+  margin-top: 0.5rem;
+}
+
 @media (max-width: 960px) {
   .app-body {
     grid-template-columns: 1fr;
@@ -523,6 +533,190 @@ button.ghost {
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.25rem 0.75rem;
+  }
+
+  .header-actions {
+    order: 1;
+    width: auto;
+    flex-wrap: nowrap;
+  }
+
+  .brand {
+    order: 2;
+  }
+
+  .brand-logo {
+    width: 200px;
+    max-width: 100%;
+  }
+
+  .app-content {
+    padding: 1rem;
+  }
+
+  .app-nav {
+    width: 80vw;
+    max-width: 18rem;
+    padding-top: 1.5rem;
+  }
+
+  .nav-footer {
+    position: static;
+    padding-top: 0.75rem;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .card-details {
+    grid-template-columns: 1fr;
+  }
+
+  .innhopp-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .full-width-alt {
+    width: 100% !important;
+    min-width: 0;
+  }
+
+  .table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .status-list li {
+    align-items: flex-start;
+  }
+
+  .status-list .schedule-entry {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+
+  .schedule-entry .schedule-time {
+    text-align: left;
+    justify-self: start;
+  }
+
+  .event-card-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .event-card-header > div {
+    min-width: 0;
+  }
+
+  .event-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    width: 100%;
+  }
+
+  .event-card-badges .badge {
+    white-space: normal;
+    max-width: 100%;
+  }
+
+  .event-schedule-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .event-schedule-title-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .event-schedule-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    row-gap: 0.5rem;
+    margin-top: 1rem;
+    justify-content: center;
+  }
+
+  .event-schedule-headline-text {
+    text-align: center;
+  }
+
+.event-schedule-filters {
+  padding: 2rem 0 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  justify-content: flex-end;
+}
+
+.event-schedule-filter-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+  .event-schedule-actions {
+    width: auto;
+    justify-content: flex-end;
+  }
+
+  .event-schedule-menu {
+    right: 0;
+    left: auto;
+    max-width: calc(100vw - 2rem);
+  }
+
+  .event-schedule-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    text-align: left !important;
+  }
+
+  .event-schedule-stats > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .event-schedule-filters {
+    padding: 1.25rem 0 0.3rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .event-schedule-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-start;
   }
 }
 
@@ -599,6 +793,88 @@ button.ghost {
   margin-bottom: 1rem;
 }
 
+.event-card-badges {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.event-schedule-actions {
+  position: relative;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.event-schedule-headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
+.event-schedule-headline-text {
+  min-width: 0;
+  flex: 1;
+  order: 1;
+  text-align: center;
+}
+
+.event-schedule-actions {
+  order: 2;
+}
+
+.event-schedule-gear {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.75rem;
+  background: rgba(var(--surface-rgb), 0.25);
+  color: var(--text-strong);
+}
+
+.event-schedule-gear svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: currentColor;
+}
+
+.event-schedule-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: auto;
+  right: 0;
+  width: 11rem;
+  max-width: 75vw;
+  background: var(--panel-strong);
+  border: 1px solid var(--panel-border);
+  border-radius: 0.75rem;
+  padding: 0.5rem;
+  box-shadow: var(--panel-card-shadow);
+  z-index: 20;
+}
+
+.event-schedule-menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-strong);
+}
+
+.event-schedule-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.event-schedule-menu-item.danger {
+  color: #fecdd3;
+}
+
 .card-header h3 {
   margin: 0;
   color: var(--text-strong);
@@ -644,6 +920,7 @@ button.ghost {
   text-transform: uppercase;
   text-align: center;
   white-space: nowrap;
+  margin-left: 0.5rem;
 }
 
 .badge.schedule-type-badge {

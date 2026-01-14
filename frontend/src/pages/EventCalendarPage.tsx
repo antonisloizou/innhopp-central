@@ -186,12 +186,12 @@ const EventCalendarPage = () => {
                             const past = isPastEvent(event);
                             return (
                               <>
-                                <header className="card-header">
+                                <header className="card-header event-card-header">
                                   <div>
                                     <h3>{event.name}</h3>
                                     <p className="muted event-location">{event.location || 'Location TBD'}</p>
                                   </div>
-                                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                  <div className="event-card-badges">
                                     <span className={`badge status-${event.status}`}>
                                       {event.status}
                                     </span>

@@ -57,9 +57,6 @@ const Layout = () => {
               <span className="bar" />
             </span>
           </button>
-          <NavLink to="/login" className="logout-link">
-            Sign out
-          </NavLink>
         </div>
       </header>
       <div className="app-body">
@@ -77,15 +74,20 @@ const Layout = () => {
               </li>
             ))}
           </ul>
-          <div className="nav-footer">
-            <button
-              type="button"
-              className="theme-toggle-btn"
-              onClick={toggleTheme}
-              aria-pressed={theme === 'light'}
-            >
-              {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            </button>
+          <div className="nav-bottom">
+            <NavLink to="/login" className="nav-link logout-link">
+              Sign out
+            </NavLink>
+            <div className="nav-footer">
+              <button
+                type="button"
+                className="theme-toggle-btn"
+                onClick={toggleTheme}
+                aria-pressed={theme === 'light'}
+              >
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </button>
+            </div>
           </div>
         </nav>
         {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}

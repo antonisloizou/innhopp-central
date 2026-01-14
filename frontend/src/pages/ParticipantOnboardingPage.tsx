@@ -209,7 +209,7 @@ const ParticipantOnboardingPage = () => {
         <div
           className="form-grid"
           style={{
-            gridTemplateColumns: 'minmax(140px, 0.5fr) minmax(160px, 1fr) minmax(220px, 1.6fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             alignItems: 'end'
           }}
         >

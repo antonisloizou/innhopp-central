@@ -191,7 +191,9 @@ const EventSchedulePage = () => {
   const [dragging, setDragging] = useState<{ id: string; dayKey: string } | null>(null);
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
   const [dragHoverIndex, setDragHoverIndex] = useState<number | null>(null);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [savingDrag, setSavingDrag] = useState(false);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const dragGhostTimeRef = useRef<HTMLElement | null>(null);
   const dragShimRef = useRef<HTMLElement | null>(null);
@@ -754,6 +756,30 @@ const EventSchedulePage = () => {
     }
   }, [timePicker]);
 
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const handlePointer = (event: globalThis.MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!actionMenuRef.current || !target) return;
+      if (!actionMenuRef.current.contains(target)) {
+        setActionMenuOpen(false);
+      }
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('touchstart', handlePointer);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('touchstart', handlePointer);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [actionMenuOpen]);
+
   // Update expanded map when buckets change
   useEffect(() => {
     if (dayBuckets.length === 0) return;
@@ -982,63 +1008,110 @@ const EventSchedulePage = () => {
 
   return (
     <section className="stack">
-      <header className="page-header">
-        <div>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>{eventData.name}</h2>
-            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-            {!pastEvent && (
-              <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-              </span>
+      <header className="page-header event-schedule-header">
+        <div className="event-schedule-headline">
+          <div className="event-schedule-actions" ref={actionMenuRef}>
+            <button
+              className="ghost event-schedule-gear"
+              type="button"
+              aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
+              aria-expanded={actionMenuOpen}
+              aria-controls="event-schedule-actions-menu"
+              onClick={() => setActionMenuOpen((open) => !open)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
+                />
+              </svg>
+            </button>
+            {actionMenuOpen && (
+              <div className="event-schedule-menu" id="event-schedule-actions-menu" role="menu">
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  style={actionButtonStyle}
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    navigate(`/events/${eventData.id}/details`);
+                  }}
+                >
+                  Details
+                </button>
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  style={actionButtonStyle}
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    navigate(`/manifests?eventId=${eventData.id}`);
+                  }}
+                >
+                  Manifest
+                </button>
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  style={actionButtonStyle}
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    handleCopy();
+                  }}
+                  disabled={copying}
+                >
+                  {copying ? 'Copying…' : 'Copy'}
+                </button>
+                <button
+                  className="event-schedule-menu-item danger"
+                  type="button"
+                  style={actionButtonStyle}
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    handleDelete();
+                  }}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </button>
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  style={actionButtonStyle}
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    navigate('/events');
+                  }}
+                >
+                  Back
+                </button>
+              </div>
             )}
           </div>
-          <p className="event-location">{eventData.location || 'Location TBD'}</p>
-        </div>
-        <div className="card-actions">
-          <button
-            className="ghost"
-            type="button"
-            style={actionButtonStyle}
-            onClick={() => navigate(`/events/${eventData.id}/details`)}
-          >
-            Details
-          </button>
-          <button
-            className="ghost"
-            type="button"
-            style={actionButtonStyle}
-            onClick={() => navigate(`/manifests?eventId=${eventData.id}`)}
-          >
-            Manifest
-          </button>
-          <button
-            className="ghost"
-            type="button"
-            style={actionButtonStyle}
-            onClick={handleCopy}
-            disabled={copying}
-          >
-            {copying ? 'Copying…' : 'Copy'}
-          </button>
-          <button
-            className="ghost danger"
-            type="button"
-            style={actionButtonStyle}
-            onClick={handleDelete}
-            disabled={deleting}
-          >
-            {deleting ? 'Deleting…' : 'Delete'}
-          </button>
-          <button className="ghost" type="button" style={actionButtonStyle} onClick={() => navigate('/events')}>
-            Back
-          </button>
+          <div className="event-schedule-headline-text">
+            <div className="event-schedule-title-row">
+              <h2 style={{ margin: 0 }}>{eventData.name}</h2>
+            </div>
+            <p className="event-location">{eventData.location || 'Location TBD'}</p>
+            <div className="event-schedule-badges">
+              <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
+              {!pastEvent && (
+                <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                  {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       </header>
       {message && <p className="error-text">{message}</p>}
       <article className="card" style={{ marginBottom: '0.75rem' }}>
         <dl
-          className="card-details"
+          className="card-details event-schedule-stats"
           style={{
             margin: 0,
             display: 'grid',
@@ -1086,17 +1159,10 @@ const EventSchedulePage = () => {
           </div>
         </dl>
         <div
-          style={{
-            padding: '2rem 0 0.3rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end'
-          }}
+          className="event-schedule-filters"
         >
           <strong>Show:</strong>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div className="event-schedule-filter-list">
             {typeFilterOrder.map((type) => {
               const selected = typeFilters[type];
               const base = typeBadgeStyles[type];

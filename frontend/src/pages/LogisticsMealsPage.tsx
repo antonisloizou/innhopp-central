@@ -85,7 +85,7 @@ const LogisticsMealsPage = () => {
         <div
           className="form-grid"
           style={{
-            gridTemplateColumns: 'minmax(140px, 0.25fr) minmax(160px, 0.5fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
             alignItems: 'end',
             gap: '0.75rem'
           }}

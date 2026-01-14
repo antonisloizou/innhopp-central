@@ -99,7 +99,7 @@ const LogisticsDashboardPage = () => {
           <div
             className="form-grid"
             style={{
-              gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
               alignItems: 'end',
               gap: '0.75rem'
             }}
