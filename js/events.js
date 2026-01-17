@@ -517,7 +517,7 @@ function parseEventLocalParts(raw) {
   const trimmed = raw.trim().replace(/([+-]\d{2}:?\d{2}|Z)$/i, "");
   if (!trimmed) return null;
   const match = trimmed.match(
-    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/
   );
   if (!match) return null;
   const year = Number(match[1]);
