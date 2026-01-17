@@ -8,6 +8,7 @@ import {
   updateAccommodation,
   deleteAccommodation
 } from '../api/events';
+import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 
 const AccommodationDetailPage = () => {
   const { eventId, accommodationId } = useParams();
@@ -215,24 +216,30 @@ const AccommodationDetailPage = () => {
           <label className="form-field">
             <span>Check-in</span>
             <Flatpickr
-              value={form.check_in_at ? new Date(form.check_in_at) : undefined}
+              value={toEventLocalPickerDate(form.check_in_at)}
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
                 markDirty();
-                setForm((prev) => ({ ...prev, check_in_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  check_in_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>
           <label className="form-field">
             <span>Check-out</span>
             <Flatpickr
-              value={form.check_out_at ? new Date(form.check_out_at) : undefined}
+              value={toEventLocalPickerDate(form.check_out_at)}
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
                 markDirty();
-                setForm((prev) => ({ ...prev, check_out_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  check_out_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>

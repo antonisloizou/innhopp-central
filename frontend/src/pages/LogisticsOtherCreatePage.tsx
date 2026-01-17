@@ -4,6 +4,7 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { listEvents, Event } from '../api/events';
 import { createOther } from '../api/logistics';
+import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 
 const LogisticsOtherCreatePage = () => {
   const navigate = useNavigate();
@@ -123,11 +124,14 @@ const LogisticsOtherCreatePage = () => {
           <label className="form-field">
             <span>Scheduled at</span>
             <Flatpickr
-              value={form.scheduled_at ? new Date(form.scheduled_at) : undefined}
+              value={toEventLocalPickerDate(form.scheduled_at)}
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
-                setForm((prev) => ({ ...prev, scheduled_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  scheduled_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>

@@ -30,6 +30,14 @@ import { ParticipantProfile, listParticipantProfiles } from '../api/participants
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { formatMetersWithFeet } from '../utils/units';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
+import {
+  formatEventLocal,
+  fromEventLocalPickerDate,
+  getEventLocalDateKey,
+  getEventLocalTimeParts,
+  parseEventLocal,
+  toEventLocalPickerDate
+} from '../utils/eventDate';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
@@ -87,32 +95,13 @@ type ScheduleEntry = {
 type Entry = ScheduleEntry;
 
 const formatDayLabel = (date: Date) =>
-  date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  formatEventLocal(date.toISOString(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
-const parseTimeParts = (iso?: string | null) => {
-  return extractLocalHM(iso);
-};
-
-const extractLocalHM = (iso?: string | null) => {
-  if (!iso) return null;
-  const date = new Date(iso);
-  if (!Number.isNaN(date.getTime())) {
-    return { hour: date.getHours(), minute: date.getMinutes() };
-  }
-  const m = iso.match(/(?:T|\s)(\d{2}):(\d{2})/);
-  if (m) {
-    const hour = Number(m[1]);
-    const minute = Number(m[2]);
-    if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
-      return { hour, minute };
-    }
-  }
-  return null;
-};
+const parseTimeParts = (iso?: string | null) => getEventLocalTimeParts(iso);
 
 const formatTimeLabel = (iso?: string | null) => {
   if (!iso) return 'Unscheduled';
-  const parts = extractLocalHM(iso);
+  const parts = getEventLocalTimeParts(iso);
   if (!parts) return 'Unscheduled';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(parts.hour)}:${pad(parts.minute)}`;
@@ -120,56 +109,42 @@ const formatTimeLabel = (iso?: string | null) => {
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return '';
-  const parts = extractLocalHM(iso);
+  const parts = getEventLocalTimeParts(iso);
   if (!parts) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  })}, ${pad(parts.hour)}:${pad(parts.minute)}`;
+  const day = formatEventLocal(iso, { year: 'numeric', month: 'short', day: 'numeric' });
+  if (!day) return '';
+  return `${day}, ${pad(parts.hour)}:${pad(parts.minute)}`;
 };
 
 const extractDateKey = (iso?: string | null) => {
-  if (!iso) return '';
-  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (match) {
-    return `${match[1]}-${match[2]}-${match[3]}`;
-  }
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return getEventLocalDateKey(iso);
 };
 
 const buildDays = (event: Event): Date[] => {
   const days: Date[] = [];
-  const start = event.starts_at ? new Date(event.starts_at) : null;
-  const end = event.ends_at ? new Date(event.ends_at) : null;
+  const start = parseEventLocal(event.starts_at);
+  const end = parseEventLocal(event.ends_at);
   if (!start) return days;
   const cursor = new Date(start);
   const last = end && !Number.isNaN(end.getTime()) ? end : start;
-  while (cursor <= last) {
+  while (cursor.getTime() <= last.getTime()) {
     days.push(new Date(cursor));
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return days;
 };
 
 const minutesSinceMidnight = (iso?: string | null) => {
-  const parts = extractLocalHM(iso);
+  const parts = getEventLocalTimeParts(iso);
   if (!parts) return Number.POSITIVE_INFINITY;
   return parts.hour * 60 + parts.minute;
 };
 
 const buildDayIso = (day: Date, minutes: number) => {
-  const d = new Date(day);
-  d.setHours(0, 0, 0, 0);
-  d.setMinutes(minutes);
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const d = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hours, mins, 0));
   return d.toISOString();
 };
 
@@ -674,18 +649,22 @@ const EventSchedulePage = () => {
   const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Accommodation', 'Meal', 'Other'];
 
   const buildPickerDate = (entry?: ScheduleEntry | null, day?: DayBucket) => {
-    const base = entry?.scheduledAt ? new Date(entry.scheduledAt) : day ? new Date(day.date) : new Date();
+    const base =
+      (entry?.scheduledAt ? toEventLocalPickerDate(entry.scheduledAt) : undefined) ||
+      (day ? toEventLocalPickerDate(day.date.toISOString()) : undefined) ||
+      new Date();
     const parts = parseTimeParts(entry?.scheduledAt || undefined);
     if (parts) {
       base.setHours(parts.hour, parts.minute, 0, 0);
     } else {
-      base.setHours(new Date().getHours(), new Date().getMinutes(), 0, 0);
+      const now = new Date();
+      base.setHours(now.getHours(), now.getMinutes(), 0, 0);
     }
     return base;
   };
 
   const buildIsoFromPickerDate = (date: Date) => {
-    return date.toISOString();
+    return fromEventLocalPickerDate(date);
   };
 
   const applyLocalUpdate = useCallback(
@@ -904,10 +883,10 @@ const EventSchedulePage = () => {
     const base =
       selected && !Number.isNaN(selected.getTime())
         ? new Date(selected.getTime())
-        : timePicker?.entry.scheduledAt && !Number.isNaN(new Date(timePicker.entry.scheduledAt).getTime())
-        ? new Date(timePicker.entry.scheduledAt)
+        : timePicker?.entry.scheduledAt
+        ? toEventLocalPickerDate(timePicker.entry.scheduledAt) || new Date()
         : timePicker?.day
-        ? new Date(timePicker.day.date)
+        ? toEventLocalPickerDate(timePicker.day.date.toISOString()) || new Date()
         : new Date();
 
     if (instance) {
@@ -922,7 +901,7 @@ const EventSchedulePage = () => {
 
     const value = instance?.input?.value?.trim();
     if (instance && value) {
-      const parsed = instance.parseDate(value, 'Y-m-d H:i') || new Date(value);
+      const parsed = instance.parseDate(value, 'Y-m-d H:i') || toEventLocalPickerDate(value);
       if (!Number.isNaN(parsed?.getTime())) return parsed;
     }
     return base;
@@ -1125,11 +1104,7 @@ const EventSchedulePage = () => {
             <dt>Starts</dt>
             <dd>
               {eventData.starts_at
-                ? new Date(eventData.starts_at).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                  })
+                ? formatEventLocal(eventData.starts_at, { month: 'short', day: 'numeric', year: 'numeric' })
                 : 'TBD'}
             </dd>
           </div>
@@ -1137,11 +1112,7 @@ const EventSchedulePage = () => {
             <dt>Ends</dt>
             <dd>
               {eventData.ends_at
-                ? new Date(eventData.ends_at).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                  })
+                ? formatEventLocal(eventData.ends_at, { month: 'short', day: 'numeric', year: 'numeric' })
                 : 'TBD'}
             </dd>
           </div>

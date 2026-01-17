@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
 )
 
@@ -175,7 +176,7 @@ func (h *Handler) createOther(w http.ResponseWriter, r *http.Request) {
 
 	var scheduled *time.Time
 	if payload.ScheduledAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return
@@ -263,7 +264,7 @@ func (h *Handler) updateOther(w http.ResponseWriter, r *http.Request) {
 
 	var scheduled *time.Time
 	if payload.ScheduledAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return
@@ -484,7 +485,7 @@ func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 
 	var scheduled *time.Time
 	if payload.ScheduledAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return
@@ -558,7 +559,7 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 
 	var scheduled *time.Time
 	if strings.TrimSpace(payload.ScheduledAt) != "" {
-		t, err := time.Parse(time.RFC3339, strings.TrimSpace(payload.ScheduledAt))
+		t, err := timeutil.ParseEventTimestamp(strings.TrimSpace(payload.ScheduledAt))
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return
@@ -757,7 +758,7 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 
 	var scheduledAt *time.Time
 	if payload.ScheduledAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return
@@ -936,7 +937,7 @@ func (h *Handler) createGearAsset(w http.ResponseWriter, r *http.Request) {
 
 	var inspectedAt *time.Time
 	if payload.InspectedAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.InspectedAt)
+		t, err := timeutil.ParseEventTimestamp(payload.InspectedAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "inspected_at must be RFC3339 timestamp")
 			return
@@ -1175,7 +1176,7 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 
 	var scheduledAt *time.Time
 	if payload.ScheduledAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.ScheduledAt)
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
 			return

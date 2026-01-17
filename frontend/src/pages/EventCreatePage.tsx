@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CreateEventPayload, EventStatus, Season, createEvent, listSeasons } from '../api/events';
+import { fromEventLocalDateInput } from '../utils/eventDate';
 
 const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -11,7 +12,7 @@ const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'past', label: 'Past' }
 ];
 
-const toIsoDate = (value: string) => new Date(`${value}T00:00:00Z`).toISOString();
+const toIsoDate = (value: string) => fromEventLocalDateInput(value);
 
 const EventCreatePage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);

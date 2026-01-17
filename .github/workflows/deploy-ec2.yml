@@ -75,6 +75,9 @@ jobs:
           script: |
             set -e
             mkdir -p /home/ec2-user/app
+            cat <<'EOF' > /home/ec2-user/app/.env
+            ${{ secrets.EC2_APP_ENV }}
+            EOF
             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
               | docker login --username AWS --password-stdin \
                 ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com

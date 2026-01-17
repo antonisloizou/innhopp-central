@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const normalizeEvents = (raw: Event[]) =>
   (Array.isArray(raw) ? raw : []).map((event) => ({
@@ -14,11 +15,7 @@ const normalizeEvents = (raw: Event[]) =>
 
 const formatDate = (value?: string | null) =>
   value
-    ? new Date(value).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      })
+    ? formatEventLocal(value, { month: 'short', day: 'numeric', year: 'numeric' })
     : 'TBD';
 
 const EventCalendarPage = () => {
@@ -69,8 +66,8 @@ const EventCalendarPage = () => {
 
   const isPastEvent = (event: Event) => {
     if (event.status === 'past') return true;
-    const ends = event.ends_at ? new Date(event.ends_at) : null;
-    const starts = event.starts_at ? new Date(event.starts_at) : null;
+    const ends = parseEventLocal(event.ends_at);
+    const starts = parseEventLocal(event.starts_at);
     if (ends) return ends.getTime() < Date.now();
     if (starts) return starts.getTime() < Date.now();
     return false;

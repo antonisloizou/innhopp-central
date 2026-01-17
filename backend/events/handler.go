@@ -17,6 +17,7 @@ import (
 
 	"github.com/innhopp/central/backend/airfields"
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
 )
 
@@ -309,7 +310,7 @@ func (h *Handler) createSeason(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	startsOn, err := time.Parse("2006-01-02", payload.StartsOn)
+	startsOn, err := timeutil.ParseEventDate(payload.StartsOn)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "starts_on must be a date in YYYY-MM-DD format")
 		return
@@ -317,7 +318,7 @@ func (h *Handler) createSeason(w http.ResponseWriter, r *http.Request) {
 
 	var endsOn *time.Time
 	if payload.EndsOn != "" {
-		t, err := time.Parse("2006-01-02", payload.EndsOn)
+		t, err := timeutil.ParseEventDate(payload.EndsOn)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "ends_on must be a date in YYYY-MM-DD format")
 			return
@@ -1024,7 +1025,7 @@ func (h *Handler) createAccommodation(w http.ResponseWriter, r *http.Request) {
 
 	var checkIn *time.Time
 	if payload.CheckInAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.CheckInAt)
+		t, err := timeutil.ParseEventTimestamp(payload.CheckInAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "check_in_at must be RFC3339 timestamp")
 			return
@@ -1034,7 +1035,7 @@ func (h *Handler) createAccommodation(w http.ResponseWriter, r *http.Request) {
 
 	var checkOut *time.Time
 	if payload.CheckOutAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.CheckOutAt)
+		t, err := timeutil.ParseEventTimestamp(payload.CheckOutAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "check_out_at must be RFC3339 timestamp")
 			return
@@ -1161,7 +1162,7 @@ func (h *Handler) updateAccommodation(w http.ResponseWriter, r *http.Request) {
 
 	var checkIn *time.Time
 	if payload.CheckInAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.CheckInAt)
+		t, err := timeutil.ParseEventTimestamp(payload.CheckInAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "check_in_at must be RFC3339 timestamp")
 			return
@@ -1171,7 +1172,7 @@ func (h *Handler) updateAccommodation(w http.ResponseWriter, r *http.Request) {
 
 	var checkOut *time.Time
 	if payload.CheckOutAt != "" {
-		t, err := time.Parse(time.RFC3339, payload.CheckOutAt)
+		t, err := timeutil.ParseEventTimestamp(payload.CheckOutAt)
 		if err != nil {
 			httpx.Error(w, http.StatusBadRequest, "check_out_at must be RFC3339 timestamp")
 			return
@@ -2359,7 +2360,7 @@ func parseEventTimes(starts, ends string) (time.Time, *time.Time, error) {
 		return time.Time{}, nil, errors.New("starts_at is required")
 	}
 
-	startsAt, err := time.Parse(time.RFC3339, starts)
+	startsAt, err := timeutil.ParseEventTimestamp(starts)
 	if err != nil {
 		return time.Time{}, nil, errors.New("starts_at must be RFC3339 timestamp")
 	}
@@ -2368,7 +2369,7 @@ func parseEventTimes(starts, ends string) (time.Time, *time.Time, error) {
 		return startsAt, nil, nil
 	}
 
-	endsAt, err := time.Parse(time.RFC3339, strings.TrimSpace(ends))
+	endsAt, err := timeutil.ParseEventTimestamp(strings.TrimSpace(ends))
 	if err != nil {
 		return time.Time{}, nil, errors.New("ends_at must be RFC3339 timestamp")
 	}
@@ -2752,15 +2753,10 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 		var scheduled *time.Time
 		if strings.TrimSpace(payload.ScheduledAt) != "" {
 			rawTS := strings.TrimSpace(payload.ScheduledAt)
-			t, err := time.Parse(time.RFC3339, rawTS)
+			t, err := timeutil.ParseEventTimestamp(rawTS)
 			if err != nil {
-				tLocal, errLocal := time.ParseInLocation("2006-01-02T15:04", rawTS, time.UTC)
-				if errLocal != nil {
-					return nil, errors.New("innhopps[" + strconv.Itoa(i) + "].scheduled_at must be RFC3339 or YYYY-MM-DDTHH:MM")
-				}
-				t = tLocal
+				return nil, errors.New("innhopps[" + strconv.Itoa(i) + "].scheduled_at must be RFC3339 or YYYY-MM-DDTHH:MM")
 			}
-			t = t.UTC()
 			scheduled = &t
 		}
 

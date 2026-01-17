@@ -3,6 +3,7 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { listEvents, Event, createAccommodation } from '../api/events';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 
 const LogisticsAccommodationCreatePage = () => {
   const navigate = useNavigate();
@@ -151,22 +152,28 @@ const LogisticsAccommodationCreatePage = () => {
           <label className="form-field">
             <span>Check-in</span>
             <Flatpickr
-              value={form.check_in_at ? new Date(form.check_in_at) : undefined}
+              value={toEventLocalPickerDate(form.check_in_at)}
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
-                setForm((prev) => ({ ...prev, check_in_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  check_in_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>
           <label className="form-field">
             <span>Check-out</span>
             <Flatpickr
-              value={form.check_out_at ? new Date(form.check_out_at) : undefined}
+              value={toEventLocalPickerDate(form.check_out_at)}
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
-                setForm((prev) => ({ ...prev, check_out_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  check_out_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>

@@ -2,12 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listSeasons, listEvents, Season, Event } from '../api/events';
 import { listOthers, OtherLogistic } from '../api/logistics';
+import { formatEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return 'Unscheduled';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return 'Unscheduled';
-  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  return (
+    formatEventLocal(iso, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }) || 'Unscheduled'
+  );
 };
 
 const LogisticsOthersPage = () => {

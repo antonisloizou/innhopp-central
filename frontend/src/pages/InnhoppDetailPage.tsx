@@ -18,26 +18,15 @@ import {
 } from '../api/events';
 import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '../api/airfields';
 import { formatMetersWithFeet, metersToFeet } from '../utils/units';
+import {
+  formatEventLocalPickerDateTime,
+  fromEventLocalInput,
+  fromEventLocalPickerDate,
+  parseEventLocal,
+  toEventLocalPickerDate
+} from '../utils/eventDate';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
-
-const formatUTC = (date: Date) => {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(
-    date.getUTCHours() - date.getTimezoneOffset() / 60
-  )}:${pad(date.getUTCMinutes())}`;
-};
-
-const toPickerDate = (iso?: string) => {
-  if (!iso) return undefined;
-  const d = new Date(iso);
-  return new Date(d.getTime() + d.getTimezoneOffset() * 60000);
-};
-
-const fromPickerDateToISO = (date: Date) => {
-  const utcTime = date.getTime() - date.getTimezoneOffset() * 60000;
-  return new Date(utcTime).toISOString();
-};
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -249,8 +238,7 @@ const InnhoppDetailPage = () => {
 
   const toInputDateTime = (iso?: string | null) => {
     if (!iso) return '';
-    const trimmed = iso.trim();
-    return new Date(trimmed).toISOString();
+    return fromEventLocalInput(iso.trim());
   };
 
   const resizeTextarea = (el: HTMLTextAreaElement | null) => {
@@ -315,8 +303,9 @@ const InnhoppDetailPage = () => {
                 if (target.event_id && evtCache.current?.[target.event_id]) {
                   const e = evtCache.current[target.event_id];
                   if (e.starts_at) {
-                    const d = new Date(e.starts_at);
-                    d.setHours(9, 0, 0, 0);
+                    const d = parseEventLocal(e.starts_at);
+                    if (!d) return '';
+                    d.setUTCHours(9, 0, 0, 0);
                     return d.toISOString();
                   }
                 }
@@ -356,9 +345,11 @@ const InnhoppDetailPage = () => {
                 setEventData(evt);
                 evtCache.current = { ...evtCache.current, [target.event_id]: evt };
                 if (!target.scheduled_at && evt.starts_at) {
-                  const d = new Date(evt.starts_at);
-                  d.setHours(9, 0, 0, 0);
-                  setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                  const d = parseEventLocal(evt.starts_at);
+                  if (d) {
+                    d.setUTCHours(9, 0, 0, 0);
+                    setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                  }
                 }
               }
             } catch {
@@ -375,9 +366,11 @@ const InnhoppDetailPage = () => {
                 setEventData(evt);
                 evtCache.current = { ...evtCache.current, [evt.id]: evt };
                 if (!copy?.scheduled_at && evt.starts_at) {
-                  const d = new Date(evt.starts_at);
-                  d.setHours(9, 0, 0, 0);
-                  setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                  const d = parseEventLocal(evt.starts_at);
+                  if (d) {
+                    d.setUTCHours(9, 0, 0, 0);
+                    setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                  }
                 }
               }
             } catch {
@@ -940,22 +933,22 @@ const InnhoppDetailPage = () => {
                     <span>Scheduled at</span>
                     <div style={{ width: '24ch' }}>
                       <Flatpickr
-                        value={toPickerDate(form.scheduled_at || undefined)}
+                        value={toEventLocalPickerDate(form.scheduled_at || undefined)}
                         options={{
                           enableTime: true,
                           time_24hr: true,
                           altInput: true,
                           altInputClass: 'full-width-alt',
                           altFormat: 'Y-m-d H:i',
-                          dateFormat: 'Z',
-                          formatDate: (date) => formatUTC(date)
+                          dateFormat: 'Y-m-d H:i',
+                          formatDate: (date) => formatEventLocalPickerDateTime(date)
                         }}
                         style={{ width: '100%' }}
                         onChange={(dates) => {
                           const picked = dates[0];
                           setForm((prev) => ({
                             ...prev,
-                            scheduled_at: picked ? fromPickerDateToISO(picked) : ''
+                            scheduled_at: picked ? fromEventLocalPickerDate(picked) : ''
                           }));
                         }}
                         placeholder="Select date & time"

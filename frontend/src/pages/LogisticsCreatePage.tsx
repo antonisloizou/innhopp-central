@@ -15,6 +15,7 @@ import {
 } from '../api/logistics';
 import { Event, listEvents, Accommodation, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
+import { fromEventLocalPickerDate, parseEventLocal, toEventLocalPickerDate } from '../utils/eventDate';
 
 type VehicleRow = {
   name: string;
@@ -130,9 +131,11 @@ const LogisticsCreatePage = () => {
     if (!selectedEventId || form.scheduled_at) return;
     const ev = events.find((e) => e.id === Number(selectedEventId));
     if (ev?.starts_at) {
-      const d = new Date(ev.starts_at);
-      d.setHours(9, 0, 0, 0);
-      setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+      const d = parseEventLocal(ev.starts_at);
+      if (d) {
+        d.setUTCHours(9, 0, 0, 0);
+        setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+      }
     }
   }, [selectedEventId, events, form.scheduled_at]);
 
@@ -375,11 +378,11 @@ const LogisticsCreatePage = () => {
 
   const closestEventDate = (current?: string) => {
     const ev = events.find((e) => e.id === Number(selectedEventId));
-    const start = ev?.starts_at ? new Date(ev.starts_at) : null;
-    const end = ev?.ends_at ? new Date(ev.ends_at) : null;
+    const start = toEventLocalPickerDate(ev?.starts_at) || null;
+    const end = toEventLocalPickerDate(ev?.ends_at) || null;
     if (current) {
-      const d = new Date(current);
-      if (!Number.isNaN(d.getTime())) return d;
+      const d = toEventLocalPickerDate(current);
+      if (d) return d;
     }
     const today = new Date();
     if (start && end) {
@@ -529,7 +532,7 @@ const LogisticsCreatePage = () => {
             <label className="form-field">
               <span>Scheduled at</span>
               <Flatpickr
-                value={form.scheduled_at ? new Date(form.scheduled_at) : undefined}
+                value={toEventLocalPickerDate(form.scheduled_at)}
                 options={{
                   enableTime: true,
                   dateFormat: 'Y-m-d H:i',
@@ -538,7 +541,10 @@ const LogisticsCreatePage = () => {
                 }}
                 onChange={(dates) => {
                   const date = dates[0];
-                  setForm((prev) => ({ ...prev, scheduled_at: date ? date.toISOString() : '' }));
+                  setForm((prev) => ({
+                    ...prev,
+                    scheduled_at: date ? fromEventLocalPickerDate(date) : ''
+                  }));
                 }}
               />
             </label>

@@ -4,6 +4,7 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { Event, listEvents } from '../api/events';
 import { Meal, createMeal } from '../api/logistics';
+import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 
 const LogisticsMealCreatePage = () => {
   const navigate = useNavigate();
@@ -48,11 +49,11 @@ const LogisticsMealCreatePage = () => {
 
   const closestEventDate = (current?: string) => {
     const ev = events.find((e) => e.id === Number(form.event_id));
-    const start = ev?.starts_at ? new Date(ev.starts_at) : null;
-    const end = ev?.ends_at ? new Date(ev.ends_at) : null;
+    const start = toEventLocalPickerDate(ev?.starts_at) || null;
+    const end = toEventLocalPickerDate(ev?.ends_at) || null;
     if (current) {
-      const d = new Date(current);
-      if (!Number.isNaN(d.getTime())) return d;
+      const d = toEventLocalPickerDate(current);
+      if (d) return d;
     }
     const today = new Date();
     if (start && end) {
@@ -165,7 +166,7 @@ const LogisticsMealCreatePage = () => {
           <label className="form-field">
             <span>Scheduled at</span>
             <Flatpickr
-              value={form.scheduled_at ? new Date(form.scheduled_at) : undefined}
+              value={toEventLocalPickerDate(form.scheduled_at)}
               options={{
                 enableTime: true,
                 dateFormat: 'Y-m-d H:i',
@@ -174,7 +175,10 @@ const LogisticsMealCreatePage = () => {
               }}
               onChange={(dates) => {
                 const d = dates[0];
-                setForm((prev) => ({ ...prev, scheduled_at: d ? d.toISOString() : '' }));
+                setForm((prev) => ({
+                  ...prev,
+                  scheduled_at: d ? fromEventLocalPickerDate(d) : ''
+                }));
               }}
             />
           </label>

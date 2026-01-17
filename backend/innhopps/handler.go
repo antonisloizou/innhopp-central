@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
+	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
 )
 
@@ -396,16 +397,11 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 	var scheduled *time.Time
 	if strings.TrimSpace(p.ScheduledAt) != "" {
 		val := strings.TrimSpace(p.ScheduledAt)
-		t, err := time.Parse(time.RFC3339, val)
+		t, err := timeutil.ParseEventTimestamp(val)
 		if err != nil {
-			tLocal, errLocal := time.ParseInLocation("2006-01-02T15:04", val, time.UTC)
-			if errLocal != nil {
-				httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 or YYYY-MM-DDTHH:MM")
-				return
-			}
-			t = tLocal
+			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 or YYYY-MM-DDTHH:MM")
+			return
 		}
-		t = t.UTC()
 		scheduled = &t
 	}
 

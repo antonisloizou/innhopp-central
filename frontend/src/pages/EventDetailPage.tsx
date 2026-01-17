@@ -29,6 +29,17 @@ import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { roleOptions } from '../utils/roles';
 import { formatMetersWithFeet } from '../utils/units';
+import {
+  formatEventLocal,
+  formatEventLocalDateInput,
+  formatEventLocalInputFromDate,
+  formatEventLocalPickerDateTime,
+  fromEventLocalDateInput,
+  fromEventLocalPickerDate,
+  parseEventLocal,
+  toEventLocalInput,
+  toEventLocalPickerDate
+} from '../utils/eventDate';
 import { createAccommodation, listAccommodations } from '../api/events';
 import {
   Transport,
@@ -102,24 +113,13 @@ const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'past', label: 'Past' }
 ];
 
-const sanitizeLocalDateTime = (value?: string | null) => {
-  if (!value) return '';
-  const trimmed = value.trim();
-  const noZone = trimmed.replace(/([+-]\d{2}:?\d{2}|Z)$/i, '');
-  return noZone.slice(0, 16);
-};
+const toInputDateTime = (value?: string | null) => toEventLocalInput(value);
 
-const toInputDateTime = (value?: string | null) => sanitizeLocalDateTime(value);
+const toLocalInputFromDate = (date: Date) => formatEventLocalInputFromDate(date);
 
-const toLocalInputFromDate = (date: Date) => {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
+const toInputDate = (iso?: string | null) => formatEventLocalDateInput(iso);
 
-const toInputDate = (iso?: string | null) =>
-  iso ? new Date(iso).toISOString().slice(0, 10) : '';
-
-const toIsoDate = (value: string) => (value ? new Date(`${value}T00:00:00Z`).toISOString() : '');
+const toIsoDate = (value: string) => fromEventLocalDateInput(value);
 
 const formatDateOnly = (date: Date) => {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -128,14 +128,12 @@ const formatDateOnly = (date: Date) => {
 
 const formatInnhoppSchedule = (value?: string | null) => {
   if (!value) return '';
-  return sanitizeLocalDateTime(value).replace('T', ' ');
+  return toEventLocalInput(value).replace('T', ' ');
 };
 
 const formatDateTime24h = (value?: string | null) => {
   if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
+  return formatEventLocal(value, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -192,8 +190,8 @@ const formatLandOwnersForPayload = (owners: LandOwnerForm[]): LandOwner[] =>
   }));
 
 const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
-  const defaultStart = event.starts_at ? new Date(event.starts_at) : null;
-  if (defaultStart) defaultStart.setHours(9, 0, 0, 0);
+  const defaultStart = parseEventLocal(event.starts_at);
+  if (defaultStart) defaultStart.setUTCHours(9, 0, 0, 0);
   const defaultScheduled = defaultStart ? toLocalInputFromDate(defaultStart) : '';
   return (Array.isArray(event.innhopps) ? event.innhopps : []).map((i, idx) => ({
     id: i.id,
@@ -370,7 +368,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     const list = Array.isArray(accommodations) ? [...accommodations] : [];
     const timeValue = (acc: AccommodationItem) => {
       const iso = acc.check_in_at || acc.check_out_at || acc.created_at || '';
-      const t = iso ? new Date(iso).getTime() : Number.POSITIVE_INFINITY;
+      const parsed = parseEventLocal(iso);
+      const t = parsed ? parsed.getTime() : Number.POSITIVE_INFINITY;
       return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
     };
     return list.sort((a, b) => {
@@ -382,8 +381,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   const sortedMeals = useMemo(() => {
     const list = Array.isArray(meals) ? [...meals] : [];
     return list.sort((a, b) => {
-      const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
-      const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+      const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
       if (aTime !== bTime) return aTime - bTime;
       return (a.name || '').localeCompare(b.name || '');
     });
@@ -895,7 +894,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             coordinates: row.coordinates?.trim(),
             elevation: row.elevation,
             takeoff_airfield_id: row.takeoff_airfield_id,
-            scheduled_at: row.scheduled_at ? sanitizeLocalDateTime(row.scheduled_at) : '',
+            scheduled_at: row.scheduled_at ? toEventLocalInput(row.scheduled_at) : '',
             notes: row.notes,
             reason_for_choice: row.reason_for_choice?.trim(),
             adjust_altimeter_aad: row.adjust_altimeter_aad?.trim(),
@@ -1161,10 +1160,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   const handleAddRow = () => {
     const defaultStart =
       eventForm.starts_at && eventForm.starts_at.length >= 10
-        ? new Date(`${eventForm.starts_at}T09:00:00Z`)
+        ? parseEventLocal(`${eventForm.starts_at}T09:00`)
         : null;
     if (defaultStart) {
-      defaultStart.setHours(9, 0, 0, 0);
+      defaultStart.setUTCHours(9, 0, 0, 0);
     }
     setInnhopps((prev) => [
       ...prev,
@@ -1471,7 +1470,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
                 <span>Starts on</span>
                 <Flatpickr
-                  value={eventForm.starts_at ? new Date(`${eventForm.starts_at}T00:00:00`) : undefined}
+                  value={toEventLocalPickerDate(eventForm.starts_at)}
                   options={{
                     dateFormat: 'Y-m-d',
                     altInput: true,
@@ -1488,7 +1487,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               <label className="form-field" style={{ margin: 0, gridColumn: '4 / 6' }}>
                 <span>Ends on</span>
                 <Flatpickr
-                  value={eventForm.ends_at ? new Date(`${eventForm.ends_at}T00:00:00`) : undefined}
+                  value={toEventLocalPickerDate(eventForm.ends_at)}
                   options={{
                     dateFormat: 'Y-m-d',
                     altInput: true,
@@ -1621,11 +1620,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   <label className="form-field">
                     <span>Scheduled at</span>
                   <Flatpickr
-                    value={row.scheduled_at ? new Date(row.scheduled_at) : undefined}
+                    value={toEventLocalPickerDate(row.scheduled_at)}
                     options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
                     onChange={(dates) => {
                       const date = dates[0];
-                      handleChange(draftIndex, 'scheduled_at', date ? toLocalInputFromDate(date) : '');
+                      handleChange(draftIndex, 'scheduled_at', date ? formatEventLocalPickerDateTime(date) : '');
                     }}
                   />
                   </label>
@@ -2628,13 +2627,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Check-in</span>
                   <Flatpickr
-                    value={accommodationForm.check_in_at ? new Date(accommodationForm.check_in_at) : undefined}
+                    value={toEventLocalPickerDate(accommodationForm.check_in_at)}
                     options={{ enableTime: true, dateFormat: 'Y-m-d H:i' }}
                     onChange={(dates) => {
                       const date = dates[0];
                       setAccommodationForm((prev) => ({
                         ...prev,
-                        check_in_at: date ? date.toISOString() : ''
+                        check_in_at: date ? fromEventLocalPickerDate(date) : ''
                       }));
                     }}
                   />
@@ -2642,15 +2641,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Check-out</span>
                   <Flatpickr
-                    value={
-                      accommodationForm.check_out_at ? new Date(accommodationForm.check_out_at) : undefined
-                    }
+                    value={toEventLocalPickerDate(accommodationForm.check_out_at)}
                     options={{ enableTime: true, dateFormat: 'Y-m-d H:i' }}
                     onChange={(dates) => {
                       const date = dates[0];
                       setAccommodationForm((prev) => ({
                         ...prev,
-                        check_out_at: date ? date.toISOString() : ''
+                        check_out_at: date ? fromEventLocalPickerDate(date) : ''
                       }));
                     }}
                   />
@@ -2768,8 +2765,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 {transports
                   .slice()
                   .sort((a, b) => {
-                    const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
-                    const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+                    const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+                    const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
                     return aTime - bTime;
                   })
                   .map((t) => {
@@ -2919,11 +2916,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Scheduled at</span>
                   <Flatpickr
-                    value={transportForm.scheduled_at ? new Date(transportForm.scheduled_at) : undefined}
+                    value={toEventLocalPickerDate(transportForm.scheduled_at)}
                     options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
                     onChange={(dates) => {
                       const d = dates[0];
-                      setTransportForm((prev) => ({ ...prev, scheduled_at: d ? d.toISOString() : '' }));
+                      setTransportForm((prev) => ({
+                        ...prev,
+                        scheduled_at: d ? fromEventLocalPickerDate(d) : ''
+                      }));
                     }}
                   />
                 </label>
@@ -3049,8 +3049,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 {others
                   .slice()
                   .sort((a, b) => {
-                    const aTime = a.scheduled_at ? new Date(a.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
-                    const bTime = b.scheduled_at ? new Date(b.scheduled_at).getTime() : Number.POSITIVE_INFINITY;
+                    const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+                    const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
                     return aTime - bTime;
                   })
                   .map((o) => {
@@ -3144,11 +3144,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Scheduled at</span>
                   <Flatpickr
-                    value={otherForm.scheduled_at ? new Date(otherForm.scheduled_at) : undefined}
+                    value={toEventLocalPickerDate(otherForm.scheduled_at)}
                     options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
                     onChange={(dates) => {
                       const d = dates[0];
-                      setOtherForm((prev) => ({ ...prev, scheduled_at: d ? d.toISOString() : '' }));
+                      setOtherForm((prev) => ({
+                        ...prev,
+                        scheduled_at: d ? fromEventLocalPickerDate(d) : ''
+                      }));
                     }}
                   />
                 </label>

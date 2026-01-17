@@ -444,7 +444,7 @@ function upsertEvent(event) {
 }
 
 function sortEvents() {
-  state.events.sort((a, b) => new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime());
+  state.events.sort((a, b) => getEventLocalTime(b.starts_at) - getEventLocalTime(a.starts_at));
 }
 
 function showMessage(kind, message) {
@@ -459,46 +459,92 @@ function formatDate(iso) {
   if (!iso) {
     return "Unscheduled";
   }
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseEventLocal(iso);
+  if (!date) {
     return iso;
   }
-  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function formatDateOnly(value) {
   if (!value) {
     return "";
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseEventLocal(value);
+  if (!date) {
     return value;
   }
-  return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: "UTC",
+    dateStyle: "medium",
+  }).format(date);
 }
 
 function toLocalInputValue(isoString) {
   if (!isoString) {
     return "";
   }
-  const date = new Date(isoString);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const tzOffset = date.getTimezoneOffset();
-  date.setMinutes(date.getMinutes() - tzOffset);
-  return date.toISOString().slice(0, 16);
+  return toEventLocalInput(isoString);
 }
 
 function toISOStringFromLocal(value) {
   if (!value) {
     return "";
   }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toISOString();
+  return fromEventLocalInput(value);
+}
+
+function getEventLocalTime(value) {
+  const date = parseEventLocal(value);
+  return date ? date.getTime() : Number.NEGATIVE_INFINITY;
+}
+
+function parseEventLocal(value) {
+  const parts = parseEventLocalParts(value);
+  if (!parts) return null;
+  const date = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseEventLocalParts(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/([+-]\d{2}:?\d{2}|Z)$/i, "");
+  if (!trimmed) return null;
+  const match = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4] || "0");
+  const minute = Number(match[5] || "0");
+  const second = Number(match[6] || "0");
+  if ([year, month, day, hour, minute, second].some((v) => Number.isNaN(v))) return null;
+  return { year, month, day, hour, minute, second };
+}
+
+function toEventLocalInput(value) {
+  const date = parseEventLocal(value);
+  if (!date) return "";
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(
+    date.getUTCDate()
+  )}T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+function fromEventLocalInput(value) {
+  const date = parseEventLocal(value);
+  return date ? date.toISOString() : "";
+}
+
+function pad(value) {
+  return String(value).padStart(2, "0");
 }
 
 function capitalize(value) {

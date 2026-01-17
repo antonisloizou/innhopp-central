@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { listTransports, Transport } from '../api/logistics';
+import { formatEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string, force24h = false) => {
   if (!iso) return 'Not scheduled';
-  const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  return formatEventLocal(iso, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
