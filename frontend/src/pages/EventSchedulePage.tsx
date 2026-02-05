@@ -58,10 +58,10 @@ const formatTransportVehiclesLine = (
   vehicles?: { name: string; driver?: string; passenger_capacity: number }[]
 ) => {
   if (!Array.isArray(vehicles) || vehicles.length === 0) {
-    return 'Vehicles: Unassigned';
+    return 'No vehicles';
   }
   const labels = vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`));
-  return `Vehicles: ${labels.join(', ')}`;
+  return `${labels.join(', ')}`;
 };
 
 type ScheduleEntry = {
