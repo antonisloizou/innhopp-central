@@ -54,6 +54,15 @@ type DayBucket = {
 };
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
+const formatTransportVehiclesLine = (
+  vehicles?: { name: string; driver?: string; passenger_capacity: number }[]
+) => {
+  if (!Array.isArray(vehicles) || vehicles.length === 0) {
+    return 'Vehicles: Unassigned';
+  }
+  const labels = vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`));
+  return `Vehicles: ${labels.join(', ')}`;
+};
 
 type ScheduleEntry = {
   id: string;
@@ -1306,7 +1315,7 @@ const EventSchedulePage = () => {
                     return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
                   })(),
                   title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
-                  subtitle: '',
+                  subtitle: formatTransportVehiclesLine(vehicles),
                   type: 'Transport',
                   to: `/logistics/${t.id}`,
                   transportComplete: complete,

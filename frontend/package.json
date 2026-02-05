@@ -20,6 +20,7 @@
     "@types/react-dom": "^18.2.15",
     "@types/react-flatpickr": "^3.8.11",
     "@vitejs/plugin-react": "^4.2.1",
+    "baseline-browser-mapping": "^2.9.19",
     "typescript": "^5.4.5",
     "vite": "^5.2.0"
   }
