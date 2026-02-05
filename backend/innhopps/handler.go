@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
@@ -448,7 +447,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to encode land owners")
 		return
 	}
-	var imageFilesJSON pgtype.JSONB
+	var imageFilesJSON []byte
 	if p.ImageFiles != nil {
 		imageFiles := normalizeImageFiles(*p.ImageFiles)
 		encoded, err := encodeImageFiles(imageFiles)
@@ -456,9 +455,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusInternalServerError, "failed to encode images")
 			return
 		}
-		imageFilesJSON = pgtype.JSONB{Bytes: encoded, Status: pgtype.Present}
-	} else {
-		imageFilesJSON = pgtype.JSONB{Status: pgtype.Null}
+		imageFilesJSON = encoded
 	}
 
 	reason := strings.TrimSpace(p.ReasonForChoice)
