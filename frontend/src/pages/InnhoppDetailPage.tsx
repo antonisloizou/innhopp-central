@@ -194,6 +194,7 @@ const InnhoppDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
+  const [imagesDirty, setImagesDirty] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -289,6 +290,7 @@ const InnhoppDetailPage = () => {
         setInnhopp(null);
         setForm(initialFormState);
         setTakeoffSelectValue('');
+        setImagesDirty(false);
       }
       setLoading(true);
       setError(null);
@@ -336,6 +338,7 @@ const InnhoppDetailPage = () => {
             land_owner_permission: target.land_owner_permission ?? undefined,
             image_files: target.image_files || []
           });
+          setImagesDirty(false);
           setTakeoffSelectValue(target.takeoff_airfield_id ? String(target.takeoff_airfield_id) : '');
           // fetch event for context
           if (target.event_id) {
@@ -403,6 +406,7 @@ const InnhoppDetailPage = () => {
               land_owner_permission: copy.land_owner_permission ?? undefined,
               image_files: copy.image_files || []
             });
+            setImagesDirty(false);
             setTakeoffSelectValue(copy.takeoff_airfield_id ? String(copy.takeoff_airfield_id) : '');
           }
         }
@@ -440,10 +444,13 @@ const InnhoppDetailPage = () => {
     };
   }, []);
 
-  const buildPayload = (override?: Partial<InnhoppFormState>): UpdateInnhoppPayload => {
+  const buildPayload = (
+    override?: Partial<InnhoppFormState>,
+    options?: { includeImages?: boolean }
+  ): UpdateInnhoppPayload => {
     const state = { ...form, ...override };
     const owners = compactLandOwners(state.land_owners || []);
-    return {
+    const payload: UpdateInnhoppPayload = {
       sequence: state.sequence,
       name: state.name.trim(),
       coordinates: state.coordinates?.trim(),
@@ -469,13 +476,16 @@ const InnhoppDetailPage = () => {
         telephone: owner.telephone.trim(),
         email: owner.email.trim()
       })),
-      land_owner_permission: state.land_owner_permission ?? undefined,
-      image_files: (state.image_files || []).map((img) => ({
+      land_owner_permission: state.land_owner_permission ?? undefined
+    };
+    if (options?.includeImages) {
+      payload.image_files = (state.image_files || []).map((img) => ({
         name: img.name?.trim() || undefined,
         mime_type: img.mime_type?.trim() || undefined,
         data: img.data
-      }))
-    };
+      }));
+    }
+    return payload;
   };
 
   const handleLandingAreaChange = (
@@ -556,6 +566,7 @@ const InnhoppDetailPage = () => {
         setActiveImageIndex(existing.length);
       }
       setForm((prev) => ({ ...prev, image_files: merged }));
+      setImagesDirty(true);
       if (innhopp) {
         await autoSaveImages(merged);
       }
@@ -569,6 +580,7 @@ const InnhoppDetailPage = () => {
       ...prev,
       image_files: (prev.image_files || []).filter((_, idx) => idx !== index)
     }));
+    setImagesDirty(true);
     if (lightboxIndex !== null && lightboxIndex === index) {
       setLightboxIndex(null);
     } else if (lightboxIndex !== null && index < lightboxIndex) {
@@ -631,7 +643,8 @@ const InnhoppDetailPage = () => {
     setMessage(null);
     setSaved(false);
     try {
-      const payload = buildPayload();
+      const includeImages = isCreateMode || imagesDirty;
+      const payload = buildPayload(undefined, { includeImages });
       if (isCreateMode || !innhopp) {
         const created = await createInnhopp(Number(eventId), payload);
         setInnhopp(created);
@@ -641,6 +654,9 @@ const InnhoppDetailPage = () => {
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
         setMessage('Innhopp updated');
+      }
+      if (includeImages) {
+        setImagesDirty(false);
       }
       setSaved(true);
       setLastSavedSignature(currentSignature);
@@ -662,12 +678,13 @@ const InnhoppDetailPage = () => {
     setMessage(null);
     setSaved(false);
     try {
-      const payload = buildPayload({ image_files: nextImages });
+      const payload = buildPayload({ image_files: nextImages }, { includeImages: true });
       const updated = await updateInnhopp(innhopp.id, payload);
       setInnhopp(updated);
       setForm((prev) => ({ ...prev, image_files: updated.image_files || nextImages }));
       setMessage('Images saved');
       setSaved(true);
+      setImagesDirty(false);
       setLastSavedSignature(buildSignature({ ...form, image_files: nextImages }));
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to save images');
@@ -710,7 +727,7 @@ const InnhoppDetailPage = () => {
       if (!innhopp) {
         setMessage('Airfield created and assigned as takeoff');
       } else {
-        const payload = buildPayload({ takeoff_airfield_id: created.id });
+        const payload = buildPayload({ takeoff_airfield_id: created.id }, { includeImages: false });
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
         setForm((prev) => ({ ...prev, takeoff_airfield_id: updated.takeoff_airfield_id || created.id }));

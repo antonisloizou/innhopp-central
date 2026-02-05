@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
@@ -46,32 +47,32 @@ type InnhoppImage struct {
 }
 
 type Innhopp struct {
-	ID                   int64       `json:"id"`
-	EventID              int64       `json:"event_id"`
-	Sequence             int         `json:"sequence"`
-	Name                 string      `json:"name"`
-	Coordinates          string      `json:"coordinates,omitempty"`
-	TakeoffAirfieldID    *int64      `json:"takeoff_airfield_id,omitempty"`
-	ScheduledAt          *time.Time  `json:"scheduled_at,omitempty"`
-	Elevation            *int        `json:"elevation,omitempty"`
-	Notes                string      `json:"notes,omitempty"`
-	ReasonForChoice      string      `json:"reason_for_choice,omitempty"`
-	AdjustAltimeterAAD   string      `json:"adjust_altimeter_aad,omitempty"`
-	Notam                string      `json:"notam,omitempty"`
-	DistanceByAir        *float64    `json:"distance_by_air,omitempty"`
-	DistanceByRoad       *float64    `json:"distance_by_road,omitempty"`
-	PrimaryLandingArea   LandingArea `json:"primary_landing_area"`
-	SecondaryLandingArea LandingArea `json:"secondary_landing_area"`
-	RiskAssessment       string      `json:"risk_assessment,omitempty"`
-	SafetyPrecautions    string      `json:"safety_precautions,omitempty"`
-	Jumprun              string      `json:"jumprun,omitempty"`
-	Hospital             string      `json:"hospital,omitempty"`
-	RescueBoat           *bool       `json:"rescue_boat,omitempty"`
-	MinimumRequirements  string      `json:"minimum_requirements,omitempty"`
-	LandOwners           []LandOwner `json:"land_owners,omitempty"`
-	LandOwnerPermission  *bool       `json:"land_owner_permission,omitempty"`
+	ID                   int64          `json:"id"`
+	EventID              int64          `json:"event_id"`
+	Sequence             int            `json:"sequence"`
+	Name                 string         `json:"name"`
+	Coordinates          string         `json:"coordinates,omitempty"`
+	TakeoffAirfieldID    *int64         `json:"takeoff_airfield_id,omitempty"`
+	ScheduledAt          *time.Time     `json:"scheduled_at,omitempty"`
+	Elevation            *int           `json:"elevation,omitempty"`
+	Notes                string         `json:"notes,omitempty"`
+	ReasonForChoice      string         `json:"reason_for_choice,omitempty"`
+	AdjustAltimeterAAD   string         `json:"adjust_altimeter_aad,omitempty"`
+	Notam                string         `json:"notam,omitempty"`
+	DistanceByAir        *float64       `json:"distance_by_air,omitempty"`
+	DistanceByRoad       *float64       `json:"distance_by_road,omitempty"`
+	PrimaryLandingArea   LandingArea    `json:"primary_landing_area"`
+	SecondaryLandingArea LandingArea    `json:"secondary_landing_area"`
+	RiskAssessment       string         `json:"risk_assessment,omitempty"`
+	SafetyPrecautions    string         `json:"safety_precautions,omitempty"`
+	Jumprun              string         `json:"jumprun,omitempty"`
+	Hospital             string         `json:"hospital,omitempty"`
+	RescueBoat           *bool          `json:"rescue_boat,omitempty"`
+	MinimumRequirements  string         `json:"minimum_requirements,omitempty"`
+	LandOwners           []LandOwner    `json:"land_owners,omitempty"`
+	LandOwnerPermission  *bool          `json:"land_owner_permission,omitempty"`
 	ImageFiles           []InnhoppImage `json:"image_files,omitempty"`
-	CreatedAt            time.Time   `json:"created_at"`
+	CreatedAt            time.Time      `json:"created_at"`
 }
 
 type landingAreaPayload struct {
@@ -110,7 +111,7 @@ type payload struct {
 	MinimumRequirements  string             `json:"minimum_requirements"`
 	LandOwners           []landOwnerPayload `json:"land_owners"`
 	LandOwnerPermission  *bool              `json:"land_owner_permission"`
-	ImageFiles           []InnhoppImage     `json:"image_files"`
+	ImageFiles           *[]InnhoppImage    `json:"image_files"`
 }
 
 func normalizeLandingAreaPayload(p landingAreaPayload) LandingArea {
@@ -447,11 +448,17 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to encode land owners")
 		return
 	}
-	imageFiles := normalizeImageFiles(p.ImageFiles)
-	imageFilesJSON, err := encodeImageFiles(imageFiles)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to encode images")
-		return
+	var imageFilesJSON pgtype.JSONB
+	if p.ImageFiles != nil {
+		imageFiles := normalizeImageFiles(*p.ImageFiles)
+		encoded, err := encodeImageFiles(imageFiles)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to encode images")
+			return
+		}
+		imageFilesJSON = pgtype.JSONB{Bytes: encoded, Status: pgtype.Present}
+	} else {
+		imageFilesJSON = pgtype.JSONB{Status: pgtype.Null}
 	}
 
 	reason := strings.TrimSpace(p.ReasonForChoice)
@@ -471,7 +478,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
              primary_landing_area_name = $13, primary_landing_area_description = $14, primary_landing_area_size = $15, primary_landing_area_obstacles = $16,
              secondary_landing_area_name = $17, secondary_landing_area_description = $18, secondary_landing_area_size = $19, secondary_landing_area_obstacles = $20,
              risk_assessment = $21, safety_precautions = $22, jumprun = $23, hospital = $24, rescue_boat = $25, minimum_requirements = $26,
-             image_files = $27, land_owners = $28, land_owner_permission = $29
+             image_files = COALESCE($27, image_files), land_owners = $28, land_owner_permission = $29
          WHERE id = $30
          RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                    reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
