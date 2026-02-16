@@ -14,6 +14,9 @@ import ParticipantDetailPage from './pages/ParticipantDetailPage';
 import LogisticsDashboardPage from './pages/LogisticsDashboardPage';
 import LogisticsCreatePage from './pages/LogisticsCreatePage';
 import LogisticsDetailPage from './pages/LogisticsDetailPage';
+import LogisticsGroundCrewDashboardPage from './pages/LogisticsGroundCrewDashboardPage';
+import LogisticsGroundCrewCreatePage from './pages/LogisticsGroundCrewCreatePage';
+import LogisticsGroundCrewDetailPage from './pages/LogisticsGroundCrewDetailPage';
 import LogisticsSummaryPage from './pages/LogisticsSummaryPage';
 import LogisticsAccommodationsPage from './pages/LogisticsAccommodationsPage';
 import LogisticsAccommodationCreatePage from './pages/LogisticsAccommodationCreatePage';
@@ -52,6 +55,9 @@ const App = () => (
         <Route path="participants/:participantId" element={<ParticipantDetailPage />} />
         <Route path="logistics" element={<LogisticsSummaryPage />} />
         <Route path="logistics/transport" element={<LogisticsDashboardPage />} />
+        <Route path="logistics/ground-crew" element={<LogisticsGroundCrewDashboardPage />} />
+        <Route path="logistics/ground-crew/new" element={<LogisticsGroundCrewCreatePage />} />
+        <Route path="logistics/ground-crew/:groundCrewId" element={<LogisticsGroundCrewDetailPage />} />
         <Route path="logistics/accommodations" element={<LogisticsAccommodationsPage />} />
         <Route path="logistics/accommodations/new" element={<LogisticsAccommodationCreatePage />} />
         <Route path="logistics/meals" element={<LogisticsMealsPage />} />

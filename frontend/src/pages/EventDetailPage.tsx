@@ -44,6 +44,8 @@ import { createAccommodation, listAccommodations } from '../api/events';
 import {
   Transport,
   listTransports,
+  GroundCrew,
+  listGroundCrews,
   createTransport,
   CreateTransportPayload,
   OtherLogistic,
@@ -344,6 +346,7 @@ const currentSignature = useMemo(
     notes: ''
 });
 const [transports, setTransports] = useState<Transport[]>([]);
+  const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [showTransportForm, setShowTransportForm] = useState(false);
@@ -411,6 +414,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     | 'staff'
     | 'accommodations'
     | 'transports'
+    | 'groundCrews'
     | 'meals'
     | 'others';
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
@@ -421,6 +425,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     staff: false,
     accommodations: false,
     transports: false,
+    groundCrews: false,
     meals: false,
     others: false
   });
@@ -491,7 +496,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       attempts += 1;
     }, 120);
     return () => clearInterval(interval);
-  }, [highlightId, innhopps, airfieldIds, participantIds, accommodations, transports, others]);
+  }, [highlightId, innhopps, airfieldIds, participantIds, accommodations, transports, groundCrews, others]);
 
   useEffect(() => {
     const copy = (location.state as any)?.copyInnhopp as Innhopp | undefined;
@@ -714,11 +719,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     const loadTransportsAndOthers = async () => {
       if (!eventId) return;
       try {
-        const [transportData, otherData, mealData] = await Promise.all([listTransports(), listOthers(), listMeals()]);
+        const [transportData, groundCrewData, otherData, mealData] = await Promise.all([listTransports(), listGroundCrews(), listOthers(), listMeals()]);
         if (cancelled) return;
         setTransports(
           Array.isArray(transportData)
             ? transportData.filter((t) => t.event_id === Number(eventId))
+            : []
+        );
+        setGroundCrews(
+          Array.isArray(groundCrewData)
+            ? groundCrewData.filter((g) => g.event_id === Number(eventId))
             : []
         );
         setOthers(
@@ -728,6 +738,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       } catch {
         if (!cancelled) {
           setTransports([]);
+          setGroundCrews([]);
           setOthers([]);
           setMeals([]);
         }
@@ -2943,6 +2954,128 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </button>
         </div>
       </>
+        )}
+      </article>
+
+      <article className="card">
+        <header
+          className="card-header"
+          onClick={() => toggleSection('groundCrews')}
+          style={{ cursor: 'pointer' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+            <button
+              className="ghost"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection('groundCrews');
+              }}
+            >
+              {openSections.groundCrews ? '▾' : '▸'}
+            </button>
+            <h3 style={{ margin: 0 }}>Ground Crew</h3>
+          </div>
+          <span className="badge neutral">{groundCrews.length} ENTRIES</span>
+        </header>
+        {openSections.groundCrews && (
+          <>
+            {groundCrews.length > 0 ? (
+              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+                {groundCrews
+                  .slice()
+                  .sort((a, b) => {
+                    const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+                    const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+                    return aTime - bTime;
+                  })
+                  .map((g) => {
+                    const pickupCoords = locationCoordinates(g.pickup_location);
+                    const destCoords = locationCoordinates(g.destination);
+                    const hasPassengers = Number.isFinite(g.passenger_count) && g.passenger_count >= 0;
+                    const hasVehicles = Array.isArray((g as any).vehicles) && (g as any).vehicles.length > 0;
+                    const groundCrewComplete =
+                      hasText(g.pickup_location) &&
+                      hasText(g.destination) &&
+                      hasText(g.scheduled_at) &&
+                      hasPassengers &&
+                      hasVehicles &&
+                      hasText(pickupCoords) &&
+                      hasText(destCoords);
+                    return (
+                      <li
+                        key={g.id}
+                        id={`ground-crew-${g.id}`}
+                        style={{ ...listItemPadding, ...(highlightId === `ground-crew-${g.id}` ? highlightFrame : {}) }}
+                      >
+                        <Link
+                          to={`/logistics/ground-crew/${g.id}`}
+                          state={{ fromEventId: eventId, highlightId: `ground-crew-${g.id}` }}
+                          className="card-link"
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.25rem',
+                            width: '100%'
+                          }}
+                          onClick={() => {
+                            if (eventId) {
+                              try {
+                                sessionStorage.setItem(
+                                  `event-detail-highlight:${eventId}`,
+                                  `ground-crew-${g.id}`
+                                );
+                              } catch {
+                                // ignore
+                              }
+                            }
+                            saveDetailState();
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              justifyContent: 'space-between',
+                              gap: '0.75rem',
+                              width: '100%'
+                            }}
+                          >
+                            <strong style={{ display: 'block' }}>
+                              {g.pickup_location} → {g.destination}
+                            </strong>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
+                              <span className={`badge ${groundCrewComplete ? 'success' : 'danger'}`} style={{ minWidth: '2.4ch', textAlign: 'center' }}>
+                                {groundCrewComplete ? '✓' : '!'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            {g.scheduled_at ? `${formatDateTime24h(g.scheduled_at)}` : 'Unscheduled'}
+                          </div>
+                          {Array.isArray((g as any).vehicles) && (g as any).vehicles.length > 0 ? (
+                            <div className="muted" style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                              {(g as any).vehicles.map((v: any, idx: number) => (
+                                <div key={idx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <strong>{v.name}</strong>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </Link>
+                      </li>
+                    );
+                  })}
+              </ul>
+            ) : (
+              <p className="muted">No ground crew entries yet.</p>
+            )}
+            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+                {saveButtonLabel}
+              </button>
+            </div>
+          </>
         )}
       </article>
 

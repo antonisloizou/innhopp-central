@@ -849,6 +849,426 @@ func (h *Handler) deleteTransport(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *Handler) attachEventVehiclesToGroundCrew(ctx context.Context, tx pgx.Tx, groundCrewID int64, vehicles []TransportVehicle) error {
+	if len(vehicles) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, v := range vehicles {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			continue
+		}
+		batch.Queue(
+			`INSERT INTO logistics_ground_crew_vehicles (ground_crew_id, name, driver, passenger_capacity, notes, event_vehicle_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+			groundCrewID, name, strings.TrimSpace(v.Driver), v.PassengerCapacity, strings.TrimSpace(v.Notes), v.EventVehicleID,
+		)
+	}
+	br := tx.SendBatch(ctx, batch)
+	for range batch.QueuedQueries {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return err
+		}
+	}
+	return br.Close()
+}
+
+func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at FROM logistics_ground_crews ORDER BY created_at DESC`)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list ground crews")
+		return
+	}
+	defer rows.Close()
+
+	var groundCrews []Transport
+	var groundCrewIDs []int64
+
+	for rows.Next() {
+		var gc Transport
+		var notes sql.NullString
+		var eventID sql.NullInt64
+		var seasonID sql.NullInt64
+		var scheduledAt sql.NullTime
+		if err := rows.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse ground crew")
+			return
+		}
+		if scheduledAt.Valid {
+			gc.ScheduledAt = &scheduledAt.Time
+		}
+		if notes.Valid {
+			gc.Notes = notes.String
+		}
+		if eventID.Valid {
+			val := eventID.Int64
+			gc.EventID = &val
+		}
+		if seasonID.Valid {
+			val := seasonID.Int64
+			gc.SeasonID = &val
+		}
+		groundCrews = append(groundCrews, gc)
+		groundCrewIDs = append(groundCrewIDs, gc.ID)
+	}
+
+	if len(groundCrews) == 0 {
+		httpx.WriteJSON(w, http.StatusOK, groundCrews)
+		return
+	}
+
+	vehicleRows, err := h.db.Query(r.Context(),
+		`SELECT ground_crew_id, name, driver, passenger_capacity, notes, event_vehicle_id
+         FROM logistics_ground_crew_vehicles
+         WHERE ground_crew_id = ANY($1)`,
+		groundCrewIDs,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list vehicles")
+		return
+	}
+	defer vehicleRows.Close()
+
+	vehicleMap := make(map[int64][]TransportVehicle)
+	for vehicleRows.Next() {
+		var groundCrewID int64
+		var v TransportVehicle
+		var driver sql.NullString
+		var notes sql.NullString
+		var eventVehicleID sql.NullInt64
+		if err := vehicleRows.Scan(&groundCrewID, &v.Name, &driver, &v.PassengerCapacity, &notes, &eventVehicleID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse vehicle")
+			return
+		}
+		if driver.Valid {
+			v.Driver = driver.String
+		}
+		if notes.Valid {
+			v.Notes = notes.String
+		}
+		if eventVehicleID.Valid {
+			val := eventVehicleID.Int64
+			v.EventVehicleID = &val
+		}
+		vehicleMap[groundCrewID] = append(vehicleMap[groundCrewID], v)
+	}
+
+	for i := range groundCrews {
+		groundCrews[i].Vehicles = vehicleMap[groundCrews[i].ID]
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, groundCrews)
+}
+
+func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		PickupLocation string             `json:"pickup_location"`
+		Destination    string             `json:"destination"`
+		PassengerCount int                `json:"passenger_count"`
+		ScheduledAt    string             `json:"scheduled_at"`
+		Notes          string             `json:"notes"`
+		EventID        int64              `json:"event_id"`
+		VehicleIDs     []int64            `json:"vehicle_ids"`
+		Vehicles       []TransportVehicle `json:"vehicles"`
+	}
+
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	if payload.EventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "event_id is required")
+		return
+	}
+
+	pickup := strings.TrimSpace(payload.PickupLocation)
+	dest := strings.TrimSpace(payload.Destination)
+	if pickup == "" || dest == "" {
+		httpx.Error(w, http.StatusBadRequest, "pickup_location and destination are required")
+		return
+	}
+	if payload.PassengerCount < 0 {
+		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
+		return
+	}
+	notes := strings.TrimSpace(payload.Notes)
+
+	var scheduledAt *time.Time
+	if payload.ScheduledAt != "" {
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
+			return
+		}
+		scheduledAt = &t
+	}
+
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var seasonID *int64
+	if err := tx.QueryRow(r.Context(), `SELECT season_id FROM events WHERE id = $1`, payload.EventID).Scan(&seasonID); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
+		return
+	}
+
+	var groundCrew Transport
+	row := tx.QueryRow(r.Context(),
+		`INSERT INTO logistics_ground_crews (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, created_at`,
+		pickup, dest, payload.PassengerCount, scheduledAt, notes, payload.EventID, seasonID,
+	)
+	if err := row.Scan(&groundCrew.ID, &groundCrew.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create ground crew")
+		return
+	}
+
+	groundCrew.PickupLocation = pickup
+	groundCrew.Destination = dest
+	groundCrew.PassengerCount = payload.PassengerCount
+	groundCrew.ScheduledAt = scheduledAt
+	groundCrew.Notes = notes
+	groundCrew.EventID = &payload.EventID
+	groundCrew.SeasonID = seasonID
+
+	if len(payload.VehicleIDs) > 0 {
+		eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, payload.VehicleIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := h.attachEventVehiclesToGroundCrew(r.Context(), tx, groundCrew.ID, eventVehicles); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to attach vehicles")
+			return
+		}
+		groundCrew.Vehicles = eventVehicles
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save ground crew")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusCreated, groundCrew)
+}
+
+func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "groundCrewID"), 10, 64)
+	if err != nil || id <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid ground crew id")
+		return
+	}
+
+	row := h.db.QueryRow(r.Context(),
+		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at
+         FROM logistics_ground_crews WHERE id = $1`,
+		id,
+	)
+	var gc Transport
+	var scheduledAt sql.NullTime
+	var notes sql.NullString
+	var eventID sql.NullInt64
+	var seasonID sql.NullInt64
+	if err := row.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusNotFound, "ground crew not found")
+		return
+	}
+	if scheduledAt.Valid {
+		gc.ScheduledAt = &scheduledAt.Time
+	}
+	if notes.Valid {
+		gc.Notes = notes.String
+	}
+	if eventID.Valid {
+		val := eventID.Int64
+		gc.EventID = &val
+	}
+	if seasonID.Valid {
+		val := seasonID.Int64
+		gc.SeasonID = &val
+	}
+
+	vehicleRows, err := h.db.Query(r.Context(),
+		`SELECT name, driver, passenger_capacity, notes, event_vehicle_id FROM logistics_ground_crew_vehicles WHERE ground_crew_id = $1`,
+		id,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load vehicles")
+		return
+	}
+	defer vehicleRows.Close()
+	for vehicleRows.Next() {
+		var v TransportVehicle
+		var driver sql.NullString
+		var notes sql.NullString
+		var eventVehicleID sql.NullInt64
+		if err := vehicleRows.Scan(&v.Name, &driver, &v.PassengerCapacity, &notes, &eventVehicleID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse vehicle")
+			return
+		}
+		if driver.Valid {
+			v.Driver = driver.String
+		}
+		if notes.Valid {
+			v.Notes = notes.String
+		}
+		if eventVehicleID.Valid {
+			val := eventVehicleID.Int64
+			v.EventVehicleID = &val
+		}
+		gc.Vehicles = append(gc.Vehicles, v)
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, gc)
+}
+
+func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "groundCrewID"), 10, 64)
+	if err != nil || id <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid ground crew id")
+		return
+	}
+
+	var payload struct {
+		PickupLocation string             `json:"pickup_location"`
+		Destination    string             `json:"destination"`
+		PassengerCount int                `json:"passenger_count"`
+		ScheduledAt    string             `json:"scheduled_at"`
+		Notes          *string            `json:"notes"`
+		EventID        int64              `json:"event_id"`
+		VehicleIDs     *[]int64           `json:"vehicle_ids"`
+		Vehicles       []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
+	}
+
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	if payload.EventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "event_id is required")
+		return
+	}
+
+	pickup := strings.TrimSpace(payload.PickupLocation)
+	dest := strings.TrimSpace(payload.Destination)
+	if pickup == "" || dest == "" {
+		httpx.Error(w, http.StatusBadRequest, "pickup_location and destination are required")
+		return
+	}
+	if payload.PassengerCount < 0 {
+		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
+		return
+	}
+	var notesVal interface{}
+	if payload.Notes != nil {
+		n := strings.TrimSpace(*payload.Notes)
+		if n != "" {
+			notesVal = n
+		} else {
+			notesVal = nil
+		}
+	}
+
+	var scheduledAt *time.Time
+	if payload.ScheduledAt != "" {
+		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "scheduled_at must be RFC3339 timestamp")
+			return
+		}
+		scheduledAt = &t
+	}
+
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var seasonID *int64
+	if err := tx.QueryRow(r.Context(), `SELECT season_id FROM events WHERE id = $1`, payload.EventID).Scan(&seasonID); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
+		return
+	}
+
+	if notesVal == nil {
+		var existingNotes sql.NullString
+		if err := tx.QueryRow(r.Context(), `SELECT notes FROM logistics_ground_crews WHERE id = $1`, id).Scan(&existingNotes); err == nil {
+			if existingNotes.Valid {
+				notesVal = existingNotes.String
+			}
+		}
+	}
+
+	tag, err := tx.Exec(r.Context(),
+		`UPDATE logistics_ground_crews
+         SET pickup_location = $1, destination = $2, passenger_count = $3, scheduled_at = $4, notes = $5, event_id = $6, season_id = $7
+         WHERE id = $8`,
+		pickup, dest, payload.PassengerCount, scheduledAt, notesVal, payload.EventID, seasonID, id,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update ground crew")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "ground crew not found")
+		return
+	}
+
+	if payload.VehicleIDs != nil {
+		if _, err := tx.Exec(r.Context(), `DELETE FROM logistics_ground_crew_vehicles WHERE ground_crew_id = $1`, id); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to clear vehicles")
+			return
+		}
+		if len(*payload.VehicleIDs) > 0 {
+			eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, *payload.VehicleIDs)
+			if err != nil {
+				httpx.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			if err := h.attachEventVehiclesToGroundCrew(r.Context(), tx, id, eventVehicles); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to save vehicles")
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save ground crew")
+		return
+	}
+
+	h.getGroundCrew(w, r)
+}
+
+func (h *Handler) deleteGroundCrew(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "groundCrewID"), 10, 64)
+	if err != nil || id <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid ground crew id")
+		return
+	}
+	tag, err := h.db.Exec(r.Context(), `DELETE FROM logistics_ground_crews WHERE id = $1`, id)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to delete ground crew")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "ground crew not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // NewHandler creates a logistics handler.
 func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{db: db}
@@ -864,6 +1284,11 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/transports/{transportID}", h.getTransport)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Put("/transports/{transportID}", h.updateTransport)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Delete("/transports/{transportID}", h.deleteTransport)
+	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/ground-crews", h.listGroundCrews)
+	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Post("/ground-crews", h.createGroundCrew)
+	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/ground-crews/{groundCrewID}", h.getGroundCrew)
+	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Put("/ground-crews/{groundCrewID}", h.updateGroundCrew)
+	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Delete("/ground-crews/{groundCrewID}", h.deleteGroundCrew)
 	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/vehicles", h.listVehicles)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Post("/vehicles", h.createVehicle)
 	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/vehicles/{vehicleID}", h.getVehicle)

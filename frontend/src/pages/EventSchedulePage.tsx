@@ -14,12 +14,16 @@ import {
 import {
   Transport,
   listTransports,
+  GroundCrew,
+  listGroundCrews,
   OtherLogistic,
   listOthers,
   Meal,
   listMeals,
   updateTransport,
   getTransport,
+  updateGroundCrew,
+  getGroundCrew,
   updateOther,
   getOther,
   updateMeal,
@@ -41,13 +45,14 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
-type EntryType = 'Innhopp' | 'Transport' | 'Accommodation' | 'Other' | 'Meal';
+type EntryType = 'Innhopp' | 'Transport' | 'Ground Crew' | 'Accommodation' | 'Other' | 'Meal';
 type DayBucket = {
   date: Date;
   label: string;
   key: string;
   innhopps: Event['innhopps'];
   transports: Transport[];
+  groundCrews: GroundCrew[];
   accommodations: Accommodation[];
   others: OtherLogistic[];
   meals: Meal[];
@@ -163,6 +168,7 @@ const EventSchedulePage = () => {
   const location = useLocation();
   const [eventData, setEventData] = useState<Event | null>(null);
   const [transports, setTransports] = useState<Transport[]>([]);
+  const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
@@ -301,6 +307,7 @@ const EventSchedulePage = () => {
   const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>({
     Innhopp: true,
     Transport: true,
+    'Ground Crew': true,
     Accommodation: true,
     Other: true,
     Meal: true
@@ -329,9 +336,10 @@ const EventSchedulePage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [evt, transportList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
+        const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
           getEvent(Number(eventId)),
           listTransports(),
+          listGroundCrews(),
           listAccommodations(Number(eventId)),
           listParticipantProfiles(),
           listOthers(),
@@ -341,6 +349,7 @@ const EventSchedulePage = () => {
         if (cancelled) return;
         setEventData(evt);
         setTransports(Array.isArray(transportList) ? transportList.filter((t) => t.event_id === Number(eventId)) : []);
+        setGroundCrews(Array.isArray(groundCrewList) ? groundCrewList.filter((g) => g.event_id === Number(eventId)) : []);
         setAccommodations(Array.isArray(accList) ? accList : []);
         setParticipants(Array.isArray(participantList) ? participantList : []);
         setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
@@ -370,9 +379,10 @@ const EventSchedulePage = () => {
       }
     setMessage(null);
     try {
-      const [evt, transportList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
+      const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
         getEvent(Number(eventId)),
         listTransports(),
+        listGroundCrews(),
         listAccommodations(Number(eventId)),
         listParticipantProfiles(),
         listOthers(),
@@ -381,6 +391,7 @@ const EventSchedulePage = () => {
       ]);
       setEventData(evt);
       setTransports(Array.isArray(transportList) ? transportList.filter((t) => t.event_id === Number(eventId)) : []);
+      setGroundCrews(Array.isArray(groundCrewList) ? groundCrewList.filter((g) => g.event_id === Number(eventId)) : []);
       setAccommodations(Array.isArray(accList) ? accList : []);
       setParticipants(Array.isArray(participantList) ? participantList : []);
       setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
@@ -406,6 +417,10 @@ const EventSchedulePage = () => {
     days.forEach((d) => keys.add(extractDateKey(d.toISOString())));
     transports.forEach((t) => {
       const key = extractDateKey(t.scheduled_at || undefined);
+      if (key) keys.add(key);
+    });
+    groundCrews.forEach((g) => {
+      const key = extractDateKey(g.scheduled_at || undefined);
       if (key) keys.add(key);
     });
     meals.forEach((m) => {
@@ -434,6 +449,7 @@ const EventSchedulePage = () => {
     const buckets = bucketDates.map(({ key, date }) => {
       const innhoppItems = innhopps.filter((i) => extractDateKey(i.scheduled_at || undefined) === key);
       const transportItems = transports.filter((t) => extractDateKey(t.scheduled_at || undefined) === key);
+      const groundCrewItems = groundCrews.filter((g) => extractDateKey(g.scheduled_at || undefined) === key);
       const accommodationItems = accommodations.filter(
         (a) =>
           extractDateKey(a.check_in_at || undefined) === key || extractDateKey(a.check_out_at || undefined) === key
@@ -446,6 +462,7 @@ const EventSchedulePage = () => {
         key,
         innhopps: innhoppItems,
         transports: transportItems,
+        groundCrews: groundCrewItems,
         accommodations: accommodationItems,
         others: otherItems,
         meals: mealItems
@@ -453,15 +470,17 @@ const EventSchedulePage = () => {
     });
 
     const unscheduledTransports = transports.filter((t) => !t.scheduled_at || extractDateKey(t.scheduled_at) === '');
+    const unscheduledGroundCrews = groundCrews.filter((g) => !g.scheduled_at || extractDateKey(g.scheduled_at) === '');
     const unscheduledOthers = others.filter((o) => !o.scheduled_at || extractDateKey(o.scheduled_at) === '');
     const unscheduledMeals = meals.filter((m) => !m.scheduled_at || extractDateKey(m.scheduled_at) === '');
-    if ((unscheduledTransports.length > 0 || unscheduledOthers.length > 0 || unscheduledMeals.length > 0) && !keys.has('unscheduled')) {
+    if ((unscheduledTransports.length > 0 || unscheduledGroundCrews.length > 0 || unscheduledOthers.length > 0 || unscheduledMeals.length > 0) && !keys.has('unscheduled')) {
       buckets.push({
         date: new Date(),
         label: 'Unscheduled',
         key: 'unscheduled',
         innhopps: [],
         transports: unscheduledTransports,
+        groundCrews: unscheduledGroundCrews,
         accommodations: [],
         others: unscheduledOthers,
         meals: unscheduledMeals
@@ -469,7 +488,7 @@ const EventSchedulePage = () => {
     }
 
     return buckets;
-  }, [eventData, transports, accommodations, others, meals]);
+  }, [eventData, transports, groundCrews, accommodations, others, meals]);
 
   const handleDelete = async () => {
     if (!eventId) return;
@@ -627,6 +646,7 @@ const EventSchedulePage = () => {
   const typeBadgeStyles: Record<EntryType, { backgroundColor: string; color: string }> = {
     Innhopp: { backgroundColor: '#2b8a3e', color: '#fff' },
     Transport: { backgroundColor: '#e6b84a', color: '#fff' },
+    'Ground Crew': { backgroundColor: '#f6dea0', color: '#fff' },
     Accommodation: { backgroundColor: '#0d6efd', color: '#fff' },
     Meal: { backgroundColor: '#d97706', color: '#fff' },
     Other: { backgroundColor: '#7e22ce', color: '#fff' }
@@ -655,7 +675,7 @@ const EventSchedulePage = () => {
     }
     return minutes;
   };
-  const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Accommodation', 'Meal', 'Other'];
+  const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'];
 
   const buildPickerDate = (entry?: ScheduleEntry | null, day?: DayBucket) => {
     const base =
@@ -693,6 +713,12 @@ const EventSchedulePage = () => {
         setTransports((prev) =>
           Array.isArray(prev)
             ? prev.map((t) => (t.id === Number(entry.id.split('-').pop()) ? { ...t, scheduled_at: newIso ?? undefined } : t))
+            : prev
+        );
+      } else if (entry.type === 'Ground Crew') {
+        setGroundCrews((prev) =>
+          Array.isArray(prev)
+            ? prev.map((g) => (g.id === Number(entry.id.split('-').pop()) ? { ...g, scheduled_at: newIso ?? undefined } : g))
             : prev
         );
       } else if (entry.type === 'Other') {
@@ -832,6 +858,23 @@ const EventSchedulePage = () => {
                   .filter((id: any) => typeof id === 'number')
               : [];
           await updateTransport(numericId, {
+            pickup_location: full.pickup_location,
+            destination: full.destination,
+            passenger_count: full.passenger_count,
+            scheduled_at: newIso || undefined,
+            notes: full.notes || undefined,
+            event_id: Number(full.event_id),
+            vehicle_ids: vehicleIds.length > 0 ? vehicleIds : undefined
+          });
+        } else if (entry.type === 'Ground Crew') {
+          const full = await getGroundCrew(numericId);
+          const vehicleIds =
+            Array.isArray((full as any).vehicles)
+              ? (full as any).vehicles
+                  .map((v: any) => v.event_vehicle_id || v.id)
+                  .filter((id: any) => typeof id === 'number')
+              : [];
+          await updateGroundCrew(numericId, {
             pickup_location: full.pickup_location,
             destination: full.destination,
             passenger_count: full.passenger_count,
@@ -1327,6 +1370,46 @@ const EventSchedulePage = () => {
                   scheduledAt: t.scheduled_at || undefined
                 });
               });
+              day.groundCrews.forEach((g) => {
+                const pickupCoords = locationCoordinates(g.pickup_location);
+                const destCoords = locationCoordinates(g.destination);
+                const hasPassengers = Number.isFinite(g.passenger_count) && g.passenger_count >= 0;
+                const hasVehicles = Array.isArray(g.vehicles) && g.vehicles.length > 0;
+                const complete =
+                  hasText(g.pickup_location) &&
+                  hasText(g.destination) &&
+                  hasText(g.scheduled_at) &&
+                  hasPassengers &&
+                  hasVehicles &&
+                  hasText(pickupCoords) &&
+                  hasText(destCoords);
+                const vehicles = Array.isArray(g.vehicles)
+                  ? g.vehicles.map((v) => ({
+                      name: v.name,
+                      driver: v.driver || '',
+                      passenger_capacity: v.passenger_capacity
+                    }))
+                  : [];
+                entries.push({
+                  id: `gc-${g.id}`,
+                  hourKey: formatTimeLabel(g.scheduled_at),
+                  sortValue: (() => {
+                    const parts = parseTimeParts(g.scheduled_at);
+                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+                  })(),
+                  title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
+                  subtitle: formatTransportVehiclesLine(vehicles),
+                  type: 'Ground Crew',
+                  to: `/logistics/ground-crew/${g.id}`,
+                  transportComplete: complete,
+                  missingCoordinates: !pickupCoords || !destCoords,
+                  transportRouteOrigin: pickupCoords || null,
+                  transportRouteDestination: destCoords || null,
+                  notes: g.notes || null,
+                  vehicles,
+                  scheduledAt: g.scheduled_at || undefined
+                });
+              });
               day.others.forEach((o) => {
                 entries.push({
                   id: `o-${o.id}`,
@@ -1433,6 +1516,7 @@ const EventSchedulePage = () => {
                 const deriveType = (id: string): EntryType | null => {
                   if (id.startsWith('i-')) return 'Innhopp';
                   if (id.startsWith('t-')) return 'Transport';
+                  if (id.startsWith('gc-')) return 'Ground Crew';
                   if (id.startsWith('acc-')) return 'Accommodation';
                   if (id.startsWith('o-')) return 'Other';
                   if (id.startsWith('meal-')) return 'Meal';
@@ -1528,6 +1612,16 @@ const EventSchedulePage = () => {
                     </span>
                   );
                 } else if (entry.type === 'Transport') {
+                  statusBadge = entry.transportComplete ? (
+                    <span className="badge success" style={compactBadgeStyle}>
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="badge danger" style={compactBadgeStyle}>
+                      !
+                    </span>
+                  );
+                } else if (entry.type === 'Ground Crew') {
                   statusBadge = entry.transportComplete ? (
                     <span className="badge success" style={compactBadgeStyle}>
                       ✓
@@ -1940,7 +2034,7 @@ const EventSchedulePage = () => {
                 {(() => {
                   const badgeStyle = typeBadgeStyles[previewEntry.entry.type];
                   const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
-                  if (previewEntry.entry.type === 'Transport') {
+                  if (previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') {
                     return (
                       <>
                         <span
@@ -2215,7 +2309,8 @@ const EventSchedulePage = () => {
                           <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
                           <div>{(previewEntry.entry as any).notes || '—'}</div>
                         </div>
-                        {previewEntry.entry.type === 'Transport' && (previewEntry.entry as any).vehicles ? (
+                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
+                        (previewEntry.entry as any).vehicles ? (
                           <div key="vehicles">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
                             <div style={{ marginTop: '0.15rem' }}>
@@ -2233,7 +2328,7 @@ const EventSchedulePage = () => {
                             </div>
                           </div>
                         ) : null}
-                        {previewEntry.entry.type === 'Transport' &&
+                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
                         (previewEntry.entry as any).transportRouteOrigin &&
                         (previewEntry.entry as any).transportRouteDestination ? (
                           <div

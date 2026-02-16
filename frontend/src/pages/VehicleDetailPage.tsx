@@ -14,6 +14,7 @@ const VehicleDetailPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const transportId = searchParams.get('transportId');
+  const groundCrewId = searchParams.get('groundCrewId');
   const [form, setForm] = useState({
     event_id: '',
     name: '',
@@ -95,6 +96,8 @@ const VehicleDetailPage = () => {
       await deleteEventVehicle(Number(vehicleId));
       if (transportId) {
         navigate(`/logistics/${transportId}`);
+      } else if (groundCrewId) {
+        navigate(`/logistics/ground-crew/${groundCrewId}`);
       } else {
         navigate('/logistics');
       }
@@ -121,9 +124,17 @@ const VehicleDetailPage = () => {
           <button
             className="ghost"
             type="button"
-            onClick={() => navigate(transportId ? `/logistics/${transportId}` : '/logistics')}
+            onClick={() =>
+              navigate(
+                transportId
+                  ? `/logistics/${transportId}`
+                  : groundCrewId
+                    ? `/logistics/ground-crew/${groundCrewId}`
+                    : '/logistics'
+              )
+            }
           >
-            {transportId ? 'Back to route' : 'Back to logistics'}
+            {transportId ? 'Back to route' : groundCrewId ? 'Back to ground crew' : 'Back to logistics'}
           </button>
         </div>
       </header>

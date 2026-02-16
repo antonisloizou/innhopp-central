@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season, Accommodation, listAllAccommodations } from '../api/events';
-import { listTransports, Transport, listOthers, OtherLogistic, listMeals, Meal } from '../api/logistics';
+import { listTransports, Transport, listOthers, OtherLogistic, listMeals, Meal, listGroundCrews, GroundCrew } from '../api/logistics';
 import { listEventVehicles, EventVehicle } from '../api/logistics';
 
 const LogisticsSummaryPage = () => {
@@ -9,6 +9,7 @@ const LogisticsSummaryPage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [transports, setTransports] = useState<Transport[]>([]);
+  const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
@@ -24,10 +25,11 @@ const LogisticsSummaryPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [seasonResp, eventResp, transportResp, accResp, vehResp, otherResp, mealsResp] = await Promise.all([
+        const [seasonResp, eventResp, transportResp, groundCrewResp, accResp, vehResp, otherResp, mealsResp] = await Promise.all([
           listSeasons(),
           listEvents(),
           listTransports(),
+          listGroundCrews(),
           listAllAccommodations(),
           listEventVehicles(),
           listOthers(),
@@ -37,6 +39,7 @@ const LogisticsSummaryPage = () => {
         setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
         setEvents(Array.isArray(eventResp) ? eventResp : []);
         setTransports(Array.isArray(transportResp) ? transportResp : []);
+        setGroundCrews(Array.isArray(groundCrewResp) ? groundCrewResp : []);
         setAccommodations(Array.isArray(accResp) ? accResp : []);
         setVehicles(Array.isArray(vehResp) ? vehResp : []);
         setOthers(Array.isArray(otherResp) ? otherResp : []);
@@ -79,6 +82,17 @@ const LogisticsSummaryPage = () => {
       return true;
     });
   }, [accommodations, selectedEvent, selectedSeason, events]);
+
+  const filteredGroundCrews = useMemo(() => {
+    return groundCrews.filter((g) => {
+      if (selectedEvent) return g.event_id === Number(selectedEvent);
+      if (selectedSeason) {
+        const ev = events.find((e) => e.id === g.event_id);
+        return ev?.season_id === Number(selectedSeason);
+      }
+      return true;
+    });
+  }, [groundCrews, selectedEvent, selectedSeason, events]);
 
   const filteredVehicles = useMemo(() => {
     return vehicles.filter((v) => {
@@ -184,6 +198,17 @@ const LogisticsSummaryPage = () => {
             <span className="badge neutral">{filteredTransports.length}</span>
           </header>
           <p className="muted">View and manage transport routes.</p>
+        </article>
+
+        <article
+          className="card clickable"
+          onClick={() => navigate('/logistics/ground-crew')}
+        >
+          <header className="card-header">
+            <h3>Ground Crew</h3>
+            <span className="badge neutral">{filteredGroundCrews.length}</span>
+          </header>
+          <p className="muted">View and manage ground crew entries.</p>
         </article>
 
         <article

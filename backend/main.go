@@ -294,6 +294,20 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`CREATE TABLE IF NOT EXISTS logistics_ground_crews (
+            id SERIAL PRIMARY KEY,
+            pickup_location TEXT NOT NULL,
+            destination TEXT NOT NULL,
+            passenger_count INTEGER NOT NULL,
+            scheduled_at TIMESTAMPTZ,
+            notes TEXT,
+            event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+            season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`CREATE TABLE IF NOT EXISTS logistics_other (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -347,6 +361,18 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE logistics_transport_vehicles ADD COLUMN IF NOT EXISTS event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL`,
+		`CREATE TABLE IF NOT EXISTS logistics_ground_crew_vehicles (
+            id SERIAL PRIMARY KEY,
+            ground_crew_id INTEGER NOT NULL REFERENCES logistics_ground_crews(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            driver TEXT,
+            passenger_capacity INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE logistics_ground_crew_vehicles ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE logistics_ground_crew_vehicles ADD COLUMN IF NOT EXISTS event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL`,
 		`CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             subject TEXT NOT NULL UNIQUE,

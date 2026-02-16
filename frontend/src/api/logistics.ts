@@ -53,6 +53,25 @@ export const updateTransport = (id: number, payload: UpdateTransportPayload) =>
 export const deleteTransport = (id: number) =>
   apiRequest<void>(`/logistics/transports/${id}`, { method: 'DELETE' });
 
+export type GroundCrew = Transport;
+export type CreateGroundCrewPayload = CreateTransportPayload;
+export type UpdateGroundCrewPayload = UpdateTransportPayload;
+
+export const listGroundCrews = () => apiRequest<GroundCrew[]>('/logistics/ground-crews');
+export const getGroundCrew = (id: number) => apiRequest<GroundCrew>(`/logistics/ground-crews/${id}`);
+export const createGroundCrew = (payload: CreateGroundCrewPayload) =>
+  apiRequest<GroundCrew>('/logistics/ground-crews', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+export const updateGroundCrew = (id: number, payload: UpdateGroundCrewPayload) =>
+  apiRequest<GroundCrew>(`/logistics/ground-crews/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+export const deleteGroundCrew = (id: number) =>
+  apiRequest<void>(`/logistics/ground-crews/${id}`, { method: 'DELETE' });
+
 export type EventVehicle = {
   id: number;
   event_id: number;
