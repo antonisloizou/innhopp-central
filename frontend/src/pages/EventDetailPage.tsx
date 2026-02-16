@@ -46,6 +46,8 @@ import {
   listTransports,
   GroundCrew,
   listGroundCrews,
+  createGroundCrew,
+  CreateGroundCrewPayload,
   createTransport,
   CreateTransportPayload,
   OtherLogistic,
@@ -356,6 +358,13 @@ const [transportForm, setTransportForm] = useState({
     passenger_count: '',
     scheduled_at: ''
   });
+  const [showGroundCrewForm, setShowGroundCrewForm] = useState(false);
+  const [groundCrewForm, setGroundCrewForm] = useState({
+    pickup_location: '',
+    destination: '',
+    passenger_count: '',
+    scheduled_at: ''
+  });
   const [showOtherForm, setShowOtherForm] = useState(false);
   const [otherForm, setOtherForm] = useState({
     name: '',
@@ -561,6 +570,31 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setShowTransportForm(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create transport');
+    }
+  };
+
+  const handleCreateGroundCrewInline = async () => {
+    if (!eventId) return;
+    if (!groundCrewForm.pickup_location.trim() || !groundCrewForm.destination.trim()) return;
+    try {
+      const created = await createGroundCrew({
+        pickup_location: groundCrewForm.pickup_location.trim(),
+        destination: groundCrewForm.destination.trim(),
+        passenger_count: Number(groundCrewForm.passenger_count) || 0,
+        scheduled_at: groundCrewForm.scheduled_at || undefined,
+        event_id: Number(eventId),
+        vehicle_ids: []
+      } as CreateGroundCrewPayload);
+      setGroundCrews((prev) => [created, ...prev]);
+      setGroundCrewForm({
+        pickup_location: '',
+        destination: '',
+        passenger_count: '',
+        scheduled_at: ''
+      });
+      setShowGroundCrewForm(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to create ground crew');
     }
   };
 
@@ -3069,6 +3103,90 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </ul>
             ) : (
               <p className="muted">No ground crew entries yet.</p>
+            )}
+            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+              <button type="button" className="ghost" onClick={() => setShowGroundCrewForm((prev) => !prev)}>
+                {showGroundCrewForm ? 'Cancel' : 'Create new ground crew entry'}
+              </button>
+            </div>
+            {showGroundCrewForm && (
+              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+                <label className="form-field">
+                  <span>Start location</span>
+                  <select
+                    value={groundCrewForm.pickup_location}
+                    onChange={(e) => setGroundCrewForm((prev) => ({ ...prev, pickup_location: e.target.value }))}
+                    required
+                  >
+                    <option value="">Select start location</option>
+                    {transportLocationGroups.map(
+                      (group) =>
+                        group.options.length > 0 && (
+                          <optgroup key={`gc-start-${group.label}`} label={group.label}>
+                            {group.options.map((opt) => (
+                              <option key={`gc-start-${group.label}-${opt.value}`} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )
+                    )}
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Destination</span>
+                  <select
+                    value={groundCrewForm.destination}
+                    onChange={(e) => setGroundCrewForm((prev) => ({ ...prev, destination: e.target.value }))}
+                    required
+                  >
+                    <option value="">Select destination</option>
+                    {transportLocationGroups.map(
+                      (group) =>
+                        group.options.length > 0 && (
+                          <optgroup key={`gc-dest-${group.label}`} label={group.label}>
+                            {group.options.map((opt) => (
+                              <option key={`gc-dest-${group.label}-${opt.value}`} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )
+                    )}
+                  </select>
+                </label>
+                <label className="form-field">
+                  <span>Crew count</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={groundCrewForm.passenger_count}
+                    onChange={(e) => setGroundCrewForm((prev) => ({ ...prev, passenger_count: e.target.value }))}
+                  />
+                </label>
+                <label className="form-field">
+                  <span>Scheduled at</span>
+                  <Flatpickr
+                    value={toEventLocalPickerDate(groundCrewForm.scheduled_at)}
+                    options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
+                    onChange={(dates) => {
+                      const d = dates[0];
+                      setGroundCrewForm((prev) => ({
+                        ...prev,
+                        scheduled_at: d ? fromEventLocalPickerDate(d) : ''
+                      }));
+                    }}
+                  />
+                </label>
+                <div className="form-actions">
+                  <button type="button" className="primary" onClick={handleCreateGroundCrewInline}>
+                    Save ground crew
+                  </button>
+                  <button type="button" className="ghost" onClick={() => setShowGroundCrewForm(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
             )}
             <div className="form-actions" style={{ marginTop: '0.75rem' }}>
               <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
