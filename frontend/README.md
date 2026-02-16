@@ -25,6 +25,20 @@ The login page integrates the [Google Identity Services JavaScript SDK](https://
 
 3. Restart the dev server if it is running.
 
+## Google Maps route duration configuration
+
+The event schedule page can show estimated driving duration for transport and ground crew routes. To enable it:
+
+1. Create a Google Maps API key for a web app.
+2. Enable the `Maps JavaScript API` on the same Google Cloud project.
+3. Add this to `frontend/.env`:
+
+   ```env
+   VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
+   ```
+
+4. Restart the dev server if it is running.
+
 When the `/login` route loads, the Google sign-in button renders automatically. After successful authentication the decoded profile preview is shown and the app navigates to the event calendar.
 
 ## Available routes

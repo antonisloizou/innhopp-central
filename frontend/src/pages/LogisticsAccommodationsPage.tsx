@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSeasons, listEvents, Season, Event, Accommodation, listAllAccommodations } from '../api/events';
-import { formatEventLocal } from '../utils/eventDate';
+import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string, force24h = false) => {
   if (!iso) return 'Not scheduled';
@@ -13,6 +13,11 @@ const formatDateTime = (iso?: string, force24h = false) => {
     hour12: force24h ? false : undefined
   });
 };
+
+const accommodationSortTime = (acc: Accommodation) =>
+  parseEventLocal(acc.check_in_at)?.getTime() ??
+  parseEventLocal(acc.check_out_at)?.getTime() ??
+  Number.POSITIVE_INFINITY;
 
 const LogisticsAccommodationsPage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -56,14 +61,21 @@ const LogisticsAccommodationsPage = () => {
   }, [events, selectedSeason]);
 
   const filteredAccommodations = useMemo(() => {
-    return accommodations.filter((a) => {
-      if (selectedEvent) return a.event_id === Number(selectedEvent);
-      if (selectedSeason) {
-        const ev = events.find((e) => e.id === a.event_id);
-        return ev?.season_id === Number(selectedSeason);
-      }
-      return true;
-    });
+    return accommodations
+      .filter((a) => {
+        if (selectedEvent) return a.event_id === Number(selectedEvent);
+        if (selectedSeason) {
+          const ev = events.find((e) => e.id === a.event_id);
+          return ev?.season_id === Number(selectedSeason);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = accommodationSortTime(a);
+        const bTime = accommodationSortTime(b);
+        if (aTime === bTime) return a.name.localeCompare(b.name);
+        return aTime - bTime;
+      });
   }, [accommodations, selectedEvent, selectedSeason, events]);
 
   return (

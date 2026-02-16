@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { Meal, listMeals } from '../api/logistics';
-import { formatEventLocal } from '../utils/eventDate';
+import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return 'Not scheduled';
@@ -55,14 +55,21 @@ const LogisticsMealsPage = () => {
   }, [events, selectedSeason]);
 
   const filteredMeals = useMemo(() => {
-    return meals.filter((m) => {
-      if (selectedEvent) return m.event_id === Number(selectedEvent);
-      if (selectedSeason) {
-        const ev = events.find((e) => e.id === m.event_id);
-        return ev?.season_id === Number(selectedSeason);
-      }
-      return true;
-    });
+    return meals
+      .filter((m) => {
+        if (selectedEvent) return m.event_id === Number(selectedEvent);
+        if (selectedSeason) {
+          const ev = events.find((e) => e.id === m.event_id);
+          return ev?.season_id === Number(selectedSeason);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (aTime === bTime) return a.name.localeCompare(b.name);
+        return aTime - bTime;
+      });
   }, [meals, selectedEvent, selectedSeason, events]);
 
   return (

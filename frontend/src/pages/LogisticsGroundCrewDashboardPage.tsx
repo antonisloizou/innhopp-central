@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
-import { formatEventLocal } from '../utils/eventDate';
+import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string, force24h = false) => {
   if (!iso) return 'Not scheduled';
@@ -64,18 +64,27 @@ const LogisticsGroundCrewDashboardPage = () => {
   }, [events, selectedSeason]);
 
   const filteredGroundCrews = useMemo(() => {
-    return groundCrews.filter((t) => {
-      if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
-      if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
-      if (pickupFilter && !t.pickup_location.toLowerCase().includes(pickupFilter.toLowerCase()))
-        return false;
-      if (
-        destinationFilter &&
-        !t.destination.toLowerCase().includes(destinationFilter.toLowerCase())
-      )
-        return false;
-      return true;
-    });
+    return groundCrews
+      .filter((t) => {
+        if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
+        if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
+        if (pickupFilter && !t.pickup_location.toLowerCase().includes(pickupFilter.toLowerCase()))
+          return false;
+        if (
+          destinationFilter &&
+          !t.destination.toLowerCase().includes(destinationFilter.toLowerCase())
+        )
+          return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (aTime === bTime) {
+          return `${a.pickup_location} ${a.destination}`.localeCompare(`${b.pickup_location} ${b.destination}`);
+        }
+        return aTime - bTime;
+      });
   }, [groundCrews, selectedSeason, selectedEvent, pickupFilter, destinationFilter]);
 
   return (

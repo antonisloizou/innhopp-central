@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listSeasons, listEvents, Season, Event } from '../api/events';
 import { listOthers, OtherLogistic } from '../api/logistics';
-import { formatEventLocal } from '../utils/eventDate';
+import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return 'Unscheduled';
@@ -56,14 +56,21 @@ const LogisticsOthersPage = () => {
   }, [events, selectedSeason]);
 
   const filteredOthers = useMemo(() => {
-    return others.filter((o) => {
-      if (selectedEvent) return o.event_id === Number(selectedEvent);
-      if (selectedSeason) {
-        const ev = events.find((e) => e.id === o.event_id);
-        return ev?.season_id === Number(selectedSeason);
-      }
-      return true;
-    });
+    return others
+      .filter((o) => {
+        if (selectedEvent) return o.event_id === Number(selectedEvent);
+        if (selectedSeason) {
+          const ev = events.find((e) => e.id === o.event_id);
+          return ev?.season_id === Number(selectedSeason);
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = parseEventLocal(a.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        const bTime = parseEventLocal(b.scheduled_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+        if (aTime === bTime) return a.name.localeCompare(b.name);
+        return aTime - bTime;
+      });
   }, [others, selectedEvent, selectedSeason, events]);
 
   return (
