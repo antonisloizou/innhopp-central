@@ -643,13 +643,43 @@ const EventSchedulePage = () => {
     }
   }, [dayBuckets, eventData?.status, highlightId]);
 
-  const typeBadgeStyles: Record<EntryType, { backgroundColor: string; color: string }> = {
-    Innhopp: { backgroundColor: '#2b8a3e', color: '#fff' },
-    Transport: { backgroundColor: '#e6b84a', color: '#fff' },
-    'Ground Crew': { backgroundColor: '#f6dea0', color: '#fff' },
-    Accommodation: { backgroundColor: '#0d6efd', color: '#fff' },
-    Meal: { backgroundColor: '#d97706', color: '#fff' },
-    Other: { backgroundColor: '#7e22ce', color: '#fff' }
+  const typeBadgeStyles: Record<EntryType, { backgroundColor: string; color: string; textShadow?: string }> = {
+    Innhopp: {
+      backgroundColor: '#2b8a3e',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    },
+    Transport: {
+      backgroundColor: '#e6b84a',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    },
+    'Ground Crew': {
+      backgroundColor: '#f6dea0',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    },
+    Accommodation: {
+      backgroundColor: '#0d6efd',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    },
+    Meal: {
+      backgroundColor: '#d97706',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    },
+    Other: {
+      backgroundColor: '#7e22ce',
+      color: '#fff',
+      textShadow:
+        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
+    }
   };
   const computeProposedMinutes = (
     targetIndex: number,
