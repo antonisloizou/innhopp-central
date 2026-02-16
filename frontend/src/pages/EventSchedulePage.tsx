@@ -521,6 +521,7 @@ const EventSchedulePage = () => {
 
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
   const expandedDaysRef = useRef(expandedDays);
+  const typeFiltersRef = useRef(typeFilters);
   const scheduleStateRestored = useRef(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const skipScrollRef = useRef(false);
@@ -529,6 +530,10 @@ const EventSchedulePage = () => {
   useEffect(() => {
     expandedDaysRef.current = expandedDays;
   }, [expandedDays]);
+
+  useEffect(() => {
+    typeFiltersRef.current = typeFilters;
+  }, [typeFilters]);
 
   useEffect(() => {
     if (!eventId || !scheduleStateRestored.current) return;
@@ -547,13 +552,14 @@ const EventSchedulePage = () => {
         key,
         JSON.stringify({
           ...parsed,
-          expandedDays: expandedDaysRef.current
+          expandedDays: expandedDaysRef.current,
+          typeFilters: typeFiltersRef.current
         })
       );
     } catch {
       // ignore
     }
-  }, [eventId, expandedDays]);
+  }, [eventId, expandedDays, typeFilters]);
 
   useEffect(() => {
     if (dragHoverIndex !== null) return;
@@ -578,6 +584,9 @@ const EventSchedulePage = () => {
         const parsed = JSON.parse(saved);
         if (parsed?.expandedDays) {
           setExpandedDays((prev) => ({ ...prev, ...parsed.expandedDays }));
+        }
+        if (parsed?.typeFilters) {
+          setTypeFilters((prev) => ({ ...prev, ...parsed.typeFilters }));
         }
         if (typeof parsed?.scrollY === 'number') {
           setTimeout(() => window.scrollTo(0, parsed.scrollY), 0);
@@ -609,7 +618,11 @@ const EventSchedulePage = () => {
       try {
         sessionStorage.setItem(
           key,
-          JSON.stringify({ expandedDays: expandedDaysRef.current, scrollY: window.scrollY })
+          JSON.stringify({
+            expandedDays: expandedDaysRef.current,
+            typeFilters: typeFiltersRef.current,
+            scrollY: window.scrollY
+          })
         );
       } catch {
         // ignore
