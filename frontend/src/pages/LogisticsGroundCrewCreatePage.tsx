@@ -15,7 +15,7 @@ import {
 } from '../api/logistics';
 import { Event, listEvents, Accommodation, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
-import { fromEventLocalPickerDate, parseEventLocal, toEventLocalPickerDate } from '../utils/eventDate';
+import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 
 type VehicleRow = {
   name: string;
@@ -131,10 +131,10 @@ const LogisticsGroundCrewCreatePage = () => {
     if (!selectedEventId || form.scheduled_at) return;
     const ev = events.find((e) => e.id === Number(selectedEventId));
     if (ev?.starts_at) {
-      const d = parseEventLocal(ev.starts_at);
+      const d = toEventLocalPickerDate(ev.starts_at);
       if (d) {
-        d.setUTCHours(9, 0, 0, 0);
-        setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+        d.setHours(9, 0, 0, 0);
+        setForm((prev) => ({ ...prev, scheduled_at: fromEventLocalPickerDate(d) }));
       }
     }
   }, [selectedEventId, events, form.scheduled_at]);
