@@ -74,11 +74,12 @@ const formatTransportVehiclesLine = (
   vehicles?: { name: string; driver?: string; passenger_capacity: number }[],
   durationLabel?: string
 ) => {
+  const safeDurationLabel = hasText(durationLabel) ? durationLabel : 'Duration unavailable';
   const vehiclesLabel =
     !Array.isArray(vehicles) || vehicles.length === 0
       ? 'No vehicles'
       : vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`)).join(', ');
-  return hasText(durationLabel) ? `${vehiclesLabel} ⏱ ${durationLabel}` : vehiclesLabel;
+  return `⏱ ${safeDurationLabel}\u2003\u2003🚐\uFE0E ${vehiclesLabel}`;
 };
 
 type ScheduleEntry = {
