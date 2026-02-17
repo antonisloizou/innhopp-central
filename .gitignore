@@ -2,5 +2,5 @@
 backend/.gocache
 .vscode/launch.json
 frontend/.env
-frontend/.env
 .DS_Store
+frontend/dist
