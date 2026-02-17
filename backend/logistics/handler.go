@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -808,10 +809,20 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 
 	durationMinutes := payload.DurationMin
 	if durationMinutes == nil {
-		var durationErr error
-		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-		if durationErr != nil {
-			log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+		originCoord, originOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, pickup)
+		if err != nil {
+			log.Printf("transport origin coordinate lookup failed (transport_id=%d): %v", id, err)
+		}
+		destCoord, destOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, dest)
+		if err != nil {
+			log.Printf("transport destination coordinate lookup failed (transport_id=%d): %v", id, err)
+		}
+		if originOK && destOK {
+			var durationErr error
+			durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originCoord, destCoord)
+			if durationErr != nil {
+				log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+			}
 		}
 	}
 
@@ -1051,9 +1062,22 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var groundCrew Transport
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-	if durationErr != nil {
-		log.Printf("ground crew duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+	originCoord, originOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, pickup)
+	if err != nil {
+		log.Printf("ground crew origin coordinate lookup failed (pickup=%q): %v", pickup, err)
+	}
+	destCoord, destOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, dest)
+	if err != nil {
+		log.Printf("ground crew destination coordinate lookup failed (destination=%q): %v", dest, err)
+	}
+
+	var durationMinutes *int
+	if originOK && destOK {
+		var durationErr error
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originCoord, destCoord)
+		if durationErr != nil {
+			log.Printf("ground crew duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+		}
 	}
 	row := tx.QueryRow(r.Context(),
 		`INSERT INTO logistics_ground_crews (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
@@ -1258,10 +1282,20 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 
 	durationMinutes := payload.DurationMin
 	if durationMinutes == nil {
-		var durationErr error
-		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-		if durationErr != nil {
-			log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+		originCoord, originOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, pickup)
+		if err != nil {
+			log.Printf("ground crew origin coordinate lookup failed (ground_crew_id=%d): %v", id, err)
+		}
+		destCoord, destOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, dest)
+		if err != nil {
+			log.Printf("ground crew destination coordinate lookup failed (ground_crew_id=%d): %v", id, err)
+		}
+		if originOK && destOK {
+			var durationErr error
+			durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originCoord, destCoord)
+			if durationErr != nil {
+				log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+			}
 		}
 	}
 
@@ -1342,12 +1376,13 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 	}
 	type row struct {
 		id          int64
+		eventID     sql.NullInt64
 		origin      string
 		destination string
 	}
 	backfill := func(table string) error {
 		query := fmt.Sprintf(
-			`SELECT id, pickup_location, destination FROM %s WHERE duration_minutes IS NULL AND pickup_location <> '' AND destination <> ''`,
+			`SELECT id, event_id, pickup_location, destination FROM %s WHERE duration_minutes IS NULL AND pickup_location <> '' AND destination <> ''`,
 			table,
 		)
 		rows, err := h.db.Query(ctx, query)
@@ -1359,7 +1394,7 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 		var pending []row
 		for rows.Next() {
 			var item row
-			if err := rows.Scan(&item.id, &item.origin, &item.destination); err != nil {
+			if err := rows.Scan(&item.id, &item.eventID, &item.origin, &item.destination); err != nil {
 				return err
 			}
 			pending = append(pending, item)
@@ -1370,7 +1405,23 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 
 		updated := 0
 		for _, item := range pending {
-			minutes, err := h.calculateRouteDurationMinutes(ctx, item.origin, item.destination)
+			if !item.eventID.Valid || item.eventID.Int64 <= 0 {
+				continue
+			}
+			originCoord, originOK, err := h.resolveLocationCoordinate(ctx, item.eventID.Int64, item.origin)
+			if err != nil {
+				log.Printf("route duration backfill origin lookup failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+			destCoord, destOK, err := h.resolveLocationCoordinate(ctx, item.eventID.Int64, item.destination)
+			if err != nil {
+				log.Printf("route duration backfill destination lookup failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+			if !originOK || !destOK {
+				continue
+			}
+			minutes, err := h.calculateRouteDurationMinutes(ctx, originCoord, destCoord)
 			if err != nil {
 				log.Printf("route duration backfill failed (%s id=%d): %v", table, item.id, err)
 				continue
@@ -1615,6 +1666,8 @@ type directionsAPIResponse struct {
 	} `json:"routes"`
 }
 
+var locationPrefixPattern = regexp.MustCompile(`^#\s*\d+\s*`)
+
 func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, destination string) (*int, error) {
 	if strings.TrimSpace(origin) == "" || strings.TrimSpace(destination) == "" || h.mapsAPIKey == "" {
 		return nil, nil
@@ -1665,6 +1718,83 @@ func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, des
 	}
 	minutes := (totalSeconds + 59) / 60
 	return &minutes, nil
+}
+
+func normalizeLocationLookupKey(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	trimmed = locationPrefixPattern.ReplaceAllString(trimmed, "")
+	return strings.ToLower(strings.TrimSpace(trimmed))
+}
+
+func normalizeCoordinate(raw string) (string, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", false
+	}
+	parts := strings.Split(trimmed, ",")
+	if len(parts) < 2 {
+		parts = strings.Fields(trimmed)
+	}
+	if len(parts) < 2 {
+		return "", false
+	}
+	lat := strings.TrimSpace(parts[0])
+	lng := strings.TrimSpace(parts[1])
+	if lat == "" || lng == "" {
+		return "", false
+	}
+	return lat + "," + lng, true
+}
+
+func (h *Handler) resolveLocationCoordinate(ctx context.Context, eventID int64, location string) (string, bool, error) {
+	// Allow direct coordinates in pickup/destination.
+	if coord, ok := normalizeCoordinate(location); ok {
+		return coord, true, nil
+	}
+	target := normalizeLocationLookupKey(location)
+	if target == "" || eventID <= 0 {
+		return "", false, nil
+	}
+
+	tryMatch := func(query string) (string, bool, error) {
+		rows, err := h.db.Query(ctx, query, eventID)
+		if err != nil {
+			return "", false, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			var coordRaw sql.NullString
+			if err := rows.Scan(&name, &coordRaw); err != nil {
+				return "", false, err
+			}
+			if normalizeLocationLookupKey(name) != target || !coordRaw.Valid {
+				continue
+			}
+			if coord, ok := normalizeCoordinate(coordRaw.String); ok {
+				return coord, true, nil
+			}
+		}
+		return "", false, rows.Err()
+	}
+
+	queries := []string{
+		`SELECT name, coordinates FROM event_innhopps WHERE event_id = $1 AND coordinates IS NOT NULL`,
+		`SELECT name, coordinates FROM event_accommodation WHERE event_id = $1 AND coordinates IS NOT NULL`,
+		`SELECT name, coordinates FROM logistics_other WHERE event_id = $1 AND coordinates IS NOT NULL`,
+		`SELECT a.name, CONCAT(a.latitude, ',', a.longitude)
+         FROM event_airfields ea
+         JOIN airfields a ON a.id = ea.airfield_id
+         WHERE ea.event_id = $1 AND a.latitude IS NOT NULL AND a.longitude IS NOT NULL`,
+	}
+	for _, query := range queries {
+		if coord, ok, err := tryMatch(query); err != nil {
+			return "", false, err
+		} else if ok {
+			return coord, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
@@ -1816,10 +1946,23 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originCoord, originOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, pickup)
+	if err != nil {
+		log.Printf("transport origin coordinate lookup failed (pickup=%q): %v", pickup, err)
+	}
+	destCoord, destOK, err := h.resolveLocationCoordinate(r.Context(), payload.EventID, dest)
+	if err != nil {
+		log.Printf("transport destination coordinate lookup failed (destination=%q): %v", dest, err)
+	}
+
 	var transport Transport
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-	if durationErr != nil {
-		log.Printf("transport duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+	var durationMinutes *int
+	if originOK && destOK {
+		var durationErr error
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originCoord, destCoord)
+		if durationErr != nil {
+			log.Printf("transport duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+		}
 	}
 	row := tx.QueryRow(r.Context(),
 		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
