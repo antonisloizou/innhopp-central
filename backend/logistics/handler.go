@@ -3,8 +3,13 @@ package logistics
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +25,9 @@ import (
 
 // Handler provides logistics operations such as gear tracking.
 type Handler struct {
-	db *pgxpool.Pool
+	db         *pgxpool.Pool
+	httpClient *http.Client
+	mapsAPIKey string
 }
 
 type OtherLogistic struct {
@@ -646,18 +653,23 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at
+		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
          FROM logistics_transports WHERE id = $1`,
 		id,
 	)
 	var t Transport
 	var scheduledAt sql.NullTime
+	var durationMinutes sql.NullInt32
 	var notes sql.NullString
 	var eventID sql.NullInt64
 	var seasonID sql.NullInt64
-	if err := row.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "transport not found")
 		return
+	}
+	if durationMinutes.Valid {
+		val := int(durationMinutes.Int32)
+		t.DurationMinutes = &val
 	}
 	if scheduledAt.Valid {
 		t.ScheduledAt = &scheduledAt.Time
@@ -789,11 +801,16 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	if durationErr != nil {
+		log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+	}
+
 	tag, err := tx.Exec(r.Context(),
 		`UPDATE logistics_transports
-         SET pickup_location = $1, destination = $2, passenger_count = $3, scheduled_at = $4, notes = $5, event_id = $6, season_id = $7
-         WHERE id = $8`,
-		pickup, dest, payload.PassengerCount, scheduledAt, notesVal, payload.EventID, seasonID, id,
+         SET pickup_location = $1, destination = $2, passenger_count = $3, duration_minutes = $4, scheduled_at = $5, notes = $6, event_id = $7, season_id = $8
+         WHERE id = $9`,
+		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update transport")
@@ -876,7 +893,7 @@ func (h *Handler) attachEventVehiclesToGroundCrew(ctx context.Context, tx pgx.Tx
 }
 
 func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at FROM logistics_ground_crews ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_ground_crews ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list ground crews")
 		return
@@ -889,12 +906,17 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var gc Transport
 		var notes sql.NullString
+		var durationMinutes sql.NullInt32
 		var eventID sql.NullInt64
 		var seasonID sql.NullInt64
 		var scheduledAt sql.NullTime
-		if err := rows.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+		if err := rows.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse ground crew")
 			return
+		}
+		if durationMinutes.Valid {
+			val := int(durationMinutes.Int32)
+			gc.DurationMinutes = &val
 		}
 		if scheduledAt.Valid {
 			gc.ScheduledAt = &scheduledAt.Time
@@ -1020,11 +1042,15 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var groundCrew Transport
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	if durationErr != nil {
+		log.Printf("ground crew duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+	}
 	row := tx.QueryRow(r.Context(),
-		`INSERT INTO logistics_ground_crews (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO logistics_ground_crews (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, created_at`,
-		pickup, dest, payload.PassengerCount, scheduledAt, notes, payload.EventID, seasonID,
+		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
 	)
 	if err := row.Scan(&groundCrew.ID, &groundCrew.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create ground crew")
@@ -1034,6 +1060,7 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	groundCrew.PickupLocation = pickup
 	groundCrew.Destination = dest
 	groundCrew.PassengerCount = payload.PassengerCount
+	groundCrew.DurationMinutes = durationMinutes
 	groundCrew.ScheduledAt = scheduledAt
 	groundCrew.Notes = notes
 	groundCrew.EventID = &payload.EventID
@@ -1068,18 +1095,23 @@ func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at
+		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
          FROM logistics_ground_crews WHERE id = $1`,
 		id,
 	)
 	var gc Transport
 	var scheduledAt sql.NullTime
+	var durationMinutes sql.NullInt32
 	var notes sql.NullString
 	var eventID sql.NullInt64
 	var seasonID sql.NullInt64
-	if err := row.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+	if err := row.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "ground crew not found")
 		return
+	}
+	if durationMinutes.Valid {
+		val := int(durationMinutes.Int32)
+		gc.DurationMinutes = &val
 	}
 	if scheduledAt.Valid {
 		gc.ScheduledAt = &scheduledAt.Time
@@ -1210,11 +1242,16 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	if durationErr != nil {
+		log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+	}
+
 	tag, err := tx.Exec(r.Context(),
 		`UPDATE logistics_ground_crews
-         SET pickup_location = $1, destination = $2, passenger_count = $3, scheduled_at = $4, notes = $5, event_id = $6, season_id = $7
-         WHERE id = $8`,
-		pickup, dest, payload.PassengerCount, scheduledAt, notesVal, payload.EventID, seasonID, id,
+         SET pickup_location = $1, destination = $2, passenger_count = $3, duration_minutes = $4, scheduled_at = $5, notes = $6, event_id = $7, season_id = $8
+         WHERE id = $9`,
+		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update ground crew")
@@ -1271,7 +1308,11 @@ func (h *Handler) deleteGroundCrew(w http.ResponseWriter, r *http.Request) {
 
 // NewHandler creates a logistics handler.
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	return &Handler{
+		db:         db,
+		httpClient: &http.Client{Timeout: 8 * time.Second},
+		mapsAPIKey: strings.TrimSpace(os.Getenv("GOOGLE_MAPS_API_KEY")),
+	}
 }
 
 // Routes registers logistics routes.
@@ -1466,20 +1507,85 @@ func (h *Handler) attachEventVehicles(ctx context.Context, tx pgx.Tx, transportI
 }
 
 type Transport struct {
-	ID             int64              `json:"id"`
-	PickupLocation string             `json:"pickup_location"`
-	Destination    string             `json:"destination"`
-	PassengerCount int                `json:"passenger_count"`
-	ScheduledAt    *time.Time         `json:"scheduled_at,omitempty"`
-	Notes          string             `json:"notes,omitempty"`
-	EventID        *int64             `json:"event_id,omitempty"`
-	SeasonID       *int64             `json:"season_id,omitempty"`
-	Vehicles       []TransportVehicle `json:"vehicles"`
-	CreatedAt      time.Time          `json:"created_at"`
+	ID              int64              `json:"id"`
+	PickupLocation  string             `json:"pickup_location"`
+	Destination     string             `json:"destination"`
+	PassengerCount  int                `json:"passenger_count"`
+	DurationMinutes *int               `json:"duration_minutes,omitempty"`
+	ScheduledAt     *time.Time         `json:"scheduled_at,omitempty"`
+	Notes           string             `json:"notes,omitempty"`
+	EventID         *int64             `json:"event_id,omitempty"`
+	SeasonID        *int64             `json:"season_id,omitempty"`
+	Vehicles        []TransportVehicle `json:"vehicles"`
+	CreatedAt       time.Time          `json:"created_at"`
+}
+
+type directionsAPIResponse struct {
+	Status       string `json:"status"`
+	ErrorMessage string `json:"error_message"`
+	Routes       []struct {
+		Legs []struct {
+			Duration struct {
+				Value int `json:"value"`
+			} `json:"duration"`
+		} `json:"legs"`
+	} `json:"routes"`
+}
+
+func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, destination string) (*int, error) {
+	if strings.TrimSpace(origin) == "" || strings.TrimSpace(destination) == "" || h.mapsAPIKey == "" {
+		return nil, nil
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+
+	q := url.Values{}
+	q.Set("origin", origin)
+	q.Set("destination", destination)
+	q.Set("mode", "driving")
+	q.Set("key", h.mapsAPIKey)
+	endpoint := "https://maps.googleapis.com/maps/api/directions/json?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var payload directionsAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	if payload.Status != "OK" {
+		if payload.Status == "ZERO_RESULTS" || payload.Status == "NOT_FOUND" {
+			return nil, nil
+		}
+		if payload.ErrorMessage != "" {
+			return nil, fmt.Errorf("%s: %s", payload.Status, payload.ErrorMessage)
+		}
+		return nil, fmt.Errorf(payload.Status)
+	}
+	if len(payload.Routes) == 0 || len(payload.Routes[0].Legs) == 0 {
+		return nil, nil
+	}
+
+	totalSeconds := 0
+	for _, leg := range payload.Routes[0].Legs {
+		totalSeconds += leg.Duration.Value
+	}
+	if totalSeconds <= 0 {
+		return nil, nil
+	}
+	minutes := (totalSeconds + 59) / 60
+	return &minutes, nil
 }
 
 func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list transports")
 		return
@@ -1492,12 +1598,17 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t Transport
 		var notes sql.NullString
+		var durationMinutes sql.NullInt32
 		var eventID sql.NullInt64
 		var seasonID sql.NullInt64
 		var scheduledAt sql.NullTime
-		if err := rows.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse transport")
 			return
+		}
+		if durationMinutes.Valid {
+			val := int(durationMinutes.Int32)
+			t.DurationMinutes = &val
 		}
 		if scheduledAt.Valid {
 			t.ScheduledAt = &scheduledAt.Time
@@ -1623,11 +1734,15 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var transport Transport
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	if durationErr != nil {
+		log.Printf("transport duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+	}
 	row := tx.QueryRow(r.Context(),
-		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, created_at`,
-		pickup, dest, payload.PassengerCount, scheduledAt, notes, payload.EventID, seasonID,
+		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
 	)
 	if err := row.Scan(&transport.ID, &transport.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create transport")
@@ -1637,6 +1752,7 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	transport.PickupLocation = pickup
 	transport.Destination = dest
 	transport.PassengerCount = payload.PassengerCount
+	transport.DurationMinutes = durationMinutes
 	transport.ScheduledAt = scheduledAt
 	transport.Notes = notes
 	transport.EventID = &payload.EventID

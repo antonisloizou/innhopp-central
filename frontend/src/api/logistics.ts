@@ -13,6 +13,7 @@ export type Transport = {
   pickup_location: string;
   destination: string;
   passenger_count: number;
+  duration_minutes?: number | null;
   scheduled_at?: string;
   notes?: string | null;
   event_id?: number | null;

@@ -830,10 +830,10 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 	for _, transport := range logisticsData.Transports {
 		var newTransportID int64
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, scheduled_at, notes, event_id, season_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING id`,
-			strings.TrimSpace(transport.PickupLocation), strings.TrimSpace(transport.Destination), transport.PassengerCount, transport.ScheduledAt, strings.TrimSpace(transport.Notes), created.ID, created.SeasonID,
+			strings.TrimSpace(transport.PickupLocation), strings.TrimSpace(transport.Destination), transport.PassengerCount, transport.DurationMinutes, transport.ScheduledAt, strings.TrimSpace(transport.Notes), created.ID, created.SeasonID,
 		).Scan(&newTransportID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to copy transports")
 			return
@@ -1505,12 +1505,13 @@ type transportVehicleSnapshot struct {
 }
 
 type transportSnapshot struct {
-	PickupLocation string
-	Destination    string
-	PassengerCount int
-	ScheduledAt    *time.Time
-	Notes          string
-	Vehicles       []transportVehicleSnapshot
+	PickupLocation  string
+	Destination     string
+	PassengerCount  int
+	DurationMinutes *int
+	ScheduledAt     *time.Time
+	Notes           string
+	Vehicles        []transportVehicleSnapshot
 }
 
 type otherLogisticSnapshot struct {
@@ -1642,7 +1643,7 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	}
 
 	transportRows, err := h.db.Query(ctx,
-		`SELECT id, pickup_location, destination, passenger_count, scheduled_at, notes
+		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes
          FROM logistics_transports
          WHERE event_id = $1
          ORDER BY created_at ASC`,
@@ -1657,10 +1658,15 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	for transportRows.Next() {
 		var t transportSnapshot
 		var id int64
+		var durationMinutes sql.NullInt32
 		var scheduled sql.NullTime
 		var notes sql.NullString
-		if err := transportRows.Scan(&id, &t.PickupLocation, &t.Destination, &t.PassengerCount, &scheduled, &notes); err != nil {
+		if err := transportRows.Scan(&id, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduled, &notes); err != nil {
 			return snapshot, err
+		}
+		if durationMinutes.Valid {
+			val := int(durationMinutes.Int32)
+			t.DurationMinutes = &val
 		}
 		if scheduled.Valid {
 			ts := scheduled.Time

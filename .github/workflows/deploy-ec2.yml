@@ -54,7 +54,6 @@ jobs:
           file: ./frontend/Dockerfile
           build-args: |
             VITE_API_BASE_URL=/api
-            VITE_GOOGLE_MAPS_API_KEY=${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
           push: true
           tags: |
             ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ steps.vars.outputs.sha_tag }}
@@ -80,6 +79,7 @@ jobs:
             mkdir -p /home/ec2-user/app
             cat <<'EOF' > /home/ec2-user/app/.env
             ${{ secrets.EC2_APP_ENV }}
+            GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
             EOF
             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
               | docker login --username AWS --password-stdin \

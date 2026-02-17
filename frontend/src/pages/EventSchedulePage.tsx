@@ -42,7 +42,6 @@ import {
   parseEventLocal,
   toEventLocalPickerDate
 } from '../utils/eventDate';
-import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
@@ -60,6 +59,17 @@ type DayBucket = {
 };
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
+const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
+const formatDurationMinutes = (minutes?: number | null) => {
+  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Duration unavailable';
+  const total = minutes as number;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours <= 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
+};
+
 const formatTransportVehiclesLine = (
   vehicles?: { name: string; driver?: string; passenger_capacity: number }[],
   durationLabel?: string
@@ -68,36 +78,7 @@ const formatTransportVehiclesLine = (
     !Array.isArray(vehicles) || vehicles.length === 0
       ? 'No vehicles'
       : vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`)).join(', ');
-  return hasText(durationLabel) ? `${vehiclesLabel} (${durationLabel})` : vehiclesLabel;
-};
-
-const googleMapsScriptId = 'google-maps-js-sdk';
-let googleMapsScriptLoadPromise: Promise<void> | null = null;
-
-const loadGoogleMapsSdk = (apiKey: string) => {
-  if (typeof window === 'undefined') return Promise.resolve();
-  if (window.google?.maps?.DirectionsService) return Promise.resolve();
-  if (googleMapsScriptLoadPromise) return googleMapsScriptLoadPromise;
-
-  googleMapsScriptLoadPromise = new Promise<void>((resolve, reject) => {
-    const src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
-    const existing = document.getElementById(googleMapsScriptId) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google Maps SDK')), { once: true });
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = googleMapsScriptId;
-    script.async = true;
-    script.defer = true;
-    script.src = src;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Google Maps SDK'));
-    document.head.appendChild(script);
-  });
-
-  return googleMapsScriptLoadPromise;
+  return hasText(durationLabel) ? `${vehiclesLabel} ⏱ ${durationLabel}` : vehiclesLabel;
 };
 
 type ScheduleEntry = {
@@ -278,7 +259,6 @@ const EventSchedulePage = () => {
     };
   }, [previewEntry, timePicker]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
-  const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
   const normalizeName = (val: string | null | undefined) => cleanLocation(val || '').toLowerCase();
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
     const rect = rowNode.getBoundingClientRect();
@@ -343,7 +323,6 @@ const EventSchedulePage = () => {
     Other: true,
     Meal: true
   });
-  const [routeDurationsByEntryId, setRouteDurationsByEntryId] = useState<Record<string, string>>({});
   const locationCoordinates = useCallback(
     (name: string | null | undefined) => {
       const target = normalizeName(name);
@@ -360,110 +339,6 @@ const EventSchedulePage = () => {
     },
     [accommodations, airfields, eventData?.innhopps, others]
   );
-
-  const durationRequests = useMemo(() => {
-    const requests: { entryId: string; origin: string; destination: string }[] = [];
-    transports.forEach((transport) => {
-      const origin = locationCoordinates(transport.pickup_location) || cleanLocation(transport.pickup_location || '');
-      const destination = locationCoordinates(transport.destination) || cleanLocation(transport.destination || '');
-      if (hasText(origin) && hasText(destination)) {
-        requests.push({ entryId: `t-${transport.id}`, origin, destination });
-      }
-    });
-    groundCrews.forEach((groundCrew) => {
-      const origin =
-        locationCoordinates(groundCrew.pickup_location) || cleanLocation(groundCrew.pickup_location || '');
-      const destination =
-        locationCoordinates(groundCrew.destination) || cleanLocation(groundCrew.destination || '');
-      if (hasText(origin) && hasText(destination)) {
-        requests.push({ entryId: `gc-${groundCrew.id}`, origin, destination });
-      }
-    });
-    return requests;
-  }, [groundCrews, locationCoordinates, transports]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadRouteDurations = async () => {
-      if (durationRequests.length === 0) {
-        setRouteDurationsByEntryId({});
-        return;
-      }
-      const unavailableByDefault: Record<string, string> = {};
-      durationRequests.forEach((request) => {
-        unavailableByDefault[request.entryId] = 'Duration unavailable';
-      });
-      if (!hasConfiguredGoogleMapsApiKey) {
-        setRouteDurationsByEntryId(unavailableByDefault);
-        return;
-      }
-      try {
-        await loadGoogleMapsSdk(googleMapsApiKey);
-        if (cancelled || !window.google?.maps?.DirectionsService) return;
-        const service = new window.google.maps.DirectionsService();
-        const uniqueRouteRequests = new Map<
-          string,
-          { origin: string; destination: string; entryIds: string[] }
-        >();
-        durationRequests.forEach((request) => {
-          const key = `${request.origin}__${request.destination}`;
-          const existing = uniqueRouteRequests.get(key);
-          if (existing) {
-            existing.entryIds.push(request.entryId);
-            return;
-          }
-          uniqueRouteRequests.set(key, {
-            origin: request.origin,
-            destination: request.destination,
-            entryIds: [request.entryId]
-          });
-        });
-
-        const nextDurations: Record<string, string> = { ...unavailableByDefault };
-        await Promise.all(
-          Array.from(uniqueRouteRequests.values()).map(
-            (request) =>
-              new Promise<void>((resolve) => {
-                service.route(
-                  {
-                    origin: request.origin,
-                    destination: request.destination,
-                    travelMode: 'DRIVING'
-                  },
-                  (result, status) => {
-                    if (status !== 'OK' || !result?.routes?.[0]?.legs?.[0]?.duration?.text) {
-                      resolve();
-                      return;
-                    }
-                    const durationText = result.routes[0].legs[0].duration?.text;
-                    if (!durationText) {
-                      resolve();
-                      return;
-                    }
-                    request.entryIds.forEach((entryId) => {
-                      nextDurations[entryId] = durationText;
-                    });
-                    resolve();
-                  }
-                );
-              })
-          )
-        );
-        if (!cancelled) {
-          setRouteDurationsByEntryId(nextDurations);
-        }
-      } catch (_error) {
-        if (!cancelled) {
-          setRouteDurationsByEntryId(unavailableByDefault);
-        }
-      }
-    };
-
-    loadRouteDurations();
-    return () => {
-      cancelled = true;
-    };
-  }, [durationRequests]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1537,7 +1412,7 @@ const EventSchedulePage = () => {
                     return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
                   })(),
                   title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
-                  subtitle: formatTransportVehiclesLine(vehicles, routeDurationsByEntryId[`t-${t.id}`]),
+                  subtitle: formatTransportVehiclesLine(vehicles, formatDurationMinutes(t.duration_minutes)),
                   type: 'Transport',
                   to: `/logistics/${t.id}`,
                   transportComplete: complete,
@@ -1577,7 +1452,7 @@ const EventSchedulePage = () => {
                     return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
                   })(),
                   title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
-                  subtitle: formatTransportVehiclesLine(vehicles, routeDurationsByEntryId[`gc-${g.id}`]),
+                  subtitle: formatTransportVehiclesLine(vehicles, formatDurationMinutes(g.duration_minutes)),
                   type: 'Ground Crew',
                   to: `/logistics/ground-crew/${g.id}`,
                   transportComplete: complete,

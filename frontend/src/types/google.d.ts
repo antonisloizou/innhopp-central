@@ -6,50 +6,6 @@ declare global {
   }
 
   namespace google {
-    namespace maps {
-      interface Duration {
-        text: string;
-        value: number;
-      }
-
-      interface DirectionsLeg {
-        duration?: Duration;
-      }
-
-      interface DirectionsRoute {
-        legs: DirectionsLeg[];
-      }
-
-      interface DirectionsResult {
-        routes: DirectionsRoute[];
-      }
-
-      type TravelMode = 'DRIVING' | 'WALKING' | 'BICYCLING' | 'TRANSIT';
-      type DirectionsStatus =
-        | 'OK'
-        | 'NOT_FOUND'
-        | 'ZERO_RESULTS'
-        | 'MAX_WAYPOINTS_EXCEEDED'
-        | 'MAX_ROUTE_LENGTH_EXCEEDED'
-        | 'INVALID_REQUEST'
-        | 'OVER_QUERY_LIMIT'
-        | 'REQUEST_DENIED'
-        | 'UNKNOWN_ERROR';
-
-      interface DirectionsRequest {
-        origin: string;
-        destination: string;
-        travelMode: TravelMode;
-      }
-
-      class DirectionsService {
-        route(
-          request: DirectionsRequest,
-          callback: (result: DirectionsResult | null, status: DirectionsStatus) => void
-        ): void;
-      }
-    }
-
     namespace accounts {
       namespace id {
         interface CredentialResponse {
