@@ -731,6 +731,7 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		PickupLocation string             `json:"pickup_location"`
 		Destination    string             `json:"destination"`
 		PassengerCount int                `json:"passenger_count"`
+		DurationMin    *int               `json:"duration_minutes"`
 		ScheduledAt    string             `json:"scheduled_at"`
 		Notes          *string            `json:"notes"`
 		EventID        int64              `json:"event_id"`
@@ -756,6 +757,10 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 	}
 	if payload.PassengerCount < 0 {
 		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
+		return
+	}
+	if payload.DurationMin != nil && *payload.DurationMin < 0 {
+		httpx.Error(w, http.StatusBadRequest, "duration_minutes cannot be negative")
 		return
 	}
 	var notesVal interface{}
@@ -801,9 +806,13 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-	if durationErr != nil {
-		log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+	durationMinutes := payload.DurationMin
+	if durationMinutes == nil {
+		var durationErr error
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+		if durationErr != nil {
+			log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+		}
 	}
 
 	tag, err := tx.Exec(r.Context(),
@@ -1173,6 +1182,7 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		PickupLocation string             `json:"pickup_location"`
 		Destination    string             `json:"destination"`
 		PassengerCount int                `json:"passenger_count"`
+		DurationMin    *int               `json:"duration_minutes"`
 		ScheduledAt    string             `json:"scheduled_at"`
 		Notes          *string            `json:"notes"`
 		EventID        int64              `json:"event_id"`
@@ -1198,6 +1208,10 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 	if payload.PassengerCount < 0 {
 		httpx.Error(w, http.StatusBadRequest, "passenger_count cannot be negative")
+		return
+	}
+	if payload.DurationMin != nil && *payload.DurationMin < 0 {
+		httpx.Error(w, http.StatusBadRequest, "duration_minutes cannot be negative")
 		return
 	}
 	var notesVal interface{}
@@ -1242,9 +1256,13 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
-	if durationErr != nil {
-		log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+	durationMinutes := payload.DurationMin
+	if durationMinutes == nil {
+		var durationErr error
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+		if durationErr != nil {
+			log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+		}
 	}
 
 	tag, err := tx.Exec(r.Context(),

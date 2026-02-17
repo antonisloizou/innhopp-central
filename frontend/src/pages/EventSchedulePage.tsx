@@ -61,7 +61,7 @@ type DayBucket = {
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
 const formatDurationMinutes = (minutes?: number | null) => {
-  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Duration unavailable';
+  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Unavailable';
   const total = minutes as number;
   const hours = Math.floor(total / 60);
   const mins = total % 60;
@@ -70,17 +70,10 @@ const formatDurationMinutes = (minutes?: number | null) => {
   return `${hours} hr ${mins} min`;
 };
 
-const formatTransportVehiclesLine = (
-  vehicles?: { name: string; driver?: string; passenger_capacity: number }[],
-  durationLabel?: string
-) => {
-  const safeDurationLabel = hasText(durationLabel) ? durationLabel : 'Duration unavailable';
-  const vehiclesLabel =
-    !Array.isArray(vehicles) || vehicles.length === 0
-      ? 'No vehicles'
-      : vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`)).join(', ');
-  return `⏱ ${safeDurationLabel}\u2003\u2003🚐\uFE0E ${vehiclesLabel}`;
-};
+const formatVehiclesLabel = (vehicles?: { name: string; driver?: string; passenger_capacity: number }[]) =>
+  !Array.isArray(vehicles) || vehicles.length === 0
+    ? 'No vehicles'
+    : vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`)).join(', ');
 
 type ScheduleEntry = {
   id: string;
@@ -115,6 +108,8 @@ type ScheduleEntry = {
   innhoppLandOwnerPermission?: boolean | null;
   transportRouteOrigin?: string | null;
   transportRouteDestination?: string | null;
+  routeDurationLabel?: string;
+  routeVehiclesLabel?: string;
   vehicles?: { name: string; driver?: string; passenger_capacity: number }[];
   to?: string;
   scheduledAt?: string | null;
@@ -1405,6 +1400,8 @@ const EventSchedulePage = () => {
                       passenger_capacity: v.passenger_capacity
                     }))
                   : [];
+                const routeDurationLabel = formatDurationMinutes(t.duration_minutes);
+                const routeVehiclesLabel = formatVehiclesLabel(vehicles);
                 entries.push({
                   id: `t-${t.id}`,
                   hourKey: formatTimeLabel(t.scheduled_at),
@@ -1413,13 +1410,15 @@ const EventSchedulePage = () => {
                     return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
                   })(),
                   title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
-                  subtitle: formatTransportVehiclesLine(vehicles, formatDurationMinutes(t.duration_minutes)),
+                  subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
                   type: 'Transport',
                   to: `/logistics/${t.id}`,
                   transportComplete: complete,
                   missingCoordinates: !pickupCoords || !destCoords,
                   transportRouteOrigin: pickupCoords || null,
                   transportRouteDestination: destCoords || null,
+                  routeDurationLabel,
+                  routeVehiclesLabel,
                   notes: t.notes || null,
                   vehicles,
                   scheduledAt: t.scheduled_at || undefined
@@ -1445,6 +1444,8 @@ const EventSchedulePage = () => {
                       passenger_capacity: v.passenger_capacity
                     }))
                   : [];
+                const routeDurationLabel = formatDurationMinutes(g.duration_minutes);
+                const routeVehiclesLabel = formatVehiclesLabel(vehicles);
                 entries.push({
                   id: `gc-${g.id}`,
                   hourKey: formatTimeLabel(g.scheduled_at),
@@ -1453,13 +1454,15 @@ const EventSchedulePage = () => {
                     return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
                   })(),
                   title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
-                  subtitle: formatTransportVehiclesLine(vehicles, formatDurationMinutes(g.duration_minutes)),
+                  subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
                   type: 'Ground Crew',
                   to: `/logistics/ground-crew/${g.id}`,
                   transportComplete: complete,
                   missingCoordinates: !pickupCoords || !destCoords,
                   transportRouteOrigin: pickupCoords || null,
                   transportRouteDestination: destCoords || null,
+                  routeDurationLabel,
+                  routeVehiclesLabel,
                   notes: g.notes || null,
                   vehicles,
                   scheduledAt: g.scheduled_at || undefined
@@ -1717,7 +1720,25 @@ const EventSchedulePage = () => {
                         </span>
                       </div>
                     </div>
-                    {entry.subtitle && <div className="muted">{entry.subtitle}</div>}
+                    {entry.routeDurationLabel && entry.routeVehiclesLabel ? (
+                      <div
+                        className="muted"
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'auto minmax(120px, 170px) 1.5rem auto minmax(0, 1fr)',
+                          alignItems: 'center',
+                          columnGap: '0.35rem'
+                        }}
+                      >
+                        <span>⏱</span>
+                        <span>{entry.routeDurationLabel}</span>
+                        <span />
+                        <span>🚐︎</span>
+                        <span>{entry.routeVehiclesLabel}</span>
+                      </div>
+                    ) : (
+                      entry.subtitle && <div className="muted">{entry.subtitle}</div>
+                    )}
                   </div>
                 );
                 const handleEntryClick = (e: MouseEvent) => {
@@ -2342,7 +2363,12 @@ const EventSchedulePage = () => {
                       </>
                     ) : (
                       <>
-                        {previewEntry.entry.subtitle ? (
+                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') ? (
+                          <div key="duration">
+                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>DURATION</div>
+                            <div>{previewEntry.entry.routeDurationLabel || 'Unavailable'}</div>
+                          </div>
+                        ) : previewEntry.entry.subtitle ? (
                           <div key="subtitle">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SUBTITLE</div>
                             <div>{previewEntry.entry.subtitle}</div>

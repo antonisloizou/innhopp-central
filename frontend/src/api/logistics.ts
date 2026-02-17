@@ -29,6 +29,7 @@ export type CreateTransportPayload = {
   pickup_location: string;
   destination: string;
   passenger_count: number;
+  duration_minutes?: number;
   scheduled_at?: string;
   notes?: string;
   event_id: number;

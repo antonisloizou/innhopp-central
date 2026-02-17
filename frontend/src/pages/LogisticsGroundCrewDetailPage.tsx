@@ -42,6 +42,7 @@ const LogisticsGroundCrewDetailPage = () => {
     pickup_location: '',
     destination: '',
     passenger_count: '',
+    duration_minutes: '',
     scheduled_at: '',
     notes: ''
   });
@@ -117,6 +118,10 @@ const LogisticsGroundCrewDetailPage = () => {
           pickup_location: transport.pickup_location,
           destination: transport.destination,
           passenger_count: String(transport.passenger_count),
+          duration_minutes:
+            typeof transport.duration_minutes === 'number' && Number.isFinite(transport.duration_minutes)
+              ? String(transport.duration_minutes)
+              : '',
           scheduled_at: defaultScheduled,
           notes: transport.notes || ''
         });
@@ -351,6 +356,14 @@ const LogisticsGroundCrewDetailPage = () => {
         notes: form.notes.trim() || undefined,
         event_id: Number(selectedEventId)
       };
+      const durationValue = form.duration_minutes.trim();
+      if (durationValue !== '') {
+        const parsedDuration = Number(durationValue);
+        if (!Number.isFinite(parsedDuration) || parsedDuration < 0) {
+          throw new Error('Duration must be a non-negative number');
+        }
+        payload.duration_minutes = Math.round(parsedDuration);
+      }
       const fallbackVehicleIds =
         selectedVehicleIds.length > 0
           ? [...selectedVehicleIds]
@@ -798,6 +811,20 @@ const LogisticsGroundCrewDetailPage = () => {
                       setForm((prev) => ({ ...prev, passenger_count: e.target.value }));
                     }}
                     required
+                  />
+                </label>
+                <label className="form-field" style={{ margin: 0 }}>
+                  <span>Duration (minutes)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={form.duration_minutes}
+                    onChange={(e) => {
+                      markDirty();
+                      setForm((prev) => ({ ...prev, duration_minutes: e.target.value }));
+                    }}
+                    placeholder="Auto if blank"
                   />
                 </label>
                 <label className={`form-field ${missingScheduledAt ? 'field-missing' : ''}`} style={{ margin: 0 }}>
