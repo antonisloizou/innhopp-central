@@ -5,6 +5,7 @@ import 'flatpickr/dist/flatpickr.css';
 import { Meal, deleteMeal, getMeal, updateMeal } from '../api/logistics';
 import { Event, listEvents } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
 const LogisticsMealDetailPage = () => {
@@ -25,6 +26,7 @@ const LogisticsMealDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const complete = hasText(form.name) && hasText(form.location) && hasText(form.scheduled_at);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   const closestEventDate = (current?: string) => {
     const ev = events.find((e) => e.id === Number(form.event_id));
@@ -118,11 +120,13 @@ const LogisticsMealDetailPage = () => {
   if (!meal) return <p className="error-text">Meal not found.</p>;
 
   return (
-    <section className="stack">
+    <section className="stack" {...editGuardProps}>
       <header className="page-header">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>{meal.name}</h2>
+            <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+              <h2 style={{ margin: 0 }}>{meal.name}</h2>
+            </DetailPageLockTitle>
             <span
               className={`badge ${complete ? 'success' : 'danger'}`}
               aria-label={complete ? 'Complete' : 'Missing info'}
@@ -138,18 +142,33 @@ const LogisticsMealDetailPage = () => {
           <button
             className="ghost"
             type="button"
-            onClick={() =>
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
               navigate('/logistics/meals/new', {
                 state: { copyMeal: { ...meal, event_id: meal.event_id } }
-              })
-            }
+              });
+            }}
           >
             Make a copy
           </button>
           <button className="ghost" type="button" onClick={() => navigate(-1)}>
             Back
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete} disabled={deleting}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+            disabled={deleting}
+          >
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
@@ -220,6 +239,7 @@ const LogisticsMealDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };

@@ -16,6 +16,7 @@ import { Event, listEvents, Accommodation, listAccommodations } from '../api/eve
 import { Airfield, listAirfields } from '../api/airfields';
 import { OtherLogistic, listOthers, Meal, listMeals } from '../api/logistics';
 import { fromEventLocalPickerDate, parseEventLocal, toEventLocalPickerDate } from '../utils/eventDate';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 type VehicleRow = {
   name: string;
@@ -73,6 +74,7 @@ const LogisticsGroundCrewDetailPage = () => {
   const [destinationOptionKey, setDestinationOptionKey] = useState('');
   const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
   const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const markDirty = () => {
     if (saved) setSaved(false);
   };
@@ -511,11 +513,13 @@ const LogisticsGroundCrewDetailPage = () => {
   };
 
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>{routeSummary || 'Ground Crew Entry'}</h2>
+            <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+              <h2 style={{ margin: 0 }}>{routeSummary || 'Ground Crew Entry'}</h2>
+            </DetailPageLockTitle>
             <span
               className={`badge ${transportComplete ? 'success' : 'danger'}`}
               aria-label={transportComplete ? 'Complete' : 'Missing info'}
@@ -546,7 +550,11 @@ const LogisticsGroundCrewDetailPage = () => {
           <button
             className="ghost"
             type="button"
-            onClick={() =>
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
               navigate('/logistics/ground-crew/new', {
                 state: {
                   copyGroundCrew: {
@@ -566,15 +574,25 @@ const LogisticsGroundCrewDetailPage = () => {
                     }))
                   }
                 }
-              })
-            }
+              });
+            }}
           >
             Make a copy
           </button>
           <button className="ghost" type="button" onClick={() => navigate(-1)}>
             Back
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+          >
             Delete route
           </button>
         </div>
@@ -1108,6 +1126,7 @@ const LogisticsGroundCrewDetailPage = () => {
           </div>
         )}
       </form>
+      {lockNotice}
     </section>
   );
 };

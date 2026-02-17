@@ -8,6 +8,7 @@ import {
   CreateEventVehiclePayload
 } from '../api/logistics';
 import { Event, listEvents } from '../api/events';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const VehicleDetailPage = () => {
   const { vehicleId } = useParams();
@@ -26,6 +27,7 @@ const VehicleDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -111,14 +113,26 @@ const VehicleDetailPage = () => {
   }
 
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <h2>Vehicle details</h2>
+          <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+            <h2>Vehicle details</h2>
+          </DetailPageLockTitle>
           <p>Edit vehicle information and assignment.</p>
         </div>
         <div className="card-actions">
-          <button className="ghost danger" type="button" onClick={handleDelete}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+          >
             Delete vehicle
           </button>
           <button
@@ -199,6 +213,7 @@ const VehicleDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };

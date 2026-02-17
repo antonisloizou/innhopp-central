@@ -7,6 +7,7 @@ import {
   createParticipantProfile,
   listParticipantProfiles
 } from '../api/participants';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 type EventLite = {
   id: number;
@@ -56,6 +57,7 @@ const ManifestDetailPage = () => {
     roles: ['Participant', 'Skydiver', 'Staff'] as string[]
   });
   const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Driver', 'Pilot', 'COP'] as const;
+  const { locked, toggleLocked, editGuardProps, lockNotice } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -393,10 +395,12 @@ const ManifestDetailPage = () => {
     return <p className="error-text">Manifest not found.</p>;
   }
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <h2>Load {manifest.load_number}</h2>
+          <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+            <h2>Load {manifest.load_number}</h2>
+          </DetailPageLockTitle>
         </div>
         <button className="ghost" type="button" onClick={() => navigate(-1)}>
           Back
@@ -771,6 +775,7 @@ const ManifestDetailPage = () => {
           </form>
         )}
       </article>
+      {lockNotice}
     </section>
   );
 };

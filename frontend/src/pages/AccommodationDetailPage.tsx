@@ -9,6 +9,7 @@ import {
   deleteAccommodation
 } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const AccommodationDetailPage = () => {
   const { eventId, accommodationId } = useParams();
@@ -30,6 +31,7 @@ const AccommodationDetailPage = () => {
   const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
   const missingName = !form.name.trim();
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -106,10 +108,12 @@ const AccommodationDetailPage = () => {
   };
 
   return (
-    <section className="stack">
+    <section className="stack" {...editGuardProps}>
       <header className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0 }}>Accommodation</h2>
+          <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+            <h2 style={{ margin: 0 }}>Accommodation</h2>
+          </DetailPageLockTitle>
           <span className={`badge ${form.booked && !missingCoordinates ? 'success' : 'danger'}`}>
             {form.booked && !missingCoordinates ? '✓' : 'NOT BOOKED'}
           </span>
@@ -118,7 +122,11 @@ const AccommodationDetailPage = () => {
           <button
             className="ghost"
             type="button"
-            onClick={() =>
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
               navigate('/logistics/accommodations/new', {
                 state: {
                   copyAccommodation: {
@@ -132,12 +140,22 @@ const AccommodationDetailPage = () => {
                     notes: form.notes
                   }
                 }
-              })
-            }
+              });
+            }}
           >
             Make a copy
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+          >
             Delete
           </button>
           <button className="ghost" type="button" onClick={() => navigate(-1)}>
@@ -262,6 +280,7 @@ const AccommodationDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };

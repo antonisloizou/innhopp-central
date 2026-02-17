@@ -53,13 +53,6 @@ type Meal struct {
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
-func nullableInt(v int64) interface{} {
-	if v == 0 {
-		return nil
-	}
-	return v
-}
-
 func (h *Handler) listOthers(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(), `SELECT id, name, coordinates, scheduled_at, description, notes, event_id, season_id, created_at FROM logistics_other ORDER BY created_at DESC`)
 	if err != nil {

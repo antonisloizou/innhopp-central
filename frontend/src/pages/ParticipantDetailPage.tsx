@@ -7,6 +7,7 @@ import {
   updateParticipantProfile,
   deleteParticipantProfile
 } from '../api/participants';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Photo', 'Pilot', 'COP', 'Driver'] as const;
 
@@ -29,6 +30,7 @@ const ParticipantDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -101,10 +103,12 @@ const ParticipantDetailPage = () => {
   }
 
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <h2>{profile.full_name}</h2>
+          <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+            <h2>{profile.full_name}</h2>
+          </DetailPageLockTitle>
           <p className="muted">{profile.email}</p>
         </div>
         <div className="card-actions">
@@ -130,22 +134,26 @@ const ParticipantDetailPage = () => {
             className="ghost danger"
             type="button"
             disabled={deleting}
-            onClick={async () => {
-            if (!participantId) return;
-            if (!window.confirm('Delete this participant? This cannot be undone.')) return;
-            try {
-              setDeleting(true);
-              await deleteParticipantProfile(Number(participantId));
-              navigate(-1);
-            } catch (err) {
-              const status = (err as any)?.status;
-              if (status === 404) {
+            onClick={async (event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              if (!participantId) return;
+              if (!window.confirm('Delete this participant? This cannot be undone.')) return;
+              try {
+                setDeleting(true);
+                await deleteParticipantProfile(Number(participantId));
+                navigate(-1);
+              } catch (err) {
+                const status = (err as any)?.status;
+                if (status === 404) {
                   navigate(-1);
                   return;
                 }
-              setMessage(err instanceof Error ? err.message : 'Failed to delete participant');
-              setDeleting(false);
-            }
+                setMessage(err instanceof Error ? err.message : 'Failed to delete participant');
+                setDeleting(false);
+              }
             }}
           >
             {deleting ? 'Deleting…' : 'Delete'}
@@ -241,6 +249,7 @@ const ParticipantDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };

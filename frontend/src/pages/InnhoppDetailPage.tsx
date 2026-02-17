@@ -27,6 +27,7 @@ import {
 } from '../utils/eventDate';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -199,6 +200,7 @@ const InnhoppDetailPage = () => {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   const extractImageFiles = (dt?: DataTransfer | null): File[] => {
     if (!dt) return [];
@@ -767,13 +769,15 @@ const InnhoppDetailPage = () => {
     return <p className="error-text">Innhopp not found.</p>;
   }
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>
-              {eventData.name} — {isCreateMode ? 'New innhopp' : `#${innhopp?.sequence} ${innhopp?.name}`}
-            </h2>
+            <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+              <h2 style={{ margin: 0 }}>
+                {eventData.name} — {isCreateMode ? 'New innhopp' : `#${innhopp?.sequence} ${innhopp?.name}`}
+              </h2>
+            </DetailPageLockTitle>
             {!isCreateMode && (
               <span
                 className={`badge ${ready ? 'success' : 'danger'}`}
@@ -789,11 +793,15 @@ const InnhoppDetailPage = () => {
             <button
               className="ghost"
               type="button"
-              onClick={() =>
+              onClick={(event) => {
+                if (locked) {
+                  showLockedNoticeAtEvent(event);
+                  return;
+                }
                 navigate(`/events/${eventId}/innhopps/new`, {
                   state: { copyInnhopp: innhopp }
-                })
-              }
+                });
+              }}
             >
               Make a copy
             </button>
@@ -802,7 +810,13 @@ const InnhoppDetailPage = () => {
             <button
               className="ghost danger"
               type="button"
-              onClick={handleDelete}
+              onClick={(event) => {
+                if (locked) {
+                  showLockedNoticeAtEvent(event);
+                  return;
+                }
+                handleDelete();
+              }}
               disabled={saving || deleting}
             >
               {deleting ? 'Deleting…' : 'Delete innhopp'}
@@ -1843,6 +1857,7 @@ const InnhoppDetailPage = () => {
           </div>
         </article>
       </form>
+      {lockNotice}
     </section>
   );
 };

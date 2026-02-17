@@ -5,6 +5,7 @@ import 'flatpickr/dist/flatpickr.css';
 import { getOther, updateOther, deleteOther, createOther } from '../api/logistics';
 import { listEvents, Event } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -30,6 +31,7 @@ const LogisticsOtherDetailPage = () => {
   const missingCoordinates = !form.coordinates.trim();
   const missingName = !form.name.trim();
   const complete = hasText(form.name) && hasText(form.coordinates) && hasText(form.scheduled_at);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -123,11 +125,13 @@ const LogisticsOtherDetailPage = () => {
   if (loading) return <p className="muted">Loading…</p>;
 
   return (
-    <section className="stack">
+    <section className="stack" {...editGuardProps}>
       <header className="page-header">
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <h2 style={{ margin: 0 }}>Other logistics</h2>
+            <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+              <h2 style={{ margin: 0 }}>Other logistics</h2>
+            </DetailPageLockTitle>
             <span
               className={`badge ${complete ? 'success' : 'danger'}`}
               aria-label={complete ? 'Complete' : 'Missing info'}
@@ -139,10 +143,31 @@ const LogisticsOtherDetailPage = () => {
           </div>
         </div>
         <div className="card-actions">
-          <button className="ghost" type="button" onClick={handleCopy} disabled={copying || submitting}>
+          <button
+            className="ghost"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleCopy();
+            }}
+            disabled={copying || submitting}
+          >
             {copying ? 'Copying…' : 'Make a copy'}
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+          >
             Delete
           </button>
           <button
@@ -244,6 +269,7 @@ const LogisticsOtherDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };

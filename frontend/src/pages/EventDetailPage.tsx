@@ -56,6 +56,7 @@ import {
   Meal,
   listMeals
 } from '../api/logistics';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -376,6 +377,7 @@ const [transportForm, setTransportForm] = useState({
 const missingAirfieldCoords = !hasText(airfieldForm.coordinates);
 const missingAccommodationCoords = !hasText(accommodationForm.coordinates);
 const missingOtherCoords = !hasText(otherForm.coordinates);
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const sortedAccommodations = useMemo(() => {
     const list = Array.isArray(accommodations) ? [...accommodations] : [];
     const timeValue = (acc: AccommodationItem) => {
@@ -1356,11 +1358,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   };
 
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
           <div className="event-header-top">
-            <h2 style={{ margin: 0 }}>{eventData.name}</h2>
+            <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+              <h2 style={{ margin: 0 }}>{eventData.name}</h2>
+            </DetailPageLockTitle>
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
               <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
               {!pastEvent &&
@@ -1397,10 +1401,32 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           >
             Manifest
           </button>
-          <button className="ghost" type="button" onClick={handleCopy} disabled={copying}>
+          <button
+            className="ghost"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleCopy();
+            }}
+            disabled={copying}
+          >
             {copying ? 'Copying…' : 'Copy'}
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete} disabled={deleting}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+            disabled={deleting}
+          >
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
           <button
@@ -3439,7 +3465,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </>
         )}
       </article>
-
+      {lockNotice}
     </section>
   );
 };

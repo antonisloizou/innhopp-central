@@ -730,6 +730,46 @@ button.ghost {
   margin: 0;
 }
 
+.detail-lock-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.detail-lock-toggle {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-input-bg);
+  color: var(--text-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.detail-lock-toggle:hover {
+  border-color: var(--accent);
+}
+
+.detail-lock-notice {
+  position: fixed;
+  top: 1.25rem;
+  left: 1.25rem;
+  z-index: 1000;
+  padding: 0.55rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-card);
+  color: var(--text-strong);
+  box-shadow: var(--panel-card-shadow);
+  font-size: 0.88rem;
+  pointer-events: none;
+}
+
 .event-header-top {
   display: flex;
   flex-wrap: wrap;

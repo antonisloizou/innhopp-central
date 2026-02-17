@@ -9,6 +9,7 @@ import {
 } from '../api/airfields';
 import { metersToFeet } from '../utils/units';
 import { formatMetersWithFeet } from '../utils/units';
+import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 
 const AirfieldDetailPage = () => {
   const { airfieldId } = useParams();
@@ -26,6 +27,7 @@ const AirfieldDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const missingName = !form.name.trim();
+  const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
   useEffect(() => {
     let cancelled = false;
@@ -116,16 +118,22 @@ const AirfieldDetailPage = () => {
   const elevationFeet = Number.isFinite(form.elevation) ? metersToFeet(form.elevation) : null;
 
   return (
-    <section>
+    <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <h2>{airfield.name}</h2>
+          <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
+            <h2>{airfield.name}</h2>
+          </DetailPageLockTitle>
         </div>
         <div className="card-actions">
           <button
             className="ghost"
             type="button"
-            onClick={() =>
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
               navigate('/airfields/new', {
                 state: {
                   copyAirfield: {
@@ -135,15 +143,26 @@ const AirfieldDetailPage = () => {
                     description: airfield.description
                   }
                 }
-              })
-            }
+              });
+            }}
           >
             Make a copy
           </button>
           <button className="ghost" type="button" onClick={() => navigate(-1)}>
             Back
           </button>
-          <button className="ghost danger" type="button" onClick={handleDelete} disabled={deleting}>
+          <button
+            className="ghost danger"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              handleDelete();
+            }}
+            disabled={deleting}
+          >
             {deleting ? 'Deleting…' : 'Delete airfield'}
           </button>
         </div>
@@ -221,6 +240,7 @@ const AirfieldDetailPage = () => {
           </div>
         </form>
       </article>
+      {lockNotice}
     </section>
   );
 };
