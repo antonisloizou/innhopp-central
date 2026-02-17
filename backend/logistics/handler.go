@@ -1315,6 +1315,71 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 	}
 }
 
+// BackfillMissingRouteDurations computes duration_minutes for existing routes that are missing it.
+func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error {
+	h := NewHandler(db)
+	if h.mapsAPIKey == "" {
+		log.Printf("route duration backfill skipped: GOOGLE_MAPS_API_KEY is not set")
+		return nil
+	}
+	type row struct {
+		id          int64
+		origin      string
+		destination string
+	}
+	backfill := func(table string) error {
+		query := fmt.Sprintf(
+			`SELECT id, pickup_location, destination FROM %s WHERE duration_minutes IS NULL AND pickup_location <> '' AND destination <> ''`,
+			table,
+		)
+		rows, err := h.db.Query(ctx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		var pending []row
+		for rows.Next() {
+			var item row
+			if err := rows.Scan(&item.id, &item.origin, &item.destination); err != nil {
+				return err
+			}
+			pending = append(pending, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		updated := 0
+		for _, item := range pending {
+			minutes, err := h.calculateRouteDurationMinutes(ctx, item.origin, item.destination)
+			if err != nil {
+				log.Printf("route duration backfill failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+			if minutes == nil {
+				continue
+			}
+			updateQuery := fmt.Sprintf(`UPDATE %s SET duration_minutes = $1 WHERE id = $2`, table)
+			if _, err := h.db.Exec(ctx, updateQuery, minutes, item.id); err != nil {
+				log.Printf("route duration backfill update failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+			updated++
+		}
+		log.Printf("route duration backfill: %s updated %d/%d rows", table, updated, len(pending))
+		return nil
+	}
+
+	if err := backfill("logistics_transports"); err != nil {
+		return err
+	}
+	if err := backfill("logistics_ground_crews"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Routes registers logistics routes.
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()

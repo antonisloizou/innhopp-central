@@ -38,6 +38,11 @@ func main() {
 	if err := ensureSchema(ctx, pool); err != nil {
 		log.Fatalf("failed to ensure schema: %v", err)
 	}
+	backfillCtx, cancelBackfill := context.WithTimeout(ctx, 2*time.Minute)
+	if err := logistics.BackfillMissingRouteDurations(backfillCtx, pool); err != nil {
+		log.Printf("route duration backfill failed: %v", err)
+	}
+	cancelBackfill()
 
 	sessionSecret := os.Getenv("SESSION_SECRET")
 	if sessionSecret == "" {
