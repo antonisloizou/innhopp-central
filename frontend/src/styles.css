@@ -176,6 +176,17 @@ button.ghost {
   gap: 0.75rem;
 }
 
+.logistics-filter-grid {
+  grid-template-columns: 1fr;
+  align-items: end;
+}
+
+@media (min-width: 1080px) {
+  .logistics-filter-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .form-field {
   display: grid;
   gap: 0.35rem;
@@ -352,6 +363,29 @@ button.ghost {
 
 .multi-select-dropdown .multi-select-option input[type='checkbox'] {
   margin: 0;
+}
+
+.route-subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.route-subtitle-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.route-subtitle-icon {
+  width: 1.2rem;
+  text-align: center;
+  flex: 0 0 1.2rem;
+}
+
+.route-subtitle-spacer {
+  width: 1.1rem;
+  flex: 0 0 1.1rem;
 }
 
 .upload-pane {
