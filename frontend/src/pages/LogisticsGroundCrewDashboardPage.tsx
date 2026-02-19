@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
@@ -49,6 +51,7 @@ const formatDateLabel = (dateKey: string) => {
 };
 
 const LogisticsGroundCrewDashboardPage = () => {
+  const navigate = useNavigate();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
@@ -60,6 +63,7 @@ const LogisticsGroundCrewDashboardPage = () => {
   const [destinationFilter, setDestinationFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewRoute, setPreviewRoute] = useState<GroundCrew | null>(null);
   const vehicleDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const datesDropdownRef = useRef<HTMLDetailsElement | null>(null);
 
@@ -93,6 +97,18 @@ const LogisticsGroundCrewDashboardPage = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (!previewRoute) {
+      document.body.style.overflow = '';
+      return;
+    }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [previewRoute]);
 
   useEffect(() => {
     const handleOutsidePointer = (event: MouseEvent) => {
@@ -376,32 +392,44 @@ const LogisticsGroundCrewDashboardPage = () => {
             <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
               {filteredGroundCrews.map((t) => (
                 <li key={t.id}>
-                  <Link to={`/logistics/ground-crew/${t.id}`} className="card-link" style={{ flex: 1 }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="card-link"
+                    style={{ flex: 1, cursor: 'pointer' }}
+                    onClick={() => setPreviewRoute(t)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setPreviewRoute(t);
+                      }
+                    }}
+                  >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
                       <div>
                         <strong>
                           {t.pickup_location} → {t.destination}
                         </strong>
                         <div className="muted route-subtitle">
-                          <span className="route-subtitle-item">
+                          <span className="route-subtitle-item route-subtitle-item--schedule">
                             <span className="route-subtitle-icon" aria-hidden>
                               📅
                             </span>
-                            {formatScheduledAt(t.scheduled_at)}
+                            <span className="route-subtitle-text">{formatScheduledAt(t.scheduled_at)}</span>
                           </span>
                           <span className="route-subtitle-spacer" aria-hidden />
-                          <span className="route-subtitle-item">
+                          <span className="route-subtitle-item route-subtitle-item--duration">
                             <span className="route-subtitle-icon" aria-hidden>
                               ⏱
                             </span>
-                            {formatDuration(t.duration_minutes)}
+                            <span className="route-subtitle-text">{formatDuration(t.duration_minutes)}</span>
                           </span>
                           <span className="route-subtitle-spacer" aria-hidden />
-                          <span className="route-subtitle-item">
+                          <span className="route-subtitle-item route-subtitle-item--vehicles">
                             <span className="route-subtitle-icon" aria-hidden>
                               🚐
                             </span>
-                            {formatVehicleSummary(t.vehicles)}
+                            <span className="route-subtitle-text">{formatVehicleSummary(t.vehicles)}</span>
                           </span>
                         </div>
                       </div>
@@ -411,13 +439,124 @@ const LogisticsGroundCrewDashboardPage = () => {
                         </span>
                       </div>
                     </div>
-                  </Link>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </article>
       </div>
+      {previewRoute &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            onClick={() => setPreviewRoute(null)}
+            role="button"
+            tabIndex={-1}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'var(--overlay-scrim)',
+              backdropFilter: 'blur(6px)',
+              zIndex: 9999,
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem 1rem'
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setPreviewRoute(null);
+              } else if (e.key === 'Enter') {
+                navigate(`/logistics/ground-crew/${previewRoute.id}`);
+                setPreviewRoute(null);
+              }
+            }}
+          >
+            <div
+              className="card overlay-panel-with-close"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/logistics/ground-crew/${previewRoute.id}`);
+                setPreviewRoute(null);
+              }}
+              style={{
+                position: 'relative',
+                width: 'min(720px, 92vw)',
+                maxHeight: '85vh',
+                overflowY: 'auto',
+                boxShadow: '0 18px 48px rgba(0,0,0,0.4), 0 0 0 1px var(--modal-border)',
+                cursor: 'pointer',
+                backgroundColor: 'var(--modal-surface)',
+                border: '1px solid var(--modal-border)',
+                color: 'var(--text-strong)'
+              }}
+            >
+              <button
+                type="button"
+                className="overlay-close-button overlay-close-top-left"
+                aria-label="Close overlay"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewRoute(null);
+                }}
+              >
+                ×
+              </button>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 style={{ margin: 0 }}>
+                  {previewRoute.pickup_location} → {previewRoute.destination}
+                </h3>
+                <span className="badge schedule-type-badge" style={{ background: '#2563eb' }}>
+                  Ground Crew
+                </span>
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gap: '0.85rem',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  padding: '1rem'
+                }}
+              >
+                <div>
+                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>DURATION</div>
+                  <div>{formatDuration(previewRoute.duration_minutes)}</div>
+                </div>
+                <div>
+                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                  <div>{formatScheduledAt(previewRoute.scheduled_at)}</div>
+                </div>
+                <div>
+                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>EVENT</div>
+                  <div>{events.find((e) => e.id === previewRoute.event_id)?.name || `Event #${previewRoute.event_id ?? '—'}`}</div>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
+                  <div style={{ marginTop: '0.15rem' }}>
+                    {!previewRoute.vehicles || previewRoute.vehicles.length === 0 ? (
+                      <div className="muted">—</div>
+                    ) : (
+                      previewRoute.vehicles.map((v, idx) => (
+                        <div key={idx} className="muted">
+                          <strong>{v.name}</strong>
+                          {v.driver ? ` (Driver: ${v.driver})` : ''}
+                          {typeof v.passenger_capacity === 'number' ? ` • Capacity: ${v.passenger_capacity}` : ''}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                  <div>{previewRoute.notes || '—'}</div>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </section>
   );
 };

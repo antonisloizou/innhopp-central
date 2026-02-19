@@ -368,19 +368,43 @@ button.ghost {
 .route-subtitle {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .route-subtitle-item {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  min-width: 0;
+}
+
+.route-subtitle-item--schedule {
+  flex: 0 0 12.5ch;
+}
+
+.route-subtitle-item--duration {
+  flex: 0 0 5.5ch;
+}
+
+.route-subtitle-item--vehicles {
+  flex: 1 1 auto;
 }
 
 .route-subtitle-icon {
   width: 1.2rem;
   text-align: center;
   flex: 0 0 1.2rem;
+}
+
+.route-subtitle-text {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.route-subtitle-item--vehicles .route-subtitle-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .route-subtitle-spacer {
@@ -873,6 +897,38 @@ button.ghost {
 
 .detail-lock-toggle:hover {
   border-color: var(--accent);
+}
+
+.overlay-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--panel-input-border);
+  background: var(--panel-input-bg);
+  color: var(--text-strong);
+  font-size: 1.1rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+.overlay-close-button:hover {
+  background: rgba(var(--surface-rgb), 0.9);
+}
+
+.overlay-close-top-left {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 2;
+}
+
+.overlay-panel-with-close .card-header {
+  padding-top: 1rem;
+  padding-left: 2rem;
 }
 
 .detail-lock-notice {

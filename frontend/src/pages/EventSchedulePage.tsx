@@ -229,6 +229,7 @@ const EventSchedulePage = () => {
   const previewCardStyle = useMemo(() => {
     if (!previewEntry) return undefined;
     return {
+      position: 'relative' as const,
       width: 'min(720px, 92vw)',
       maxHeight: '85vh',
       overflowY: 'auto' as const,
@@ -2020,6 +2021,18 @@ const EventSchedulePage = () => {
                     onClick={(e) => e.stopPropagation()}
                     className="schedule-time-picker"
                   >
+                    <button
+                      type="button"
+                      className="overlay-close-button overlay-close-top-left"
+                      aria-label="Close overlay"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTimePicker(null);
+                        setPendingPickerDate(null);
+                      }}
+                    >
+                      ×
+                    </button>
                     <Flatpickr
                       ref={timePickerRef}
                       options={{
@@ -2093,7 +2106,7 @@ const EventSchedulePage = () => {
             }}
           >
             <div
-              className="card"
+              className="card overlay-panel-with-close"
               onClick={(e) => {
                 e.stopPropagation();
                 if (previewEntry.entry.to) {
@@ -2104,6 +2117,17 @@ const EventSchedulePage = () => {
               }}
               style={previewCardStyle}
             >
+            <button
+              type="button"
+              className="overlay-close-button overlay-close-top-left"
+              aria-label="Close overlay"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewEntry(null);
+              }}
+            >
+              ×
+            </button>
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{previewEntry.entry.title}</h3>
               <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
