@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
@@ -59,6 +59,8 @@ const LogisticsGroundCrewDashboardPage = () => {
   const [destinationFilter, setDestinationFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const vehicleDropdownRef = useRef<HTMLDetailsElement | null>(null);
+  const datesDropdownRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +90,22 @@ const LogisticsGroundCrewDashboardPage = () => {
     load();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleOutsidePointer = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      [vehicleDropdownRef.current, datesDropdownRef.current].forEach((dropdown) => {
+        if (dropdown?.open && target && !dropdown.contains(target)) {
+          dropdown.removeAttribute('open');
+        }
+      });
+    };
+
+    document.addEventListener('mousedown', handleOutsidePointer);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsidePointer);
     };
   }, []);
 
@@ -226,7 +244,7 @@ const LogisticsGroundCrewDashboardPage = () => {
             </label>
             <label className="form-field">
               <span>Vehicle</span>
-              <details className="multi-select-dropdown">
+              <details className="multi-select-dropdown" ref={vehicleDropdownRef}>
                 <summary>
                   {selectedVehicles.length === 0
                     ? 'All vehicles'
@@ -270,7 +288,7 @@ const LogisticsGroundCrewDashboardPage = () => {
             </label>
             <label className="form-field">
               <span>Dates</span>
-              <details className="multi-select-dropdown">
+              <details className="multi-select-dropdown" ref={datesDropdownRef}>
                 <summary>
                   {selectedDates.length === 0
                     ? 'All dates'
