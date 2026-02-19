@@ -4,14 +4,36 @@ import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
-const formatDateTime = (iso?: string, force24h = false) => {
-  if (!iso) return 'Not scheduled';
-  return formatEventLocal(iso, {
+const formatDuration = (minutes?: number | null) => {
+  if (typeof minutes !== 'number' || Number.isNaN(minutes) || minutes <= 0) return 'Duration n/a';
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hrs === 0) return `${mins}m`;
+  if (mins === 0) return `${hrs}h`;
+  return `${hrs}h ${mins}m`;
+};
+
+const formatVehicleSummary = (vehicles?: GroundCrew['vehicles']) => {
+  if (!vehicles || vehicles.length === 0) return 'No vehicles';
+  return vehicles.map((v) => v.name).join(', ');
+};
+
+const getDateKey = (iso?: string) => {
+  const parsed = parseEventLocal(iso);
+  if (!parsed) return '';
+  const y = parsed.getFullYear();
+  const m = String(parsed.getMonth() + 1).padStart(2, '0');
+  const d = String(parsed.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const formatDateLabel = (dateKey: string) => {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const date = new Date(y, (m || 1) - 1, d || 1);
+  return date.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: force24h ? false : undefined
+    year: 'numeric'
   });
 };
 
@@ -21,6 +43,8 @@ const LogisticsGroundCrewDashboardPage = () => {
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedEvent, setSelectedEvent] = useState<string>('');
+  const [selectedVehicle, setSelectedVehicle] = useState<string>('');
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [pickupFilter, setPickupFilter] = useState('');
   const [destinationFilter, setDestinationFilter] = useState('');
   const [loading, setLoading] = useState(true);
@@ -63,11 +87,43 @@ const LogisticsGroundCrewDashboardPage = () => {
     return events.filter((event) => event.season_id === seasonId);
   }, [events, selectedSeason]);
 
+  const vehicleOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return groundCrews
+      .filter((t) => {
+        if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
+        if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
+        return true;
+      })
+      .flatMap((t) => t.vehicles || [])
+      .map((v) => v.name?.trim())
+      .filter((name): name is string => Boolean(name && !seen.has(name) && seen.add(name)))
+      .sort((a, b) => a.localeCompare(b));
+  }, [groundCrews, selectedSeason, selectedEvent]);
+
+  const dateOptions = useMemo(() => {
+    const seen = new Set<string>();
+    return groundCrews
+      .filter((t) => {
+        if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
+        if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
+        if (selectedVehicle && !(t.vehicles || []).some((v) => v.name === selectedVehicle))
+          return false;
+        return true;
+      })
+      .map((t) => getDateKey(t.scheduled_at))
+      .filter((dateKey) => Boolean(dateKey && !seen.has(dateKey) && seen.add(dateKey)))
+      .sort((a, b) => a.localeCompare(b));
+  }, [groundCrews, selectedSeason, selectedEvent, selectedVehicle]);
+
   const filteredGroundCrews = useMemo(() => {
     return groundCrews
       .filter((t) => {
         if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
         if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
+        if (selectedVehicle && !(t.vehicles || []).some((v) => v.name === selectedVehicle))
+          return false;
+        if (selectedDates.length > 0 && !selectedDates.includes(getDateKey(t.scheduled_at))) return false;
         if (pickupFilter && !t.pickup_location.toLowerCase().includes(pickupFilter.toLowerCase()))
           return false;
         if (
@@ -85,7 +141,14 @@ const LogisticsGroundCrewDashboardPage = () => {
         }
         return aTime - bTime;
       });
-  }, [groundCrews, selectedSeason, selectedEvent, pickupFilter, destinationFilter]);
+  }, [groundCrews, selectedSeason, selectedEvent, selectedVehicle, selectedDates, pickupFilter, destinationFilter]);
+
+  const totalDurationMinutes = useMemo(() => {
+    return filteredGroundCrews.reduce((sum, t) => {
+      const duration = t.duration_minutes;
+      return sum + (typeof duration === 'number' && duration > 0 ? duration : 0);
+    }, 0);
+  }, [filteredGroundCrews]);
 
   return (
     <section>
@@ -120,6 +183,8 @@ const LogisticsGroundCrewDashboardPage = () => {
                 onChange={(e) => {
                   setSelectedSeason(e.target.value);
                   setSelectedEvent('');
+                  setSelectedVehicle('');
+                  setSelectedDates([]);
                 }}
                 style={{ width: '100%', minWidth: '180px', maxWidth: '25%' }}
               >
@@ -135,7 +200,11 @@ const LogisticsGroundCrewDashboardPage = () => {
               <span>Event</span>
               <select
                 value={selectedEvent}
-                onChange={(e) => setSelectedEvent(e.target.value)}
+                onChange={(e) => {
+                  setSelectedEvent(e.target.value);
+                  setSelectedVehicle('');
+                  setSelectedDates([]);
+                }}
                 style={{ width: '100%', minWidth: '180px' }}
               >
                 <option value="">All events</option>
@@ -145,6 +214,65 @@ const LogisticsGroundCrewDashboardPage = () => {
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="form-field">
+              <span>Vehicle</span>
+              <select
+                value={selectedVehicle}
+                onChange={(e) => setSelectedVehicle(e.target.value)}
+                style={{ width: '100%', minWidth: '180px' }}
+              >
+                <option value="">All vehicles</option>
+                {vehicleOptions.map((vehicleName) => (
+                  <option key={vehicleName} value={vehicleName}>
+                    {vehicleName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Dates</span>
+              <details className="multi-select-dropdown">
+                <summary>
+                  {selectedDates.length === 0
+                    ? 'All dates'
+                    : selectedDates.length === 1
+                    ? formatDateLabel(selectedDates[0])
+                    : `${selectedDates.length} dates selected`}
+                </summary>
+                <div className="multi-select-panel">
+                  {selectedDates.length > 0 && (
+                    <button type="button" className="multi-select-option" onClick={() => setSelectedDates([])}>
+                      Clear date filters
+                    </button>
+                  )}
+                  {dateOptions.length === 0 ? (
+                    <div className="muted" style={{ padding: '0.4rem 0.45rem' }}>
+                      No scheduled dates
+                    </div>
+                  ) : (
+                    dateOptions.map((dateKey) => {
+                      const checked = selectedDates.includes(dateKey);
+                      return (
+                        <label key={dateKey} className="multi-select-option">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedDates((prev) => [...prev, dateKey]);
+                              } else {
+                                setSelectedDates((prev) => prev.filter((d) => d !== dateKey));
+                              }
+                            }}
+                          />
+                          {formatDateLabel(dateKey)}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </details>
             </label>
             <label className="form-field">
               <span>Start location</span>
@@ -170,18 +298,23 @@ const LogisticsGroundCrewDashboardPage = () => {
         <article className="card">
           <header className="card-header">
             <div>
-              <h3>Ground crew entries</h3>
+              <h3>Ground crew routes</h3>
             </div>
-            <span className="badge neutral">
-              {filteredGroundCrews.length} {filteredGroundCrews.length === 1 ? 'entry' : 'entries'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <span className="badge neutral">
+                {filteredGroundCrews.length} routes
+              </span>
+              <span className="badge neutral">
+                ⏱ {totalDurationMinutes > 0 ? formatDuration(totalDurationMinutes) : '0m'}
+              </span>
+            </div>
           </header>
           {loading ? (
-            <p className="muted">Loading ground crew entries…</p>
+            <p className="muted">Loading ground crew routes…</p>
           ) : error ? (
             <p className="error-text">{error}</p>
           ) : filteredGroundCrews.length === 0 ? (
-            <p className="muted">No ground crew entries match the selected filters.</p>
+            <p className="muted">No ground crew routes match the selected filters.</p>
           ) : (
             <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
               {filteredGroundCrews.map((t) => (
@@ -192,7 +325,10 @@ const LogisticsGroundCrewDashboardPage = () => {
                         <strong>
                           {t.pickup_location} → {t.destination}
                         </strong>
-                        <div className="muted">{formatDateTime(t.scheduled_at)}</div>
+                        <div className="muted">
+                          ⏱ {formatDuration(t.duration_minutes)} &nbsp;&nbsp; 🚐{' '}
+                          {formatVehicleSummary(t.vehicles)}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
                         <span className="badge" style={{ backgroundColor: '#2b8a3e', color: '#fff' }}>
@@ -200,14 +336,6 @@ const LogisticsGroundCrewDashboardPage = () => {
                         </span>
                       </div>
                     </div>
-                    {t.vehicles && t.vehicles.length > 0 && (
-                      <div className="muted">
-                        Assigned vehicles:{' '}
-                        {t.vehicles
-                          .map((v) => `${v.name}${v.driver ? ` (Driver: ${v.driver})` : ''} • Cap: ${v.passenger_capacity}`)
-                          .join('; ')}
-                      </div>
-                    )}
                   </Link>
                 </li>
               ))}
