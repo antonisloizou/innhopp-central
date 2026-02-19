@@ -417,7 +417,7 @@ const LogisticsDashboardPage = () => {
                             </span>
                             <span className="route-subtitle-text">{formatScheduledAt(t.scheduled_at)}</span>
                           </span>
-                          <span className="route-subtitle-spacer" aria-hidden />
+                          <span className="route-subtitle-spacer route-subtitle-spacer--after-duration" aria-hidden />
                           <span className="route-subtitle-item route-subtitle-item--duration">
                             <span className="route-subtitle-icon" aria-hidden>
                               ⏱
