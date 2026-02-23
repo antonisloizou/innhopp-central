@@ -39,7 +39,7 @@ const clampToViewport = (point: NoticePosition): NoticePosition => {
 };
 
 export const useDetailPageLock = () => {
-  const [locked, setLocked] = useState(true);
+  const [locked, setLocked] = useState(false);
   const [showNotice, setShowNotice] = useState(false);
   const [noticePosition, setNoticePosition] = useState<NoticePosition | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
