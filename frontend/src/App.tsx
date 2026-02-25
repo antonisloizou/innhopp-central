@@ -31,6 +31,7 @@ import VehicleDetailPage from './pages/VehicleDetailPage';
 import InnhoppDetailPage from './pages/InnhoppDetailPage';
 import ManifestDetailPage from './pages/ManifestDetailPage';
 import AccommodationDetailPage from './pages/AccommodationDetailPage';
+import InnhoppCsvPage from './pages/InnhoppCsvPage';
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -45,6 +46,7 @@ const App = () => (
         <Route path="events/:eventId/accommodations/:accommodationId" element={<AccommodationDetailPage />} />
         <Route path="events/:eventId/innhopps/new" element={<InnhoppDetailPage />} />
         <Route path="events/:eventId/innhopps/:innhoppId" element={<InnhoppDetailPage />} />
+        <Route path="innhopps/csv" element={<InnhoppCsvPage />} />
         <Route path="airfields/new" element={<AirfieldCreatePage />} />
         <Route path="airfields/:airfieldId" element={<AirfieldDetailPage />} />
         <Route path="seasons/new" element={<SeasonCreatePage />} />
