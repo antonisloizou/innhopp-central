@@ -4,6 +4,7 @@ import { listEvents } from '../api/events';
 type CsvRow = {
   eventId: number;
   date: string;
+  time: string;
   name: string;
   coordinates: string;
 };
@@ -18,13 +19,16 @@ const csvEscape = (value: string) => {
   return value;
 };
 
-const toDateOnly = (value?: string | null) => {
-  if (!value) return '';
-  const direct = value.match(/^\d{4}-\d{2}-\d{2}/);
-  if (direct) return direct[0];
+const toDateAndTime = (value?: string | null) => {
+  if (!value) return { date: '', time: '' };
+  const direct = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+  if (direct) return { date: direct[1], time: direct[2] };
+  const dateOnly = value.match(/^\d{4}-\d{2}-\d{2}/);
+  if (dateOnly) return { date: dateOnly[0], time: '' };
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return { date: value, time: '' };
+  const iso = parsed.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
 };
 
 const InnhoppCsvPage = () => {
@@ -47,16 +51,22 @@ const InnhoppCsvPage = () => {
           .sort((a, b) => a.name.localeCompare(b.name));
         const allRows = events
           .flatMap((event) =>
-            (Array.isArray(event.innhopps) ? event.innhopps : []).map((innhopp) => ({
-              eventId: event.id,
-              date: toDateOnly(innhopp.scheduled_at),
-              name: innhopp.name?.trim() || '',
-              coordinates: innhopp.coordinates?.trim() || ''
-            }))
+            (Array.isArray(event.innhopps) ? event.innhopps : []).map((innhopp) => {
+              const { date, time } = toDateAndTime(innhopp.scheduled_at);
+              return {
+                eventId: event.id,
+                date,
+                time,
+                name: innhopp.name?.trim() || '',
+                coordinates: innhopp.coordinates?.trim() || ''
+              };
+            })
           )
           .sort((a, b) => {
             const dateCmp = a.date.localeCompare(b.date);
             if (dateCmp !== 0) return dateCmp;
+            const timeCmp = a.time.localeCompare(b.time);
+            if (timeCmp !== 0) return timeCmp;
             return a.name.localeCompare(b.name);
           });
         setEvents(eventOptions);
@@ -82,9 +92,9 @@ const InnhoppCsvPage = () => {
   }, [rows, selectedEventId]);
 
   const csv = useMemo(() => {
-    const lines = ['date,name,coordinates'];
+    const lines = ['date,time,name,coordinates'];
     filteredRows.forEach((row) => {
-      lines.push([csvEscape(row.date), csvEscape(row.name), csvEscape(row.coordinates)].join(','));
+      lines.push([csvEscape(row.date), csvEscape(row.time), csvEscape(row.name), row.coordinates].join(','));
     });
     return lines.join('\n');
   }, [filteredRows]);
@@ -93,7 +103,7 @@ const InnhoppCsvPage = () => {
     <section className="stack">
       <header className="page-header">
         <h1>Innhopps CSV</h1>
-        <p className="muted">All innhopps as comma-separated values: date, name, coordinates.</p>
+        <p className="muted">All innhopps as comma-separated values: date, time, name, coordinates.</p>
       </header>
       <article className="card">
         {loading ? <p className="muted">Loading innhopps…</p> : null}
