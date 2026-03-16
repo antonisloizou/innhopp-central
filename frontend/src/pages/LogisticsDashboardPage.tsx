@@ -31,6 +31,11 @@ const formatVehicleSummary = (vehicles?: Transport['vehicles']) => {
   return vehicles.map((v) => v.name).join(', ');
 };
 
+const getVehicleFilterKey = (vehicle: NonNullable<Transport['vehicles']>[number], index: number) =>
+  typeof vehicle.event_vehicle_id === 'number'
+    ? `vehicle:${vehicle.event_vehicle_id}`
+    : `legacy:${vehicle.name}:${vehicle.driver || ''}:${vehicle.passenger_capacity}:${index}`;
+
 const getDateKey = (iso?: string) => {
   const parsed = parseEventLocal(iso);
   if (!parsed) return '';
@@ -134,16 +139,24 @@ const LogisticsDashboardPage = () => {
 
   const vehicleOptions = useMemo(() => {
     const seen = new Set<string>();
-    return transports
+    const options: { key: string; label: string }[] = [];
+    transports
       .filter((t) => {
         if (selectedSeason && t.season_id !== Number(selectedSeason)) return false;
         if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
         return true;
       })
-      .flatMap((t) => t.vehicles || [])
-      .map((v) => v.name?.trim())
-      .filter((name): name is string => Boolean(name && !seen.has(name) && seen.add(name)))
-      .sort((a, b) => a.localeCompare(b));
+      .forEach((t) => {
+        (t.vehicles || []).forEach((v, index) => {
+          const key = getVehicleFilterKey(v, index);
+          const label = v.name?.trim();
+          if (label && !seen.has(key)) {
+            seen.add(key);
+            options.push({ key, label });
+          }
+        });
+      });
+    return options.sort((a, b) => a.label.localeCompare(b.label));
   }, [transports, selectedSeason, selectedEvent]);
 
   const dateOptions = useMemo(() => {
@@ -154,7 +167,7 @@ const LogisticsDashboardPage = () => {
         if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
         if (
           selectedVehicles.length > 0 &&
-          !(t.vehicles || []).some((v) => selectedVehicles.includes(v.name))
+          !(t.vehicles || []).some((v, index) => selectedVehicles.includes(getVehicleFilterKey(v, index)))
         )
           return false;
         return true;
@@ -171,7 +184,7 @@ const LogisticsDashboardPage = () => {
         if (selectedEvent && t.event_id !== Number(selectedEvent)) return false;
         if (
           selectedVehicles.length > 0 &&
-          !(t.vehicles || []).some((v) => selectedVehicles.includes(v.name))
+          !(t.vehicles || []).some((v, index) => selectedVehicles.includes(getVehicleFilterKey(v, index)))
         )
           return false;
         if (selectedDates.length > 0 && !selectedDates.includes(getDateKey(t.scheduled_at))) return false;
@@ -193,6 +206,14 @@ const LogisticsDashboardPage = () => {
         return aTime - bTime;
       });
   }, [transports, selectedSeason, selectedEvent, selectedVehicles, selectedDates, pickupFilter, destinationFilter]);
+
+  const selectedVehicleLabels = useMemo(
+    () =>
+      vehicleOptions
+        .filter((option) => selectedVehicles.includes(option.key))
+        .map((option) => option.label),
+    [selectedVehicles, vehicleOptions]
+  );
 
   const totalDurationMinutes = useMemo(() => {
     return filteredTransports.reduce((sum, t) => {
@@ -266,7 +287,7 @@ const LogisticsDashboardPage = () => {
                   {selectedVehicles.length === 0
                     ? 'All vehicles'
                     : selectedVehicles.length === 1
-                    ? selectedVehicles[0]
+                    ? selectedVehicleLabels[0]
                     : `${selectedVehicles.length} vehicles selected`}
                 </summary>
                 <div className="multi-select-panel">
@@ -280,22 +301,22 @@ const LogisticsDashboardPage = () => {
                       No vehicles
                     </div>
                   ) : (
-                    vehicleOptions.map((vehicleName) => {
-                      const checked = selectedVehicles.includes(vehicleName);
+                    vehicleOptions.map((vehicle) => {
+                      const checked = selectedVehicles.includes(vehicle.key);
                       return (
-                        <label key={vehicleName} className="multi-select-option">
+                        <label key={vehicle.key} className="multi-select-option">
                           <input
                             type="checkbox"
                             checked={checked}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                setSelectedVehicles((prev) => [...prev, vehicleName]);
+                                setSelectedVehicles((prev) => [...prev, vehicle.key]);
                               } else {
-                                setSelectedVehicles((prev) => prev.filter((v) => v !== vehicleName));
+                                setSelectedVehicles((prev) => prev.filter((v) => v !== vehicle.key));
                               }
                             }}
                           />
-                          {vehicleName}
+                          {vehicle.label}
                         </label>
                       );
                     })

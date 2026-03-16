@@ -830,10 +830,10 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 	for _, transport := range logisticsData.Transports {
 		var newTransportID int64
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			`INSERT INTO logistics_transports (pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
              RETURNING id`,
-			strings.TrimSpace(transport.PickupLocation), strings.TrimSpace(transport.Destination), transport.PassengerCount, transport.DurationMinutes, transport.ScheduledAt, strings.TrimSpace(transport.Notes), created.ID, created.SeasonID,
+			strings.TrimSpace(transport.PickupLocation), transport.PickupLocationType, transport.PickupLocationID, strings.TrimSpace(transport.Destination), transport.DestinationType, transport.DestinationID, transport.PassengerCount, transport.DurationMinutes, transport.ScheduledAt, strings.TrimSpace(transport.Notes), created.ID, created.SeasonID,
 		).Scan(&newTransportID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to copy transports")
 			return
@@ -894,9 +894,9 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 			notes = val
 		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO logistics_meals (name, location, scheduled_at, notes, event_id, season_id)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-			strings.TrimSpace(meal.Name), location, meal.ScheduledAt, notes, created.ID, created.SeasonID,
+			`INSERT INTO logistics_meals (name, location, location_type, location_id, scheduled_at, notes, event_id, season_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			strings.TrimSpace(meal.Name), location, meal.LocationType, meal.LocationID, meal.ScheduledAt, notes, created.ID, created.SeasonID,
 		); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to copy meals")
 			return
@@ -1505,13 +1505,17 @@ type transportVehicleSnapshot struct {
 }
 
 type transportSnapshot struct {
-	PickupLocation  string
-	Destination     string
-	PassengerCount  int
-	DurationMinutes *int
-	ScheduledAt     *time.Time
-	Notes           string
-	Vehicles        []transportVehicleSnapshot
+	PickupLocation     string
+	PickupLocationType *string
+	PickupLocationID   *int64
+	Destination        string
+	DestinationType    *string
+	DestinationID      *int64
+	PassengerCount     int
+	DurationMinutes    *int
+	ScheduledAt        *time.Time
+	Notes              string
+	Vehicles           []transportVehicleSnapshot
 }
 
 type otherLogisticSnapshot struct {
@@ -1523,10 +1527,12 @@ type otherLogisticSnapshot struct {
 }
 
 type mealSnapshot struct {
-	Name        string
-	Location    *string
-	ScheduledAt *time.Time
-	Notes       *string
+	Name         string
+	Location     *string
+	LocationType *string
+	LocationID   *int64
+	ScheduledAt  *time.Time
+	Notes        *string
 }
 
 type eventLogisticsSnapshot struct {
@@ -1643,7 +1649,7 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	}
 
 	transportRows, err := h.db.Query(ctx,
-		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes
+		`SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes
          FROM logistics_transports
          WHERE event_id = $1
          ORDER BY created_at ASC`,
@@ -1658,11 +1664,31 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	for transportRows.Next() {
 		var t transportSnapshot
 		var id int64
+		var pickupLocationType sql.NullString
+		var pickupLocationID sql.NullInt64
+		var destinationType sql.NullString
+		var destinationID sql.NullInt64
 		var durationMinutes sql.NullInt32
 		var scheduled sql.NullTime
 		var notes sql.NullString
-		if err := transportRows.Scan(&id, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduled, &notes); err != nil {
+		if err := transportRows.Scan(&id, &t.PickupLocation, &pickupLocationType, &pickupLocationID, &t.Destination, &destinationType, &destinationID, &t.PassengerCount, &durationMinutes, &scheduled, &notes); err != nil {
 			return snapshot, err
+		}
+		if pickupLocationType.Valid {
+			val := pickupLocationType.String
+			t.PickupLocationType = &val
+		}
+		if pickupLocationID.Valid {
+			val := pickupLocationID.Int64
+			t.PickupLocationID = &val
+		}
+		if destinationType.Valid {
+			val := destinationType.String
+			t.DestinationType = &val
+		}
+		if destinationID.Valid {
+			val := destinationID.Int64
+			t.DestinationID = &val
 		}
 		if durationMinutes.Valid {
 			val := int(durationMinutes.Int32)
@@ -1768,7 +1794,7 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	}
 
 	mealRows, err := h.db.Query(ctx,
-		`SELECT name, location, scheduled_at, notes
+		`SELECT name, location, location_type, location_id, scheduled_at, notes
          FROM logistics_meals
          WHERE event_id = $1
          ORDER BY created_at ASC`,
@@ -1782,14 +1808,24 @@ func (h *Handler) fetchLogisticsForEvent(ctx context.Context, eventID int64) (ev
 	for mealRows.Next() {
 		var m mealSnapshot
 		var location sql.NullString
+		var locationType sql.NullString
+		var locationID sql.NullInt64
 		var scheduled sql.NullTime
 		var notes sql.NullString
-		if err := mealRows.Scan(&m.Name, &location, &scheduled, &notes); err != nil {
+		if err := mealRows.Scan(&m.Name, &location, &locationType, &locationID, &scheduled, &notes); err != nil {
 			return snapshot, err
 		}
 		if location.Valid {
 			val := location.String
 			m.Location = &val
+		}
+		if locationType.Valid {
+			val := locationType.String
+			m.LocationType = &val
+		}
+		if locationID.Valid {
+			val := locationID.Int64
+			m.LocationID = &val
 		}
 		if scheduled.Valid {
 			t := scheduled.Time

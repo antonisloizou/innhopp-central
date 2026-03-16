@@ -13,6 +13,7 @@ import {
   createInnhopp,
   getEvent,
   getInnhopp,
+  listEvents,
   updateInnhopp,
   deleteInnhopp
 } from '../api/events';
@@ -155,6 +156,7 @@ const InnhoppDetailPage = () => {
   const [eventData, setEventData] = useState<Event | null>(null);
   const [innhopp, setInnhopp] = useState<Innhopp | null>(null);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
+  const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [takeoffSelectValue, setTakeoffSelectValue] = useState<string>('');
   const initialFormState: InnhoppFormState = {
     name: '',
@@ -224,6 +226,29 @@ const InnhoppDetailPage = () => {
     if (takeoffElevation == null) return null;
     return takeoffElevation - form.elevation;
   }, [form.elevation, form.takeoff_airfield_id, airfields]);
+  const groupedTakeoffAirfields = useMemo(() => {
+    const groups = new Map<string, { label: string; options: { key: string; value: number; label: string }[] }>();
+    airfields.forEach((airfield) => {
+      const relatedEvents = allEvents.filter(
+        (evt) => Array.isArray(evt.airfield_ids) && evt.airfield_ids.includes(airfield.id)
+      );
+      const locations = relatedEvents.length
+        ? relatedEvents.map((evt) => evt.location || 'Location TBD')
+        : ['Unassigned location'];
+      locations.forEach((locationLabel, index) => {
+        const label = locationLabel || 'Location TBD';
+        if (!groups.has(label)) {
+          groups.set(label, { label, options: [] });
+        }
+        groups.get(label)!.options.push({
+          key: `${airfield.id}-${index}-${label}`,
+          value: airfield.id,
+          label: `${airfield.name}${airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}`
+        });
+      });
+    });
+    return Array.from(groups.values());
+  }, [airfields, allEvents]);
 
   const galleryImages = useMemo(
     () =>
@@ -430,17 +455,18 @@ const InnhoppDetailPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    const loadAirfields = async () => {
+    const loadAirfieldContext = async () => {
       try {
-        const data = await listAirfields();
+        const [airfieldData, eventData] = await Promise.all([listAirfields(), listEvents()]);
         if (!cancelled) {
-          setAirfields(Array.isArray(data) ? data : []);
+          setAirfields(Array.isArray(airfieldData) ? airfieldData : []);
+          setAllEvents(Array.isArray(eventData) ? eventData : []);
         }
       } catch {
         // ignore load errors
       }
     };
-    loadAirfields();
+    loadAirfieldContext();
     return () => {
       cancelled = true;
     };
@@ -1397,10 +1423,14 @@ const InnhoppDetailPage = () => {
               >
                 <option value="">Select airfield</option>
                 <option value="__new__">Create new airfield…</option>
-                {airfields.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} {a.elevation ? `(${a.elevation} m)` : ''}
-                  </option>
+                {groupedTakeoffAirfields.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map((option) => (
+                      <option key={option.key} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>

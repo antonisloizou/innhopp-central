@@ -447,7 +447,9 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to encode land owners")
 		return
 	}
+	ownersJSONText := string(ownersJSON)
 	var imageFilesJSON []byte
+	var imageFilesJSONText *string
 	if p.ImageFiles != nil {
 		imageFiles := normalizeImageFiles(*p.ImageFiles)
 		encoded, err := encodeImageFiles(imageFiles)
@@ -456,6 +458,8 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		imageFilesJSON = encoded
+		text := string(imageFilesJSON)
+		imageFilesJSONText = &text
 	}
 
 	reason := strings.TrimSpace(p.ReasonForChoice)
@@ -475,7 +479,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
              primary_landing_area_name = $13, primary_landing_area_description = $14, primary_landing_area_size = $15, primary_landing_area_obstacles = $16,
              secondary_landing_area_name = $17, secondary_landing_area_description = $18, secondary_landing_area_size = $19, secondary_landing_area_obstacles = $20,
              risk_assessment = $21, safety_precautions = $22, jumprun = $23, hospital = $24, rescue_boat = $25, minimum_requirements = $26,
-             image_files = COALESCE($27, image_files), land_owners = $28, land_owner_permission = $29
+             image_files = COALESCE($27::jsonb, image_files), land_owners = $28::jsonb, land_owner_permission = $29
          WHERE id = $30
          RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                    reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
@@ -487,7 +491,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		reason, adjust, notam, distanceByAir, distanceByRoad,
 		primaryLanding.Name, primaryLanding.Description, primaryLanding.Size, primaryLanding.Obstacles,
 		secondaryLanding.Name, secondaryLanding.Description, secondaryLanding.Size, secondaryLanding.Obstacles,
-		risk, safety, jumprun, hospital, p.RescueBoat, minimum, imageFilesJSON, ownersJSON, p.LandOwnerPermission, innhoppID,
+		risk, safety, jumprun, hospital, p.RescueBoat, minimum, imageFilesJSONText, ownersJSONText, p.LandOwnerPermission, innhoppID,
 	)
 
 	innhopp, scanErr := scanInnhopp(row)

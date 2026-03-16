@@ -147,8 +147,6 @@ const formatDateTime24h = (value?: string | null) => {
   });
 };
 
-const normalizeName = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim().toLowerCase();
-
 const emptyLandingArea = (): LandingAreaForm => ({
   name: '',
   description: '',
@@ -401,21 +399,79 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       return (a.name || '').localeCompare(b.name || '');
     });
   }, [meals]);
+  const buildLocationOptionValue = useCallback(
+    (type: 'Innhopp' | 'Airfield' | 'Accommodation' | 'Other', id: number | string) => `${type}::${id}`,
+    []
+  );
+  const transportLocationGroups = useMemo(() => {
+    const groups: { label: string; options: { value: string; label: string; coordinates?: string | null }[] }[] = [];
+    const innhoppOptions =
+      Array.isArray(eventData?.innhopps) && eventData?.innhopps.length
+        ? eventData?.innhopps.map((i) => ({
+            value: buildLocationOptionValue('Innhopp', i.id),
+            label: `${i.sequence ? `#${i.sequence} ` : ''}${i.name || 'Untitled innhopp'}`.trim(),
+            coordinates: i.coordinates || null
+          }))
+        : [];
+    if (innhoppOptions.length) {
+      groups.push({ label: 'Innhopps', options: innhoppOptions });
+    }
+
+    const eventAirfields = Array.isArray(eventData?.airfield_ids)
+      ? airfields.filter((a) => eventData?.airfield_ids.includes(a.id))
+      : [];
+    if (eventAirfields.length) {
+      groups.push({
+        label: 'Airfields',
+        options: eventAirfields.map((a) => ({
+          value: buildLocationOptionValue('Airfield', a.id),
+          label: a.name || `Airfield #${a.id}`,
+          coordinates: a.coordinates || null
+        }))
+      });
+    }
+
+    if (accommodations.length) {
+      groups.push({
+        label: 'Accommodations',
+        options: accommodations.map((acc) => ({
+          value: buildLocationOptionValue('Accommodation', acc.id || acc.name || ''),
+          label: acc.name || `Accommodation #${acc.id}`,
+          coordinates: acc.coordinates || null
+        }))
+      });
+    }
+
+    if (others.length) {
+      groups.push({
+        label: 'Other',
+        options: others.map((o) => ({
+          value: buildLocationOptionValue('Other', o.id),
+          label: o.name || `Other #${o.id}`,
+          coordinates: o.coordinates || null
+        }))
+      });
+    }
+
+    return groups;
+  }, [accommodations, airfields, buildLocationOptionValue, eventData?.airfield_ids, eventData?.innhopps, others]);
   const locationCoordinates = useCallback(
     (name: string | null | undefined) => {
-      const target = normalizeName(name || '');
-      if (!target) return null;
-      const inn = eventData?.innhopps?.find((i) => normalizeName(i.name) === target);
-      if (inn?.coordinates) return inn.coordinates;
-      const acc = accommodations.find((a) => normalizeName(a.name || '') === target);
-      if (acc?.coordinates) return acc.coordinates;
-      const other = others.find((o) => normalizeName(o.name || '') === target);
-      if (other?.coordinates) return other.coordinates;
-      const af = airfields.find((a) => normalizeName(a.name || '') === target);
-      if (af?.coordinates) return af.coordinates;
+      if (!name) return null;
+      for (const group of transportLocationGroups) {
+        const match = group.options.find((option) => option.label === name);
+        if (match?.coordinates) return match.coordinates;
+      }
       return null;
     },
-    [accommodations, airfields, eventData?.innhopps, others]
+    [transportLocationGroups]
+  );
+  const findTransportLocationValue = useCallback(
+    (label: string) =>
+      transportLocationGroups
+        .flatMap((group) => group.options)
+        .find((option) => option.label === label)?.value || '',
+    [transportLocationGroups]
   );
   type SectionKey =
     | 'details'
@@ -617,55 +673,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       cancelled = true;
     };
   }, []);
-
-  const transportLocationGroups = useMemo(() => {
-    const groups: { label: string; options: { value: string; label: string }[] }[] = [];
-    const innhoppOptions =
-      Array.isArray(eventData?.innhopps) && eventData?.innhopps.length
-        ? eventData?.innhopps.map((i) => ({
-            value: `${i.sequence ? `#${i.sequence} ` : ''}${i.name || 'Untitled innhopp'}`.trim(),
-            label: `${i.sequence ? `#${i.sequence} ` : ''}${i.name || 'Untitled innhopp'}`.trim()
-          }))
-        : [];
-    if (innhoppOptions.length) {
-      groups.push({ label: 'Innhopps', options: innhoppOptions });
-    }
-
-    const eventAirfields = Array.isArray(eventData?.airfield_ids)
-      ? airfields.filter((a) => eventData?.airfield_ids.includes(a.id))
-      : [];
-    if (eventAirfields.length) {
-      groups.push({
-        label: 'Airfields',
-        options: eventAirfields.map((a) => ({
-          value: a.name || `Airfield #${a.id}`,
-          label: a.name || `Airfield #${a.id}`
-        }))
-      });
-    }
-
-    if (accommodations.length) {
-      groups.push({
-        label: 'Accommodations',
-        options: accommodations.map((acc) => ({
-          value: acc.name || `Accommodation #${acc.id}`,
-          label: acc.name || `Accommodation #${acc.id}`
-        }))
-      });
-    }
-
-    if (others.length) {
-      groups.push({
-        label: 'Other',
-        options: others.map((o) => ({
-          value: o.name || `Other #${o.id}`,
-          label: o.name || `Other #${o.id}`
-        }))
-      });
-    }
-
-    return groups;
-  }, [accommodations, airfields, eventData?.airfield_ids, eventData?.innhopps, others]);
 
   const handleCreateOtherInline = async () => {
     if (!eventId) return;
@@ -2934,8 +2941,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Pickup location</span>
                   <select
-                    value={transportForm.pickup_location}
-                    onChange={(e) => setTransportForm((prev) => ({ ...prev, pickup_location: e.target.value }))}
+                    value={findTransportLocationValue(transportForm.pickup_location)}
+                    onChange={(e) => {
+                      const selected = transportLocationGroups
+                        .flatMap((group) => group.options)
+                        .find((opt) => opt.value === e.target.value);
+                      setTransportForm((prev) => ({
+                        ...prev,
+                        pickup_location: selected?.label || ''
+                      }));
+                    }}
                     required
                   >
                     <option value="">Select pickup</option>
@@ -2956,8 +2971,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Destination</span>
                   <select
-                    value={transportForm.destination}
-                    onChange={(e) => setTransportForm((prev) => ({ ...prev, destination: e.target.value }))}
+                    value={findTransportLocationValue(transportForm.destination)}
+                    onChange={(e) => {
+                      const selected = transportLocationGroups
+                        .flatMap((group) => group.options)
+                        .find((opt) => opt.value === e.target.value);
+                      setTransportForm((prev) => ({
+                        ...prev,
+                        destination: selected?.label || ''
+                      }));
+                    }}
                     required
                   >
                     <option value="">Select destination</option>
@@ -3140,8 +3163,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Start location</span>
                   <select
-                    value={groundCrewForm.pickup_location}
-                    onChange={(e) => setGroundCrewForm((prev) => ({ ...prev, pickup_location: e.target.value }))}
+                    value={findTransportLocationValue(groundCrewForm.pickup_location)}
+                    onChange={(e) => {
+                      const selected = transportLocationGroups
+                        .flatMap((group) => group.options)
+                        .find((opt) => opt.value === e.target.value);
+                      setGroundCrewForm((prev) => ({
+                        ...prev,
+                        pickup_location: selected?.label || ''
+                      }));
+                    }}
                     required
                   >
                     <option value="">Select start location</option>
@@ -3162,8 +3193,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Destination</span>
                   <select
-                    value={groundCrewForm.destination}
-                    onChange={(e) => setGroundCrewForm((prev) => ({ ...prev, destination: e.target.value }))}
+                    value={findTransportLocationValue(groundCrewForm.destination)}
+                    onChange={(e) => {
+                      const selected = transportLocationGroups
+                        .flatMap((group) => group.options)
+                        .find((opt) => opt.value === e.target.value);
+                      setGroundCrewForm((prev) => ({
+                        ...prev,
+                        destination: selected?.label || ''
+                      }));
+                    }}
                     required
                   >
                     <option value="">Select destination</option>

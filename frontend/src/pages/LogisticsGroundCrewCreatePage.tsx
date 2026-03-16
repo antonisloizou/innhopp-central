@@ -240,11 +240,11 @@ const LogisticsGroundCrewCreatePage = () => {
       ? `${form.pickup_location} → ${form.destination}`
       : '';
 
-  const buildOptionKey = (type: LocationOption['type'], label: string) => `${type}::${label}`;
+  const buildOptionKey = (type: LocationOption['type'], id: number | string, label: string) =>
+    `${type}::${id || label}`;
 
   const locationGroups = useMemo(() => {
     const groups: { label: string; options: LocationOption[] }[] = [];
-    const seen = new Set<string>();
     const event = events.find((e) => e.id === Number(selectedEventId));
 
     const innhoppOptions: LocationOption[] =
@@ -252,6 +252,7 @@ const LogisticsGroundCrewCreatePage = () => {
         ? event.innhopps.map((inn) => ({
             valueKey: buildOptionKey(
               'Innhopp',
+              inn.id,
               `${inn.sequence ? `#${inn.sequence} ` : ''}${inn.name || 'Untitled innhopp'}`.trim()
             ),
             label: `${inn.sequence ? `#${inn.sequence} ` : ''}${inn.name || 'Untitled innhopp'}`.trim(),
@@ -259,7 +260,6 @@ const LogisticsGroundCrewCreatePage = () => {
           }))
         : [];
     if (innhoppOptions.length) {
-      innhoppOptions.forEach((o) => seen.add(o.label));
       groups.push({ label: 'Innhopps', options: innhoppOptions });
     }
 
@@ -268,11 +268,10 @@ const LogisticsGroundCrewCreatePage = () => {
         ? airfields.filter((af) => event.airfield_ids.includes(af.id))
         : [];
     if (eventAirfields.length) {
-      eventAirfields.forEach((af) => seen.add(af.name || `Airfield #${af.id}`));
       groups.push({
         label: 'Airfields',
         options: eventAirfields.map<LocationOption>((af) => ({
-          valueKey: buildOptionKey('Airfield', af.name || `Airfield #${af.id}`),
+          valueKey: buildOptionKey('Airfield', af.id, af.name || `Airfield #${af.id}`),
           label: af.name || `Airfield #${af.id}`,
           type: 'Airfield'
         }))
@@ -280,11 +279,10 @@ const LogisticsGroundCrewCreatePage = () => {
     }
 
     if (accommodations.length) {
-      accommodations.forEach((acc) => seen.add(acc.name || `Accommodation #${acc.id}`));
       groups.push({
         label: 'Accommodations',
         options: accommodations.map<LocationOption>((acc) => ({
-          valueKey: buildOptionKey('Accommodation', acc.name || `Accommodation #${acc.id}`),
+          valueKey: buildOptionKey('Accommodation', acc.id, acc.name || `Accommodation #${acc.id}`),
           label: acc.name || `Accommodation #${acc.id}`,
           type: 'Accommodation'
         }))
@@ -292,11 +290,10 @@ const LogisticsGroundCrewCreatePage = () => {
     }
 
     if (others.length) {
-      others.forEach((o) => seen.add(o.name || `Other #${o.id}`));
       groups.push({
         label: 'Other',
         options: others.map<LocationOption>((o) => ({
-          valueKey: buildOptionKey('Other', o.name || `Other #${o.id}`),
+          valueKey: buildOptionKey('Other', o.id, o.name || `Other #${o.id}`),
           label: o.name || `Other #${o.id}`,
           type: 'Other'
         }))
@@ -304,11 +301,10 @@ const LogisticsGroundCrewCreatePage = () => {
     }
 
     if (meals.length) {
-      meals.forEach((meal) => seen.add(meal.name || `Meal #${meal.id}`));
       groups.push({
         label: 'Meals',
         options: meals.map<LocationOption>((meal) => ({
-          valueKey: buildOptionKey('Meal', meal.name || `Meal #${meal.id}`),
+          valueKey: buildOptionKey('Meal', meal.id, meal.name || `Meal #${meal.id}`),
           label: meal.name || `Meal #${meal.id}`,
           type: 'Meal'
         }))

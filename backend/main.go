@@ -29,7 +29,17 @@ func main() {
 		databaseURL = "postgres://postgres:postgres@localhost:5432/innhopp?sslmode=disable"
 	}
 
-	pool, err := pgxpool.New(ctx, databaseURL)
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		log.Fatalf("failed to parse database config: %v", err)
+	}
+	poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "SET TIME ZONE 'UTC'")
+		return err
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		log.Fatalf("failed to create connection pool: %v", err)
 	}
@@ -39,6 +49,9 @@ func main() {
 		log.Fatalf("failed to ensure schema: %v", err)
 	}
 	backfillCtx, cancelBackfill := context.WithTimeout(ctx, 2*time.Minute)
+	if err := logistics.BackfillLegacyReferenceIDs(backfillCtx, pool); err != nil {
+		log.Printf("legacy id backfill failed: %v", err)
+	}
 	if err := logistics.BackfillMissingRouteDurations(backfillCtx, pool); err != nil {
 		log.Printf("route duration backfill failed: %v", err)
 	}
@@ -288,7 +301,11 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`CREATE TABLE IF NOT EXISTS logistics_transports (
             id SERIAL PRIMARY KEY,
             pickup_location TEXT NOT NULL,
+            pickup_location_type TEXT,
+            pickup_location_id INTEGER,
             destination TEXT NOT NULL,
+            destination_type TEXT,
+            destination_id INTEGER,
             passenger_count INTEGER NOT NULL,
             duration_minutes INTEGER,
             scheduled_at TIMESTAMPTZ,
@@ -301,10 +318,18 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS duration_minutes INTEGER`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS pickup_location_type TEXT`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS pickup_location_id INTEGER`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS destination_type TEXT`,
+		`ALTER TABLE logistics_transports ADD COLUMN IF NOT EXISTS destination_id INTEGER`,
 		`CREATE TABLE IF NOT EXISTS logistics_ground_crews (
             id SERIAL PRIMARY KEY,
             pickup_location TEXT NOT NULL,
+            pickup_location_type TEXT,
+            pickup_location_id INTEGER,
             destination TEXT NOT NULL,
+            destination_type TEXT,
+            destination_id INTEGER,
             passenger_count INTEGER NOT NULL,
             duration_minutes INTEGER,
             scheduled_at TIMESTAMPTZ,
@@ -317,6 +342,10 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
 		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS duration_minutes INTEGER`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS pickup_location_type TEXT`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS pickup_location_id INTEGER`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS destination_type TEXT`,
+		`ALTER TABLE logistics_ground_crews ADD COLUMN IF NOT EXISTS destination_id INTEGER`,
 		`CREATE TABLE IF NOT EXISTS logistics_other (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
@@ -338,6 +367,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             location TEXT,
+            location_type TEXT,
+            location_id INTEGER,
             scheduled_at TIMESTAMPTZ,
             notes TEXT,
             event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
@@ -347,6 +378,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS season_id INTEGER REFERENCES seasons(id) ON DELETE SET NULL`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS location TEXT`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS location_type TEXT`,
+		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS location_id INTEGER`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMPTZ`,
 		`ALTER TABLE logistics_meals ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`CREATE TABLE IF NOT EXISTS logistics_event_vehicles (

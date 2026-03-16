@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback, DragEvent, MouseEvent } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
@@ -166,8 +166,11 @@ const minutesSinceMidnight = (iso?: string | null) => {
 const buildDayIso = (day: Date, minutes: number) => {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
-  const d = new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hours, mins, 0));
-  return d.toISOString();
+  const localDay =
+    toEventLocalPickerDate(day.toISOString()) ||
+    new Date(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 0, 0, 0, 0);
+  localDay.setHours(hours, mins, 0, 0);
+  return fromEventLocalPickerDate(localDay);
 };
 
 const EventSchedulePage = () => {
@@ -194,7 +197,19 @@ const EventSchedulePage = () => {
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const dragGhostTimeRef = useRef<HTMLElement | null>(null);
-  const dragShimRef = useRef<HTMLElement | null>(null);
+  const pointerDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    entry: Entry;
+    dayKey: string;
+    rowEl: HTMLElement | null;
+    hint: string | null;
+    ghostStartX: number;
+    ghostStartY: number;
+    dragStarted: boolean;
+  } | null>(null);
+  const suppressRowClickRef = useRef(false);
   const expandAllDaysRef = useRef(false);
   type AnchorRect = {
     top: number;
@@ -256,26 +271,68 @@ const EventSchedulePage = () => {
     };
   }, [previewEntry, timePicker]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
-  const normalizeName = (val: string | null | undefined) => cleanLocation(val || '').toLowerCase();
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
-    const rect = rowNode.getBoundingClientRect();
+    const sourceRow = (rowNode.querySelector('.schedule-entry') as HTMLElement | null) || rowNode;
+    const rect = sourceRow.getBoundingClientRect();
+    const sourceRowStyles = window.getComputedStyle(sourceRow);
+    const currentTheme =
+      typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+    const oppositeTheme = currentTheme === 'light' ? 'dark' : 'light';
+    const ghostWidth = Math.max(rect.width + 24, sourceRow.scrollWidth + 24);
+    const ghostHeight = Math.max(rect.height + 8, sourceRow.scrollHeight + 8);
     const ghost = document.createElement('div');
     ghost.style.position = 'fixed';
-    ghost.style.left = `${(startX ?? 0) + 12}px`;
-    ghost.style.top = `${(startY ?? 0) + 12}px`;
-    ghost.style.padding = '0.35rem 0.5rem';
-    ghost.style.border = '2px dashed #3b82f6';
-    ghost.style.borderRadius = '14px';
-    ghost.style.background = '#fff';
-    ghost.style.boxShadow = '0 10px 25px rgba(0,0,0,0.12)';
+    ghost.style.padding = '0';
+    ghost.style.border = oppositeTheme === 'light' ? '1px solid rgba(15,23,42,0.12)' : '1px solid rgba(255,255,255,0.16)';
+    ghost.style.borderRadius = '12px';
+    ghost.style.background = oppositeTheme === 'light' ? 'rgba(248,250,252,0.96)' : 'rgba(15,23,42,0.92)';
+    ghost.style.color = oppositeTheme === 'light' ? '#0f172a' : '#e2e8f0';
+    ghost.style.boxShadow = '0 16px 36px rgba(0,0,0,0.22)';
     ghost.style.pointerEvents = 'none';
     ghost.style.zIndex = '9999';
-    ghost.style.width = `${rect.width}px`;
+    ghost.style.width = `${ghostWidth}px`;
+    ghost.style.minHeight = `${ghostHeight}px`;
     ghost.style.boxSizing = 'border-box';
+    ghost.style.overflow = 'visible';
+    ghost.style.left = `${(startX ?? 0) - ghostWidth}px`;
+    ghost.style.top = `${startY ?? 0}px`;
 
-    const cloned = rowNode.cloneNode(true) as HTMLElement;
+    const cloned = sourceRow.cloneNode(true) as HTMLElement;
     cloned.style.pointerEvents = 'none';
-    cloned.style.width = '100%';
+    cloned.style.width = `${ghostWidth - 24}px`;
+    cloned.style.minHeight = `${ghostHeight - 8}px`;
+    cloned.style.margin = '0';
+    cloned.style.opacity = '1';
+    cloned.style.overflow = 'visible';
+    cloned.style.padding = '0.35rem 0.75rem';
+    cloned.style.boxSizing = 'border-box';
+    cloned.style.background = 'transparent';
+    cloned.style.color = 'inherit';
+    cloned.style.display = sourceRowStyles.display || 'grid';
+    cloned.style.alignItems = 'center';
+    cloned.style.gridTemplateColumns = sourceRowStyles.gridTemplateColumns || '5.5rem minmax(0, 1fr)';
+    cloned.style.gap = sourceRowStyles.gap || '0.5rem';
+    cloned.style.minWidth = '0';
+    cloned.querySelectorAll<HTMLElement>('.card-link').forEach((el) => {
+      el.style.margin = '0';
+      el.style.padding = '0';
+      el.style.width = '100%';
+      el.style.minWidth = '0';
+    });
+    cloned.querySelectorAll<HTMLElement>('.schedule-entry-content').forEach((el) => {
+      el.style.width = '100%';
+      el.style.minWidth = '0';
+    });
+    const timeBadge = cloned.querySelector<HTMLElement>('.schedule-time');
+    if (timeBadge) {
+      timeBadge.style.justifySelf = 'start';
+      timeBadge.style.textAlign = 'left';
+      timeBadge.style.width = 'auto';
+      timeBadge.style.minWidth = '4.5rem';
+    }
+    cloned.querySelectorAll<HTMLElement>('.badge').forEach((el) => {
+      el.style.color = '';
+    });
     const timeEl = cloned.querySelector('[data-ghost-time="time"]') as HTMLElement | null;
     if (timeEl) {
       timeEl.textContent = timeLabel && timeLabel !== 'Unscheduled' ? timeLabel : '';
@@ -296,20 +353,19 @@ const EventSchedulePage = () => {
       span.textContent = label && label !== 'Unscheduled' ? label : '';
     }
     if (pos) {
-      ghost.style.left = `${pos.x + 12}px`;
-      ghost.style.top = `${pos.y + 12}px`;
+      const width = ghost.getBoundingClientRect().width;
+      ghost.style.left = `${pos.x - width}px`;
+      ghost.style.top = `${pos.y}px`;
     }
   };
 
   const clearDragGhost = () => {
     if (dragGhostRef.current) {
-      document.body.removeChild(dragGhostRef.current);
+      if (document.body.contains(dragGhostRef.current)) {
+        document.body.removeChild(dragGhostRef.current);
+      }
       dragGhostRef.current = null;
       dragGhostTimeRef.current = null;
-    }
-    if (dragShimRef.current) {
-      dragShimRef.current.remove();
-      dragShimRef.current = null;
     }
   };
   const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>({
@@ -322,15 +378,16 @@ const EventSchedulePage = () => {
   });
   const locationCoordinates = useCallback(
     (name: string | null | undefined) => {
-      const target = normalizeName(name);
-      if (!target) return null;
-      const inn = eventData?.innhopps?.find((i) => normalizeName(i.name) === target);
+      if (!name) return null;
+      const innLabel = (i: Innhopp) =>
+        `${i.sequence ? `#${i.sequence} ` : ''}${i.name || 'Untitled innhopp'}`.trim();
+      const inn = eventData?.innhopps?.find((i) => innLabel(i) === name);
       if (inn?.coordinates) return inn.coordinates;
-      const acc = accommodations.find((a) => normalizeName(a.name) === target);
+      const acc = accommodations.find((a) => a.name === name);
       if (acc?.coordinates) return acc.coordinates;
-      const other = others.find((o) => normalizeName(o.name) === target);
+      const other = others.find((o) => o.name === name);
       if (other?.coordinates) return other.coordinates;
-      const af = airfields.find((a) => normalizeName(a.name) === target);
+      const af = airfields.find((a) => a.name === name);
       if (af?.coordinates) return af.coordinates;
       return null;
     },
@@ -497,6 +554,18 @@ const EventSchedulePage = () => {
 
     return buckets;
   }, [eventData, transports, groundCrews, accommodations, others, meals]);
+
+  const resetPointerDrag = useCallback(() => {
+    pointerDragRef.current = null;
+    clearDragGhost();
+    setDragging(null);
+    setDragOverDay(null);
+    setDragHoverIndex(null);
+    if (typeof document !== 'undefined') {
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    }
+  }, []);
 
   const handleDelete = async () => {
     if (!eventId) return;
@@ -727,6 +796,299 @@ const EventSchedulePage = () => {
     return minutes;
   };
   const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'];
+  const deriveType = (id: string): EntryType | null => {
+    if (id.startsWith('i-')) return 'Innhopp';
+    if (id.startsWith('t-')) return 'Transport';
+    if (id.startsWith('gc-')) return 'Ground Crew';
+    if (id.startsWith('acc-')) return 'Accommodation';
+    if (id.startsWith('o-')) return 'Other';
+    if (id.startsWith('meal-')) return 'Meal';
+    return null;
+  };
+
+  const buildOrderedEntriesForDay = useCallback(
+    (day: DayBucket): Entry[] => {
+      const entries: ScheduleEntry[] = [];
+      day.innhopps.forEach((i) => {
+        const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
+        const elevationDiff =
+          typeof i.elevation === 'number' && typeof takeoff?.elevation === 'number' ? i.elevation - takeoff.elevation : null;
+        entries.push({
+          id: `i-${i.id}`,
+          hourKey: formatTimeLabel(i.scheduled_at),
+          sortValue: (() => {
+            const parts = parseTimeParts(i.scheduled_at);
+            return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+          })(),
+          title: `Innhopp #${i.sequence}: ${i.name}`,
+          subtitle: '',
+          type: 'Innhopp',
+          to: eventData ? `/events/${eventData.id}/innhopps/${i.id}` : undefined,
+          ready: isInnhoppReady(i),
+          missingCoordinates: !hasText(i.coordinates),
+          description: i.reason_for_choice || i.primary_landing_area?.description || null,
+          notes: i.notes || undefined,
+          innhoppReason: i.reason_for_choice || null,
+          innhoppElevation: i.elevation ?? null,
+          innhoppCoordinates: i.coordinates || null,
+          innhoppTakeoffName: takeoff?.name || null,
+          innhoppElevationDiff: elevationDiff,
+          innhoppPrimaryName: i.primary_landing_area?.name || null,
+          innhoppPrimarySize: i.primary_landing_area?.size || null,
+          innhoppSecondaryName: i.secondary_landing_area?.name || null,
+          innhoppSecondarySize: i.secondary_landing_area?.size || null,
+          innhoppRisk: i.risk_assessment || null,
+          innhoppMinimumRequirements: i.minimum_requirements || null,
+          innhoppRescueBoat: i.rescue_boat ?? null,
+          innhoppLandOwnerPermission: i.land_owner_permission ?? null,
+          scheduledAt: i.scheduled_at
+        });
+      });
+      day.transports.forEach((t) => {
+        const pickupCoords = locationCoordinates(t.pickup_location);
+        const destCoords = locationCoordinates(t.destination);
+        const hasPassengers = Number.isFinite(t.passenger_count) && t.passenger_count >= 0;
+        const hasVehicles = Array.isArray(t.vehicles) && t.vehicles.length > 0;
+        const complete =
+          hasText(t.pickup_location) &&
+          hasText(t.destination) &&
+          hasText(t.scheduled_at) &&
+          hasPassengers &&
+          hasVehicles &&
+          hasText(pickupCoords) &&
+          hasText(destCoords);
+        const vehicles = Array.isArray(t.vehicles)
+          ? t.vehicles.map((v) => ({
+              name: v.name,
+              driver: v.driver || '',
+              passenger_capacity: v.passenger_capacity
+            }))
+          : [];
+        const routeDurationLabel = formatDurationMinutes(t.duration_minutes);
+        const routeVehiclesLabel = formatVehiclesLabel(vehicles);
+        entries.push({
+          id: `t-${t.id}`,
+          hourKey: formatTimeLabel(t.scheduled_at),
+          sortValue: (() => {
+            const parts = parseTimeParts(t.scheduled_at);
+            return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+          })(),
+          title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
+          subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
+          type: 'Transport',
+          to: `/logistics/${t.id}`,
+          transportComplete: complete,
+          missingCoordinates: !pickupCoords || !destCoords,
+          transportRouteOrigin: pickupCoords || null,
+          transportRouteDestination: destCoords || null,
+          routeDurationLabel,
+          routeVehiclesLabel,
+          notes: t.notes || null,
+          vehicles,
+          scheduledAt: t.scheduled_at || undefined
+        });
+      });
+      day.groundCrews.forEach((g) => {
+        const pickupCoords = locationCoordinates(g.pickup_location);
+        const destCoords = locationCoordinates(g.destination);
+        const hasPassengers = Number.isFinite(g.passenger_count) && g.passenger_count >= 0;
+        const hasVehicles = Array.isArray(g.vehicles) && g.vehicles.length > 0;
+        const complete =
+          hasText(g.pickup_location) &&
+          hasText(g.destination) &&
+          hasText(g.scheduled_at) &&
+          hasPassengers &&
+          hasVehicles &&
+          hasText(pickupCoords) &&
+          hasText(destCoords);
+        const vehicles = Array.isArray(g.vehicles)
+          ? g.vehicles.map((v) => ({
+              name: v.name,
+              driver: v.driver || '',
+              passenger_capacity: v.passenger_capacity
+            }))
+          : [];
+        const routeDurationLabel = formatDurationMinutes(g.duration_minutes);
+        const routeVehiclesLabel = formatVehiclesLabel(vehicles);
+        entries.push({
+          id: `gc-${g.id}`,
+          hourKey: formatTimeLabel(g.scheduled_at),
+          sortValue: (() => {
+            const parts = parseTimeParts(g.scheduled_at);
+            return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+          })(),
+          title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
+          subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
+          type: 'Ground Crew',
+          to: `/logistics/ground-crew/${g.id}`,
+          transportComplete: complete,
+          missingCoordinates: !pickupCoords || !destCoords,
+          transportRouteOrigin: pickupCoords || null,
+          transportRouteDestination: destCoords || null,
+          routeDurationLabel,
+          routeVehiclesLabel,
+          notes: g.notes || null,
+          vehicles,
+          scheduledAt: g.scheduled_at || undefined
+        });
+      });
+      day.others.forEach((o) => {
+        entries.push({
+          id: `o-${o.id}`,
+          hourKey: formatTimeLabel(o.scheduled_at || undefined),
+          sortValue: (() => {
+            const parts = parseTimeParts(o.scheduled_at || undefined);
+            return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+          })(),
+          title: o.name || 'Other logistics',
+          subtitle: '',
+          type: 'Other',
+          to: `/logistics/others/${o.id}`,
+          missingCoordinates: !hasText(o.coordinates),
+          coordinates: o.coordinates || null,
+          description: o.description || null,
+          notes: o.notes || null,
+          otherComplete: hasText(o.name) && hasText(o.coordinates) && hasText(o.scheduled_at),
+          scheduledAt: o.scheduled_at || undefined
+        });
+      });
+      day.meals.forEach((m) => {
+        entries.push({
+          id: `meal-${m.id}`,
+          hourKey: formatTimeLabel(m.scheduled_at || undefined),
+          sortValue: (() => {
+            const parts = parseTimeParts(m.scheduled_at || undefined);
+            return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+          })(),
+          title: m.name,
+          subtitle: '',
+          type: 'Meal',
+          to: `/logistics/meals/${m.id}`,
+          mealComplete: hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at),
+          location: m.location || null,
+          notes: m.notes || null,
+          scheduledAt: m.scheduled_at || undefined
+        });
+      });
+      day.accommodations.forEach((a) => {
+        if (a.check_in_at && extractDateKey(a.check_in_at) === day.key) {
+          entries.push({
+            id: `acc-in-${a.id}`,
+            hourKey: formatTimeLabel(a.check_in_at),
+            sortValue: (() => {
+              const parts = parseTimeParts(a.check_in_at);
+              return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+            })(),
+            title: `Check-in: ${a.name}`,
+            subtitle: '',
+            type: 'Accommodation',
+            booked: !!a.booked,
+            coordinates: a.coordinates || null,
+            to: `/events/${eventId}/accommodations/${a.id}`,
+            missingCoordinates: !hasText(a.coordinates),
+            notes: a.notes || null,
+            scheduledAt: a.check_in_at
+          });
+        }
+        if (a.check_out_at && extractDateKey(a.check_out_at) === day.key) {
+          entries.push({
+            id: `acc-out-${a.id}`,
+            hourKey: formatTimeLabel(a.check_out_at),
+            sortValue: (() => {
+              const parts = parseTimeParts(a.check_out_at);
+              return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
+            })(),
+            title: `Check-out: ${a.name}`,
+            subtitle: '',
+            type: 'Accommodation',
+            booked: !!a.booked,
+            coordinates: a.coordinates || null,
+            to: `/events/${eventId}/accommodations/${a.id}`,
+            missingCoordinates: !hasText(a.coordinates),
+            notes: a.notes || null,
+            scheduledAt: a.check_out_at
+          });
+        }
+        if (!a.check_in_at && !a.check_out_at) {
+          entries.push({
+            id: `acc-${a.id}`,
+            hourKey: 'Unscheduled',
+            sortValue: Number.POSITIVE_INFINITY,
+            title: `${a.name}`,
+            subtitle: '',
+            type: 'Accommodation',
+            booked: !!a.booked,
+            coordinates: a.coordinates || null,
+            to: `/events/${eventId}/accommodations/${a.id}`,
+            missingCoordinates: !hasText(a.coordinates),
+            scheduledAt: null
+          });
+        }
+      });
+
+      return entries
+        .filter((entry) => typeFilters[entry.type])
+        .sort((a, b) => {
+          if (a.sortValue === b.sortValue) return a.title.localeCompare(b.title);
+          return a.sortValue - b.sortValue;
+        });
+    },
+    [airfields, eventData, eventId, locationCoordinates, typeFilters]
+  );
+
+  const resolveDropTarget = useCallback(
+    (clientX: number, clientY: number) => {
+      if (typeof document === 'undefined') return null;
+      const el = document.elementFromPoint(clientX, clientY);
+      const dayEl = el?.closest('[data-schedule-day-key]') as HTMLElement | null;
+      if (!dayEl) return null;
+      const dayKey = dayEl.dataset.scheduleDayKey;
+      if (!dayKey) return null;
+      const day = dayBuckets.find((candidate) => candidate.key === dayKey);
+      if (!day) return null;
+      const orderedEntries = buildOrderedEntriesForDay(day);
+      if (orderedEntries.length === 0) return { dayKey, index: 0 };
+
+      const rowEls = Array.from(dayEl.querySelectorAll<HTMLElement>('[data-schedule-row-index]'));
+      if (rowEls.length === 0) return { dayKey, index: 0 };
+      for (const rowEl of rowEls) {
+        const index = Number(rowEl.dataset.scheduleRowIndex);
+        if (!Number.isFinite(index)) continue;
+        const rect = rowEl.getBoundingClientRect();
+        if (clientY < rect.top + rect.height / 2) {
+          return { dayKey, index };
+        }
+      }
+      return { dayKey, index: orderedEntries.length };
+    },
+    [buildOrderedEntriesForDay, dayBuckets]
+  );
+
+  const updateDragPreview = useCallback(
+    (target: { dayKey: string; index: number } | null, pos: { x: number; y: number }) => {
+      if (!dragging || !target) {
+        setDragOverDay(null);
+        setDragHoverIndex(null);
+        updateDragGhost(null, pos);
+        return;
+      }
+      const day = dayBuckets.find((candidate) => candidate.key === target.dayKey);
+      if (!day) {
+        setDragOverDay(null);
+        setDragHoverIndex(null);
+        updateDragGhost(null, pos);
+        return;
+      }
+      const orderedEntries = buildOrderedEntriesForDay(day);
+      const proposed = computeProposedMinutes(target.index, orderedEntries, day.key, dragging.id);
+      const newTime =
+        proposed != null && proposed !== Number.POSITIVE_INFINITY ? formatTimeLabel(buildDayIso(day.date, proposed)) : null;
+      setDragOverDay(target.dayKey);
+      setDragHoverIndex(target.index);
+      updateDragGhost(newTime, pos);
+    },
+    [buildOrderedEntriesForDay, dayBuckets, dragging]
+  );
 
   const buildPickerDate = (entry?: ScheduleEntry | null, day?: DayBucket) => {
     const base =
@@ -877,27 +1239,46 @@ const EventSchedulePage = () => {
           const full = await getInnhopp(numericId);
           const payload = {
             sequence: full.sequence,
-            name: full.name,
-            coordinates: full.coordinates || undefined,
+            name: full.name.trim(),
+            coordinates: full.coordinates?.trim() || undefined,
             elevation: full.elevation ?? undefined,
             takeoff_airfield_id: full.takeoff_airfield_id ?? undefined,
             scheduled_at: newIso || undefined,
-            notes: full.notes || undefined,
-            reason_for_choice: full.reason_for_choice || undefined,
-            adjust_altimeter_aad: full.adjust_altimeter_aad || undefined,
-            notam: full.notam || undefined,
+            notes: full.notes?.trim() || '',
+            reason_for_choice: full.reason_for_choice?.trim() || undefined,
+            adjust_altimeter_aad: full.adjust_altimeter_aad?.trim() || undefined,
+            notam: full.notam?.trim() || undefined,
             distance_by_air: full.distance_by_air ?? undefined,
             distance_by_road: full.distance_by_road ?? undefined,
-            primary_landing_area: full.primary_landing_area,
-            secondary_landing_area: full.secondary_landing_area,
-            risk_assessment: full.risk_assessment || undefined,
-            safety_precautions: full.safety_precautions || undefined,
-            jumprun: full.jumprun || undefined,
-            hospital: full.hospital || undefined,
+            primary_landing_area: {
+              name: full.primary_landing_area?.name?.trim() || undefined,
+              description: full.primary_landing_area?.description?.trim() || undefined,
+              size: full.primary_landing_area?.size?.trim() || undefined,
+              obstacles: full.primary_landing_area?.obstacles?.trim() || undefined
+            },
+            secondary_landing_area: {
+              name: full.secondary_landing_area?.name?.trim() || undefined,
+              description: full.secondary_landing_area?.description?.trim() || undefined,
+              size: full.secondary_landing_area?.size?.trim() || undefined,
+              obstacles: full.secondary_landing_area?.obstacles?.trim() || undefined
+            },
+            risk_assessment: full.risk_assessment?.trim() || undefined,
+            safety_precautions: full.safety_precautions?.trim() || undefined,
+            jumprun: full.jumprun?.trim() || undefined,
+            hospital: full.hospital?.trim() || undefined,
             rescue_boat: full.rescue_boat ?? undefined,
-            minimum_requirements: full.minimum_requirements || undefined,
-            land_owners: full.land_owners || [],
-            land_owner_permission: full.land_owner_permission ?? undefined
+            minimum_requirements: full.minimum_requirements?.trim() || undefined,
+            land_owners: (full.land_owners || []).map((owner) => ({
+              name: owner.name?.trim() || undefined,
+              telephone: owner.telephone?.trim() || undefined,
+              email: owner.email?.trim() || undefined
+            })),
+            land_owner_permission: full.land_owner_permission ?? undefined,
+            image_files: (full.image_files || []).map((img) => ({
+              name: img.name?.trim() || undefined,
+              mime_type: img.mime_type?.trim() || undefined,
+              data: img.data
+            }))
           };
           await updateInnhopp(numericId, payload);
         } else if (entry.type === 'Transport') {
@@ -979,6 +1360,121 @@ const EventSchedulePage = () => {
     },
     [eventId]
   );
+
+  const commitPointerDrop = useCallback(
+    async (dragInfo: { id: string; dayKey: string }, target: { dayKey: string; index: number } | null) => {
+      if (!target) {
+        resetPointerDrag();
+        return;
+      }
+      const day = dayBuckets.find((candidate) => candidate.key === target.dayKey);
+      if (!day) {
+        resetPointerDrag();
+        return;
+      }
+      const orderedEntries = buildOrderedEntriesForDay(day);
+      const movingIndex = orderedEntries.findIndex((entry) => entry.id === dragInfo.id);
+      const movingType = deriveType(dragInfo.id);
+      if (!movingType) {
+        resetPointerDrag();
+        return;
+      }
+
+      if (movingIndex === -1) {
+        const proposed = computeProposedMinutes(target.index, orderedEntries, day.key, dragInfo.id);
+        const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
+        const movedEntry: ScheduleEntry = {
+          id: dragInfo.id,
+          type: movingType,
+          hourKey: newIso ? formatTimeLabel(newIso) : 'Unscheduled',
+          sortValue: proposed ?? Number.POSITIVE_INFINITY,
+          title: '',
+          scheduledAt: newIso || null
+        };
+        resetPointerDrag();
+        try {
+          await updateScheduledAt({ id: dragInfo.id, type: movingType }, newIso);
+          applyLocalUpdate(movedEntry, newIso);
+          setHighlightId(movedEntry.id);
+        } catch (err) {
+          setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
+        }
+        return;
+      }
+
+      const movingEntry = orderedEntries[movingIndex];
+      const reordered = orderedEntries.filter((entry) => entry.id !== dragInfo.id);
+      const clampedIndex = Math.max(0, Math.min(target.index, reordered.length));
+      reordered.splice(clampedIndex, 0, movingEntry);
+      const proposed = computeProposedMinutes(clampedIndex, reordered, day.key, dragInfo.id);
+      const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
+
+      resetPointerDrag();
+      try {
+        await updateScheduledAt(movingEntry, newIso);
+        applyLocalUpdate(movingEntry, newIso);
+        setHighlightId(movingEntry.id);
+      } catch (err) {
+        setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
+      }
+    },
+    [applyLocalUpdate, buildOrderedEntriesForDay, dayBuckets, resetPointerDrag, updateScheduledAt]
+  );
+
+  useEffect(() => {
+    const dragThreshold = 8;
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      const active = pointerDragRef.current;
+      if (!active || event.pointerId !== active.pointerId) return;
+      if (!active.dragStarted) {
+        const distance = Math.hypot(event.clientX - active.startX, event.clientY - active.startY);
+        if (distance < dragThreshold) return;
+        active.dragStarted = true;
+        suppressRowClickRef.current = true;
+        setDragging({ id: active.entry.id, dayKey: active.dayKey });
+        if (typeof document !== 'undefined') {
+          document.body.style.userSelect = 'none';
+          document.body.style.cursor = 'grabbing';
+        }
+        buildDragGhost(active.rowEl ?? document.body, active.hint, active.ghostStartX, active.ghostStartY);
+      }
+      const target = resolveDropTarget(event.clientX, event.clientY);
+      updateDragPreview(target, { x: event.clientX, y: event.clientY });
+    };
+    const handlePointerUp = (event: globalThis.PointerEvent) => {
+      const active = pointerDragRef.current;
+      if (!active || event.pointerId !== active.pointerId) return;
+      if (!active.dragStarted) {
+        pointerDragRef.current = null;
+        return;
+      }
+      const dragInfo = dragging;
+      if (!dragInfo) {
+        resetPointerDrag();
+        return;
+      }
+      const target = resolveDropTarget(event.clientX, event.clientY);
+      void commitPointerDrop(dragInfo, target);
+    };
+    const handlePointerCancel = () => {
+      resetPointerDrag();
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        resetPointerDrag();
+      }
+    };
+    window.addEventListener('pointermove', handlePointerMove, true);
+    window.addEventListener('pointerup', handlePointerUp, true);
+    window.addEventListener('pointercancel', handlePointerCancel, true);
+    window.addEventListener('keydown', handleEscape, true);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove, true);
+      window.removeEventListener('pointerup', handlePointerUp, true);
+      window.removeEventListener('pointercancel', handlePointerCancel, true);
+      window.removeEventListener('keydown', handleEscape, true);
+    };
+  }, [commitPointerDrop, dragging, resetPointerDrag, resolveDropTarget, updateDragPreview]);
 
   const getCurrentPickerDate = useCallback(() => {
     const instance = timePickerRef.current?.flatpickr;
@@ -1288,32 +1784,13 @@ const EventSchedulePage = () => {
           <article
             key={day.key}
             id={`event-day-${day.key}`}
+            data-schedule-day-key={day.key}
             className="card"
             style={
               dragOverDay === day.key && dragging
                 ? { border: '2px solid #3b82f6', boxShadow: '0 0 0 2px rgba(59,130,246,0.15)' }
                 : undefined
             }
-            onDragOver={(e) => {
-              if (!dragging) return;
-              e.preventDefault();
-              setDragOverDay(day.key);
-              setDragHoverIndex(null);
-            }}
-            onDrop={(e) => {
-              if (!dragging) return;
-              e.preventDefault();
-              setDragHoverIndex(null);
-            }}
-            onDragLeave={(e) => {
-              if (!dragging) return;
-              const current = e.currentTarget;
-              const related = e.relatedTarget as Node | null;
-              if (related && current.contains(related)) return;
-              setDragOverDay((prev) => (prev === day.key ? null : prev));
-              setDragHoverIndex(null);
-              updateDragGhost(null);
-            }}
           >
             <header
                 className="card-header"
@@ -1343,288 +1820,31 @@ const EventSchedulePage = () => {
               </h3>
             </header>
             {expandedDays[day.key] === false ? null : (() => {
-              const entries: ScheduleEntry[] = [];
-              day.innhopps.forEach((i) => {
-                const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
-                const elevationDiff =
-                  typeof i.elevation === 'number' && typeof takeoff?.elevation === 'number'
-                    ? i.elevation - takeoff.elevation
-                    : null;
-                entries.push({
-                  id: `i-${i.id}`,
-                  hourKey: formatTimeLabel(i.scheduled_at),
-                  sortValue: (() => {
-                    const parts = parseTimeParts(i.scheduled_at);
-                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                  })(),
-                  title: `Innhopp #${i.sequence}: ${i.name}`,
-                  subtitle: '',
-                  type: 'Innhopp',
-                  to: `/events/${eventData.id}/innhopps/${i.id}`,
-                  ready: isInnhoppReady(i),
-                  missingCoordinates: !hasText(i.coordinates),
-                  description: i.reason_for_choice || i.primary_landing_area?.description || null,
-                  notes: i.notes || undefined,
-                  innhoppReason: i.reason_for_choice || null,
-                  innhoppElevation: i.elevation ?? null,
-                  innhoppCoordinates: i.coordinates || null,
-                  innhoppTakeoffName: takeoff?.name || null,
-                  innhoppElevationDiff: elevationDiff,
-                  innhoppPrimaryName: i.primary_landing_area?.name || null,
-                  innhoppPrimarySize: i.primary_landing_area?.size || null,
-                  innhoppSecondaryName: i.secondary_landing_area?.name || null,
-                  innhoppSecondarySize: i.secondary_landing_area?.size || null,
-                  innhoppRisk: i.risk_assessment || null,
-                  innhoppMinimumRequirements: i.minimum_requirements || null,
-                  innhoppRescueBoat: i.rescue_boat ?? null,
-                  innhoppLandOwnerPermission: i.land_owner_permission ?? null,
-                  scheduledAt: i.scheduled_at
-                });
-              });
-              day.transports.forEach((t) => {
-                const pickupCoords = locationCoordinates(t.pickup_location);
-                const destCoords = locationCoordinates(t.destination);
-                const hasPassengers = Number.isFinite(t.passenger_count) && t.passenger_count >= 0;
-                const hasVehicles = Array.isArray(t.vehicles) && t.vehicles.length > 0;
-                const complete =
-                  hasText(t.pickup_location) &&
-                  hasText(t.destination) &&
-                  hasText(t.scheduled_at) &&
-                  hasPassengers &&
-                  hasVehicles &&
-                  hasText(pickupCoords) &&
-                  hasText(destCoords);
-                const vehicles = Array.isArray(t.vehicles)
-                  ? t.vehicles.map((v) => ({
-                      name: v.name,
-                      driver: v.driver || '',
-                      passenger_capacity: v.passenger_capacity
-                    }))
-                  : [];
-                const routeDurationLabel = formatDurationMinutes(t.duration_minutes);
-                const routeVehiclesLabel = formatVehiclesLabel(vehicles);
-                entries.push({
-                  id: `t-${t.id}`,
-                  hourKey: formatTimeLabel(t.scheduled_at),
-                  sortValue: (() => {
-                    const parts = parseTimeParts(t.scheduled_at);
-                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                  })(),
-                  title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
-                  subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
-                  type: 'Transport',
-                  to: `/logistics/${t.id}`,
-                  transportComplete: complete,
-                  missingCoordinates: !pickupCoords || !destCoords,
-                  transportRouteOrigin: pickupCoords || null,
-                  transportRouteDestination: destCoords || null,
-                  routeDurationLabel,
-                  routeVehiclesLabel,
-                  notes: t.notes || null,
-                  vehicles,
-                  scheduledAt: t.scheduled_at || undefined
-                });
-              });
-              day.groundCrews.forEach((g) => {
-                const pickupCoords = locationCoordinates(g.pickup_location);
-                const destCoords = locationCoordinates(g.destination);
-                const hasPassengers = Number.isFinite(g.passenger_count) && g.passenger_count >= 0;
-                const hasVehicles = Array.isArray(g.vehicles) && g.vehicles.length > 0;
-                const complete =
-                  hasText(g.pickup_location) &&
-                  hasText(g.destination) &&
-                  hasText(g.scheduled_at) &&
-                  hasPassengers &&
-                  hasVehicles &&
-                  hasText(pickupCoords) &&
-                  hasText(destCoords);
-                const vehicles = Array.isArray(g.vehicles)
-                  ? g.vehicles.map((v) => ({
-                      name: v.name,
-                      driver: v.driver || '',
-                      passenger_capacity: v.passenger_capacity
-                    }))
-                  : [];
-                const routeDurationLabel = formatDurationMinutes(g.duration_minutes);
-                const routeVehiclesLabel = formatVehiclesLabel(vehicles);
-                entries.push({
-                  id: `gc-${g.id}`,
-                  hourKey: formatTimeLabel(g.scheduled_at),
-                  sortValue: (() => {
-                    const parts = parseTimeParts(g.scheduled_at);
-                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                  })(),
-                  title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
-                  subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
-                  type: 'Ground Crew',
-                  to: `/logistics/ground-crew/${g.id}`,
-                  transportComplete: complete,
-                  missingCoordinates: !pickupCoords || !destCoords,
-                  transportRouteOrigin: pickupCoords || null,
-                  transportRouteDestination: destCoords || null,
-                  routeDurationLabel,
-                  routeVehiclesLabel,
-                  notes: g.notes || null,
-                  vehicles,
-                  scheduledAt: g.scheduled_at || undefined
-                });
-              });
-              day.others.forEach((o) => {
-                entries.push({
-                  id: `o-${o.id}`,
-                  hourKey: formatTimeLabel(o.scheduled_at || undefined),
-                  sortValue: (() => {
-                    const parts = parseTimeParts(o.scheduled_at || undefined);
-                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                  })(),
-                  title: o.name || 'Other logistics',
-                  subtitle: '',
-                  type: 'Other',
-                  to: `/logistics/others/${o.id}`,
-                  missingCoordinates: !hasText(o.coordinates),
-                  coordinates: o.coordinates || null,
-                  description: o.description || null,
-                  notes: o.notes || null,
-                  otherComplete: hasText(o.name) && hasText(o.coordinates) && hasText(o.scheduled_at),
-                  scheduledAt: o.scheduled_at || undefined
-                });
-              });
-              day.meals.forEach((m) => {
-                entries.push({
-                  id: `meal-${m.id}`,
-                  hourKey: formatTimeLabel(m.scheduled_at || undefined),
-                  sortValue: (() => {
-                    const parts = parseTimeParts(m.scheduled_at || undefined);
-                    return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                  })(),
-                  title: m.name,
-                  subtitle: '',
-                  type: 'Meal',
-                  to: `/logistics/meals/${m.id}`,
-                  mealComplete: hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at),
-                  location: m.location || null,
-                  notes: m.notes || null,
-                  scheduledAt: m.scheduled_at || undefined
-                });
-              });
-              day.accommodations.forEach((a) => {
-                if (a.check_in_at && extractDateKey(a.check_in_at) === day.key) {
-                  entries.push({
-                    id: `acc-in-${a.id}`,
-                    hourKey: formatTimeLabel(a.check_in_at),
-                    sortValue: (() => {
-                      const parts = parseTimeParts(a.check_in_at);
-                      return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                    })(),
-                    title: `Check-in: ${a.name}`,
-                    subtitle: '',
-                    type: 'Accommodation',
-                    booked: !!a.booked,
-                    coordinates: a.coordinates || null,
-                    to: `/events/${eventId}/accommodations/${a.id}`,
-                    missingCoordinates: !hasText(a.coordinates),
-                    notes: a.notes || null,
-                    scheduledAt: a.check_in_at
-                  });
-                }
-                if (a.check_out_at && extractDateKey(a.check_out_at) === day.key) {
-                  entries.push({
-                    id: `acc-out-${a.id}`,
-                    hourKey: formatTimeLabel(a.check_out_at),
-                    sortValue: (() => {
-                      const parts = parseTimeParts(a.check_out_at);
-                      return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
-                    })(),
-                    title: `Check-out: ${a.name}`,
-                    subtitle: '',
-                    type: 'Accommodation',
-                    booked: !!a.booked,
-                    coordinates: a.coordinates || null,
-                    to: `/events/${eventId}/accommodations/${a.id}`,
-                    missingCoordinates: !hasText(a.coordinates),
-                    notes: a.notes || null,
-                    scheduledAt: a.check_out_at
-                  });
-                }
-                if (!a.check_in_at && !a.check_out_at) {
-                  entries.push({
-                    id: `acc-${a.id}`,
-                    hourKey: 'Unscheduled',
-                    sortValue: Number.POSITIVE_INFINITY,
-                    title: `${a.name}`,
-                    subtitle: '',
-                    type: 'Accommodation',
-                    booked: !!a.booked,
-                    coordinates: a.coordinates || null,
-                    to: `/events/${eventId}/accommodations/${a.id}`,
-                    missingCoordinates: !hasText(a.coordinates),
-                    scheduledAt: null
-                  });
-                }
-              });
-
-              const filteredEntries = entries.filter((e) => typeFilters[e.type]);
-              const orderedEntries = filteredEntries.sort((a, b) => {
-                if (a.sortValue === b.sortValue) return a.title.localeCompare(b.title);
-                return a.sortValue - b.sortValue;
-              });
-
-              const handleDrop = async (targetIndex: number) => {
-                if (!dragging) return;
-                const movingIndex = orderedEntries.findIndex((e) => e.id === dragging.id);
-                const deriveType = (id: string): EntryType | null => {
-                  if (id.startsWith('i-')) return 'Innhopp';
-                  if (id.startsWith('t-')) return 'Transport';
-                  if (id.startsWith('gc-')) return 'Ground Crew';
-                  if (id.startsWith('acc-')) return 'Accommodation';
-                  if (id.startsWith('o-')) return 'Other';
-                  if (id.startsWith('meal-')) return 'Meal';
-                  return null;
+              const orderedEntries = buildOrderedEntriesForDay(day);
+              const handleDragHandlePointerDown = (entry: Entry, e: ReactPointerEvent<HTMLButtonElement>) => {
+                if (savingDrag) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rowEl = (e.currentTarget as HTMLElement).closest('li') as HTMLElement | null;
+                const timeEl = rowEl?.querySelector('[data-ghost-time="time"]') as HTMLElement | null;
+                const anchorRect = timeEl?.getBoundingClientRect() ?? rowEl?.getBoundingClientRect();
+                const anchorLeft = anchorRect?.left ?? e.clientX;
+                const anchorTop = anchorRect?.top ?? e.clientY;
+                pointerDragRef.current = {
+                  pointerId: e.pointerId,
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  entry,
+                  dayKey: day.key,
+                  rowEl,
+                  hint: entry.hourKey !== 'Unscheduled' ? entry.hourKey : null,
+                  ghostStartX: anchorLeft - 12,
+                  ghostStartY: anchorTop - 12,
+                  dragStarted: false
                 };
-
-                // If the entry is being moved into this day from another day (not present in orderedEntries)
-                if (movingIndex === -1) {
-                  const movingType = deriveType(dragging.id);
-                  if (!movingType) return;
-                  const proposed = computeProposedMinutes(targetIndex, orderedEntries, day.key, dragging?.id);
-                  const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
-
-                  try {
-                    await updateScheduledAt({ id: dragging.id, type: movingType }, newIso);
-                    await reload({ preserveLoading: true });
-                    setHighlightId(dragging.id);
-                  } catch (err) {
-                    setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
-                  } finally {
-                    setDragging(null);
-                    setDragOverDay(null);
-                    clearDragGhost();
-                  }
-                  return;
-                }
-
-                const movingEntry = orderedEntries[movingIndex];
-                const reordered = orderedEntries.filter((e) => e.id !== dragging.id);
-                const clampedIndex = Math.max(0, Math.min(targetIndex, reordered.length));
-                reordered.splice(clampedIndex, 0, movingEntry);
-
-                const proposed = computeProposedMinutes(clampedIndex, reordered, day.key, dragging?.id);
-                const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
-
-                try {
-                  await updateScheduledAt(movingEntry, newIso);
-                  await reload({ preserveLoading: true });
-                  setHighlightId(movingEntry.id);
-                } catch (err) {
-                  setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
-                } finally {
-                  setDragging(null);
-                  setDragOverDay(null);
-                  clearDragGhost();
-                }
               };
 
-              const renderEntry = (entry: Entry, index: number) => {
+              const renderEntry = (entry: Entry) => {
                 const badgeStyle = typeBadgeStyles[entry.type];
                 const missingCoords = !!entry.missingCoordinates;
                 const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
@@ -1742,7 +1962,7 @@ const EventSchedulePage = () => {
                     )}
                   </div>
                 );
-                const handleEntryClick = (e: MouseEvent) => {
+                const handleEntryClick = (e: ReactMouseEvent) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setPreviewEntry({ entry, day });
@@ -1754,75 +1974,26 @@ const EventSchedulePage = () => {
                       borderRadius: '8px'
                     }
                   : undefined;
-                const commonProps = {
-                  draggable: entry.type !== 'Accommodation',
-                  onDragStart: (e: DragEvent) => {
-                    setDragging({ id: entry.id, dayKey: day.key });
-                    const hint = entry.hourKey !== 'Unscheduled' ? entry.hourKey : null;
-                    const rowEl = (e.currentTarget as HTMLElement).closest('li') as HTMLElement;
-                    const ghost = rowEl
-                      ? buildDragGhost(rowEl, hint, e.clientX, e.clientY)
-                      : buildDragGhost(e.currentTarget as HTMLElement, hint, e.clientX, e.clientY);
-                    if (e.dataTransfer) {
-                      try {
-                        e.dataTransfer.clearData();
-                      } catch {
-                        // ignore
-                      }
-                      e.dataTransfer.setData('text/plain', entry.id);
-                      e.dataTransfer.setData('text/uri-list', '');
-                      const shim = document.createElement('div');
-                      shim.style.width = '1px';
-                      shim.style.height = '1px';
-                      shim.style.opacity = '0';
-                      shim.style.position = 'fixed';
-                      shim.style.left = '-10px';
-                      shim.style.top = '-10px';
-                      document.body.appendChild(shim);
-                      dragShimRef.current = shim;
-                      e.dataTransfer.setDragImage(shim, 0, 0);
-                    }
-                  },
-                  onDragOver: (e: DragEvent) => {
-                    if (!dragging) return;
-                    e.preventDefault();
-                    if (dragHoverIndex !== index) {
-                      setDragHoverIndex(index);
-                    }
-                    const proposed = computeProposedMinutes(index, orderedEntries, day.key, dragging?.id);
-                    const newTime =
-                      proposed != null && proposed !== Number.POSITIVE_INFINITY
-                        ? formatTimeLabel(buildDayIso(day.date, proposed))
-                        : null;
-                    updateDragGhost(newTime, { x: e.clientX, y: e.clientY });
-                  },
-                  onDrop: (e: DragEvent) => {
-                    e.preventDefault();
-                    handleDrop(index);
-                  },
-                  onDragEnd: () => {
-                    setDragging(null);
-                    setDragOverDay(null);
-                    setDragHoverIndex(null);
-                    clearDragGhost();
-                  },
-                  id: `entry-${entry.id}`,
-                  style: {
-                    display: 'block',
-                    width: '100%',
-                    flex: 1,
-                    padding: '0.5rem 0.8rem',
-                    margin: '-0.25rem -1.6rem'
-                  },
-                  onClick: handleEntryClick
-                };
                 return entry.to ? (
                   <Link
                     key={entry.id}
                     to={entry.to}
                     className="card-link"
-                    {...commonProps}
+                    id={`entry-${entry.id}`}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      flex: 1,
+                      padding: '0.5rem 0.8rem',
+                      margin: '-0.25rem -1.6rem'
+                    }}
                     onClick={(e) => {
+                      if (suppressRowClickRef.current) {
+                        suppressRowClickRef.current = false;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                      }
                       handleEntryClick(e);
                       if (eventData?.id) {
                         try {
@@ -1843,7 +2014,17 @@ const EventSchedulePage = () => {
                       display: 'block',
                       width: '100%',
                       flex: 1,
-                      padding: '0.25rem 0.4rem'
+                      padding: '0.5rem 0.8rem',
+                      margin: '-0.25rem -1.6rem'
+                    }}
+                    onClick={(e) => {
+                      if (suppressRowClickRef.current) {
+                        suppressRowClickRef.current = false;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                      }
+                      handleEntryClick(e);
                     }}
                   >
                     {content}
@@ -1855,23 +2036,6 @@ const EventSchedulePage = () => {
                 <p
                   className="muted"
                   style={{ padding: '0.5rem 0' }}
-                  onDragOver={(e) => {
-                    if (!dragging) return;
-                    e.preventDefault();
-                    setDragOverDay(day.key);
-                    setDragHoverIndex(0);
-                    const proposed = computeProposedMinutes(0, orderedEntries, day.key, dragging?.id);
-                    const newTime =
-                      proposed != null && proposed !== Number.POSITIVE_INFINITY
-                        ? formatTimeLabel(buildDayIso(day.date, proposed))
-                        : null;
-                    updateDragGhost(newTime, { x: e.clientX, y: e.clientY });
-                  }}
-                  onDrop={(e) => {
-                    if (!dragging) return;
-                    e.preventDefault();
-                    handleDrop(0);
-                  }}
                 >
                   Nothing scheduled.
                 </p>
@@ -1880,6 +2044,9 @@ const EventSchedulePage = () => {
                   {orderedEntries.map((item, idx) => {
                     const isHighlighted = item.id === highlightId;
                     const isTimeEditing = timePicker?.entry.id === item.id;
+                    const isDragTarget = dragOverDay === day.key && dragHoverIndex === idx;
+                    const isDropAfterLast =
+                      dragOverDay === day.key && dragHoverIndex === orderedEntries.length && idx === orderedEntries.length - 1;
                     const highlightedFrame = isHighlighted || isTimeEditing
                       ? {
                           boxShadow: 'inset 0 0 0 2px #3b82f6',
@@ -1889,34 +2056,26 @@ const EventSchedulePage = () => {
                     return (
                     <li
                       key={item.id}
+                      data-schedule-row-index={idx}
                       style={{
                         display: 'block',
                         padding: '0.5rem 0',
                         borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderTop: isDragTarget ? '2px solid #3b82f6' : undefined,
+                        marginTop: isDragTarget ? '-2px' : undefined,
+                        paddingBottom: isDropAfterLast ? 'calc(0.5rem + 2px)' : '0.5rem',
                         width: '100%',
-                        overflow: 'hidden'
-                      }}
-                      onDragOver={(e) => {
-                        if (!dragging) return;
-                        e.preventDefault();
-                        if (dragHoverIndex !== idx) {
-                          setDragHoverIndex(idx);
-                        }
-                        const proposed = computeProposedMinutes(idx, orderedEntries, day.key, dragging?.id);
-                        const newTime =
-                          proposed != null && proposed !== Number.POSITIVE_INFINITY
-                            ? formatTimeLabel(buildDayIso(day.date, proposed))
-                            : null;
-                        updateDragGhost(newTime, { x: e.clientX, y: e.clientY });
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        handleDrop(idx);
+                        overflow: 'hidden',
+                        position: 'relative'
                       }}
                     >
                       <div
                         className="schedule-entry"
-                        style={highlightedFrame}
+                        style={{
+                          ...highlightedFrame,
+                          gridTemplateColumns: '5.5rem minmax(0, 1fr) 2.5rem',
+                          opacity: dragging?.id === item.id ? 0.45 : 1
+                        }}
                       >
                         <div
                           style={{ fontWeight: 600 }}
@@ -1949,8 +2108,41 @@ const EventSchedulePage = () => {
                         >
                           {item.hourKey}
                         </div>
-                        <div className="schedule-entry-content">{renderEntry(item, idx)}</div>
+                        <div className="schedule-entry-content">{renderEntry(item)}</div>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          <button
+                            type="button"
+                            aria-label={`Drag ${item.title}`}
+                            title="Drag to reorder"
+                            onPointerDown={(e) => handleDragHandlePointerDown(item, e)}
+                            style={{
+                              alignSelf: 'center',
+                              border: 0,
+                              background: 'transparent',
+                              color: 'var(--text-muted)',
+                              cursor: savingDrag ? 'not-allowed' : dragging?.id === item.id ? 'grabbing' : 'grab',
+                              padding: '0.35rem 0.45rem',
+                              fontSize: '1rem',
+                              lineHeight: 1,
+                              touchAction: 'none'
+                            }}
+                            disabled={savingDrag}
+                          >
+                            ⋮⋮
+                          </button>
+                        </div>
                       </div>
+                      {isDropAfterLast ? (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            borderBottom: '2px solid #3b82f6'
+                          }}
+                        />
+                      ) : null}
                     </li>
                   );
                   })}

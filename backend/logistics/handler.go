@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/httpx"
@@ -28,6 +29,427 @@ type Handler struct {
 	db         *pgxpool.Pool
 	httpClient *http.Client
 	mapsAPIKey string
+}
+
+var validLocationReferenceTypes = map[string]struct{}{
+	"Innhopp":       {},
+	"Airfield":      {},
+	"Accommodation": {},
+	"Other":         {},
+	"Meal":          {},
+}
+
+func normalizeLocationReference(refType string, refID *int64) (*string, *int64, error) {
+	trimmedType := strings.TrimSpace(refType)
+	if refID == nil {
+		if trimmedType == "" {
+			return nil, nil, nil
+		}
+		return nil, nil, errors.New("location reference type requires an id")
+	}
+	if *refID <= 0 {
+		return nil, nil, errors.New("location reference id must be positive")
+	}
+	if trimmedType == "" {
+		return nil, nil, errors.New("location reference id requires a type")
+	}
+	if _, ok := validLocationReferenceTypes[trimmedType]; !ok {
+		return nil, nil, errors.New("invalid location reference type")
+	}
+	id := *refID
+	return &trimmedType, &id, nil
+}
+
+func (h *Handler) resolveWriteLocationReference(ctx context.Context, q dbQuerier, eventID int64, label string, refType string, refID *int64) (*string, *int64, error) {
+	if refID == nil {
+		return h.resolveLocationReference(ctx, q, eventID, label, refType)
+	}
+	return normalizeLocationReference(refType, refID)
+}
+
+type dbQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+type locationReferenceMatch struct {
+	Type  string
+	ID    int64
+	Label string
+}
+
+func normalizeLegacyLabel(label string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(label)), " ")
+}
+
+func formatInnhoppLabel(sequence int, name string) string {
+	formattedName := strings.TrimSpace(name)
+	if sequence > 0 {
+		return strings.TrimSpace(fmt.Sprintf("#%d %s", sequence, formattedName))
+	}
+	return formattedName
+}
+
+func selectUniqueLocationMatch(matches []locationReferenceMatch) (*string, *int64, error) {
+	if len(matches) == 0 {
+		return nil, nil, nil
+	}
+	first := matches[0]
+	for _, match := range matches[1:] {
+		if match.Type != first.Type || match.ID != first.ID {
+			return nil, nil, fmt.Errorf("ambiguous legacy location label %q", first.Label)
+		}
+	}
+	refType := first.Type
+	refID := first.ID
+	return &refType, &refID, nil
+}
+
+func (h *Handler) locationLabelByReference(ctx context.Context, q dbQuerier, refType *string, refID *int64, fallback string) (string, error) {
+	if refType == nil || refID == nil || *refID <= 0 {
+		return fallback, nil
+	}
+
+	switch *refType {
+	case "Innhopp":
+		var sequence int
+		var name string
+		if err := q.QueryRow(ctx, `SELECT sequence, name FROM event_innhopps WHERE id = $1`, *refID).Scan(&sequence, &name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		return formatInnhoppLabel(sequence, name), nil
+	case "Airfield":
+		var name string
+		if err := q.QueryRow(ctx, `SELECT name FROM airfields WHERE id = $1`, *refID).Scan(&name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		return strings.TrimSpace(name), nil
+	case "Accommodation":
+		var name string
+		if err := q.QueryRow(ctx, `SELECT name FROM event_accommodation WHERE id = $1`, *refID).Scan(&name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		return strings.TrimSpace(name), nil
+	case "Other":
+		var name string
+		if err := q.QueryRow(ctx, `SELECT name FROM logistics_other WHERE id = $1`, *refID).Scan(&name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		return strings.TrimSpace(name), nil
+	case "Meal":
+		var name string
+		if err := q.QueryRow(ctx, `SELECT name FROM logistics_meals WHERE id = $1`, *refID).Scan(&name); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		return strings.TrimSpace(name), nil
+	default:
+		return fallback, nil
+	}
+}
+
+func (h *Handler) hydrateTransportLabels(ctx context.Context, q dbQuerier, transport *Transport) error {
+	pickup, err := h.locationLabelByReference(ctx, q, transport.PickupLocationType, transport.PickupLocationID, transport.PickupLocation)
+	if err != nil {
+		return err
+	}
+	destination, err := h.locationLabelByReference(ctx, q, transport.DestinationType, transport.DestinationID, transport.Destination)
+	if err != nil {
+		return err
+	}
+	transport.PickupLocation = pickup
+	transport.Destination = destination
+	return nil
+}
+
+func (h *Handler) resolveLocationReference(ctx context.Context, q dbQuerier, eventID int64, label string, preferredType string) (*string, *int64, error) {
+	normalizedLabel := normalizeLegacyLabel(label)
+	if normalizedLabel == "" || eventID <= 0 {
+		return nil, nil, nil
+	}
+
+	searchTypes := []string{"Innhopp", "Airfield", "Accommodation", "Other", "Meal"}
+	if trimmedType := strings.TrimSpace(preferredType); trimmedType != "" {
+		if _, ok := validLocationReferenceTypes[trimmedType]; !ok {
+			return nil, nil, errors.New("invalid location reference type")
+		}
+		searchTypes = []string{trimmedType}
+	}
+
+	var matches []locationReferenceMatch
+
+	for _, refType := range searchTypes {
+		switch refType {
+		case "Innhopp":
+			rows, err := q.Query(ctx,
+				`SELECT id, sequence, name
+                 FROM event_innhopps
+                 WHERE event_id = $1`,
+				eventID,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			for rows.Next() {
+				var id int64
+				var sequence int
+				var name string
+				if err := rows.Scan(&id, &sequence, &name); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				if normalizeLegacyLabel(formatInnhoppLabel(sequence, name)) == normalizedLabel || normalizeLegacyLabel(name) == normalizedLabel {
+					matches = append(matches, locationReferenceMatch{Type: "Innhopp", ID: id, Label: normalizedLabel})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			rows.Close()
+		case "Airfield":
+			rows, err := q.Query(ctx,
+				`SELECT a.id, a.name
+                 FROM event_airfields ea
+                 JOIN airfields a ON a.id = ea.airfield_id
+                 WHERE ea.event_id = $1`,
+				eventID,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			for rows.Next() {
+				var id int64
+				var name string
+				if err := rows.Scan(&id, &name); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				if normalizeLegacyLabel(name) == normalizedLabel {
+					matches = append(matches, locationReferenceMatch{Type: "Airfield", ID: id, Label: normalizedLabel})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			rows.Close()
+		case "Accommodation":
+			rows, err := q.Query(ctx,
+				`SELECT id, name
+                 FROM event_accommodation
+                 WHERE event_id = $1`,
+				eventID,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			for rows.Next() {
+				var id int64
+				var name string
+				if err := rows.Scan(&id, &name); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				if normalizeLegacyLabel(name) == normalizedLabel {
+					matches = append(matches, locationReferenceMatch{Type: "Accommodation", ID: id, Label: normalizedLabel})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			rows.Close()
+		case "Other":
+			rows, err := q.Query(ctx,
+				`SELECT id, name
+                 FROM logistics_other
+                 WHERE event_id = $1`,
+				eventID,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			for rows.Next() {
+				var id int64
+				var name string
+				if err := rows.Scan(&id, &name); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				if normalizeLegacyLabel(name) == normalizedLabel {
+					matches = append(matches, locationReferenceMatch{Type: "Other", ID: id, Label: normalizedLabel})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			rows.Close()
+		case "Meal":
+			rows, err := q.Query(ctx,
+				`SELECT id, name
+                 FROM logistics_meals
+                 WHERE event_id = $1`,
+				eventID,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
+			for rows.Next() {
+				var id int64
+				var name string
+				if err := rows.Scan(&id, &name); err != nil {
+					rows.Close()
+					return nil, nil, err
+				}
+				if normalizeLegacyLabel(name) == normalizedLabel {
+					matches = append(matches, locationReferenceMatch{Type: "Meal", ID: id, Label: normalizedLabel})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			rows.Close()
+		}
+	}
+
+	return selectUniqueLocationMatch(matches)
+}
+
+func normalizeTransportVehicle(v TransportVehicle) TransportVehicle {
+	v.Name = strings.TrimSpace(v.Name)
+	v.Driver = strings.TrimSpace(v.Driver)
+	v.Notes = strings.TrimSpace(v.Notes)
+	return v
+}
+
+func (h *Handler) resolveEventVehicleID(ctx context.Context, q dbQuerier, eventID int64, vehicle TransportVehicle) (*int64, error) {
+	if eventID <= 0 {
+		return nil, nil
+	}
+	if vehicle.EventVehicleID != nil && *vehicle.EventVehicleID > 0 {
+		id := *vehicle.EventVehicleID
+		return &id, nil
+	}
+
+	vehicle = normalizeTransportVehicle(vehicle)
+	if vehicle.Name == "" {
+		return nil, nil
+	}
+
+	rows, err := q.Query(ctx,
+		`SELECT id, name, driver, passenger_capacity
+         FROM logistics_event_vehicles
+         WHERE event_id = $1`,
+		eventID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		ID                int64
+		Name              string
+		Driver            string
+		PassengerCapacity int
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var item candidate
+		if err := rows.Scan(&item.ID, &item.Name, &item.Driver, &item.PassengerCapacity); err != nil {
+			return nil, err
+		}
+		if normalizeLegacyLabel(item.Name) == normalizeLegacyLabel(vehicle.Name) {
+			candidates = append(candidates, item)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+
+	filtered := candidates
+	if vehicle.Driver != "" {
+		next := filtered[:0]
+		for _, item := range filtered {
+			if normalizeLegacyLabel(item.Driver) == normalizeLegacyLabel(vehicle.Driver) {
+				next = append(next, item)
+			}
+		}
+		filtered = next
+	}
+	if len(filtered) > 1 {
+		next := filtered[:0]
+		for _, item := range filtered {
+			if item.PassengerCapacity == vehicle.PassengerCapacity {
+				next = append(next, item)
+			}
+		}
+		if len(next) > 0 {
+			filtered = next
+		}
+	}
+	if len(filtered) != 1 {
+		return nil, fmt.Errorf("ambiguous legacy vehicle %q", vehicle.Name)
+	}
+	id := filtered[0].ID
+	return &id, nil
+}
+
+func (h *Handler) resolveLegacyVehicleSelections(ctx context.Context, q dbQuerier, eventID int64, vehicleIDs []int64, vehicles []TransportVehicle) ([]TransportVehicle, error) {
+	if len(vehicleIDs) > 0 {
+		return h.loadEventVehiclesForEvent(ctx, q, eventID, vehicleIDs)
+	}
+	if len(vehicles) == 0 {
+		return nil, nil
+	}
+
+	resolved := make([]TransportVehicle, 0, len(vehicles))
+	seen := make(map[int64]struct{}, len(vehicles))
+	for _, vehicle := range vehicles {
+		vehicle = normalizeTransportVehicle(vehicle)
+		if vehicle.Name == "" {
+			continue
+		}
+		eventVehicleID, err := h.resolveEventVehicleID(ctx, q, eventID, vehicle)
+		if err != nil {
+			return nil, err
+		}
+		if eventVehicleID == nil {
+			continue
+		}
+		if _, ok := seen[*eventVehicleID]; ok {
+			continue
+		}
+		seen[*eventVehicleID] = struct{}{}
+		vehicle.EventVehicleID = eventVehicleID
+		resolved = append(resolved, vehicle)
+	}
+	if len(resolved) == 0 {
+		return nil, nil
+	}
+	return resolved, nil
 }
 
 type OtherLogistic struct {
@@ -43,14 +465,16 @@ type OtherLogistic struct {
 }
 
 type Meal struct {
-	ID          int64      `json:"id"`
-	Name        string     `json:"name"`
-	Location    *string    `json:"location,omitempty"`
-	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	Notes       *string    `json:"notes,omitempty"`
-	EventID     *int64     `json:"event_id,omitempty"`
-	SeasonID    *int64     `json:"season_id,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Location     *string    `json:"location,omitempty"`
+	LocationType *string    `json:"location_type,omitempty"`
+	LocationID   *int64     `json:"location_id,omitempty"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+	Notes        *string    `json:"notes,omitempty"`
+	EventID      *int64     `json:"event_id,omitempty"`
+	SeasonID     *int64     `json:"season_id,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 func (h *Handler) listOthers(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +792,7 @@ func (h *Handler) deleteOther(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listMeals(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, name, location, scheduled_at, notes, event_id, season_id, created_at FROM logistics_meals ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, name, location, location_type, location_id, scheduled_at, notes, event_id, season_id, created_at FROM logistics_meals ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list meals")
 		return
@@ -379,17 +803,27 @@ func (h *Handler) listMeals(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m Meal
 		var loc sql.NullString
+		var locationType sql.NullString
+		var locationID sql.NullInt64
 		var sched sql.NullTime
 		var notes sql.NullString
 		var eventID sql.NullInt64
 		var seasonID sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.Name, &loc, &sched, &notes, &eventID, &seasonID, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &loc, &locationType, &locationID, &sched, &notes, &eventID, &seasonID, &m.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse meal")
 			return
 		}
 		if loc.Valid {
 			val := loc.String
 			m.Location = &val
+		}
+		if locationType.Valid {
+			val := locationType.String
+			m.LocationType = &val
+		}
+		if locationID.Valid {
+			val := locationID.Int64
+			m.LocationID = &val
 		}
 		if sched.Valid {
 			t := sched.Time
@@ -421,16 +855,18 @@ func (h *Handler) getMeal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, name, location, scheduled_at, notes, event_id, season_id, created_at FROM logistics_meals WHERE id = $1`,
+		`SELECT id, name, location, location_type, location_id, scheduled_at, notes, event_id, season_id, created_at FROM logistics_meals WHERE id = $1`,
 		id,
 	)
 	var m Meal
 	var loc sql.NullString
+	var locationType sql.NullString
+	var locationID sql.NullInt64
 	var sched sql.NullTime
 	var notes sql.NullString
 	var eventID sql.NullInt64
 	var seasonID sql.NullInt64
-	if err := row.Scan(&m.ID, &m.Name, &loc, &sched, &notes, &eventID, &seasonID, &m.CreatedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &loc, &locationType, &locationID, &sched, &notes, &eventID, &seasonID, &m.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "meal not found")
 			return
@@ -441,6 +877,14 @@ func (h *Handler) getMeal(w http.ResponseWriter, r *http.Request) {
 	if loc.Valid {
 		val := loc.String
 		m.Location = &val
+	}
+	if locationType.Valid {
+		val := locationType.String
+		m.LocationType = &val
+	}
+	if locationID.Valid {
+		val := locationID.Int64
+		m.LocationID = &val
 	}
 	if sched.Valid {
 		t := sched.Time
@@ -463,11 +907,13 @@ func (h *Handler) getMeal(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		Name        string `json:"name"`
-		Location    string `json:"location"`
-		ScheduledAt string `json:"scheduled_at"`
-		Notes       string `json:"notes"`
-		EventID     int64  `json:"event_id"`
+		Name         string `json:"name"`
+		Location     string `json:"location"`
+		LocationType string `json:"location_type"`
+		LocationID   *int64 `json:"location_id"`
+		ScheduledAt  string `json:"scheduled_at"`
+		Notes        string `json:"notes"`
+		EventID      int64  `json:"event_id"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -482,7 +928,6 @@ func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "event_id is required")
 		return
 	}
-
 	var scheduled *time.Time
 	if payload.ScheduledAt != "" {
 		t, err := timeutil.ParseEventTimestamp(payload.ScheduledAt)
@@ -498,12 +943,17 @@ func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	locationType, locationID, err := h.resolveWriteLocationReference(r.Context(), h.db, payload.EventID, payload.Location, payload.LocationType, payload.LocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid meal location reference: "+err.Error())
+		return
+	}
 
 	row := h.db.QueryRow(r.Context(),
-		`INSERT INTO logistics_meals (name, location, scheduled_at, notes, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO logistics_meals (name, location, location_type, location_id, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, created_at`,
-		name, strings.TrimSpace(payload.Location), scheduled, strings.TrimSpace(payload.Notes), payload.EventID, seasonID,
+		name, strings.TrimSpace(payload.Location), locationType, locationID, scheduled, strings.TrimSpace(payload.Notes), payload.EventID, seasonID,
 	)
 
 	var m Meal
@@ -512,6 +962,8 @@ func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 		loc := strings.TrimSpace(payload.Location)
 		m.Location = &loc
 	}
+	m.LocationType = locationType
+	m.LocationID = locationID
 	m.ScheduledAt = scheduled
 	if payload.Notes != "" {
 		notes := strings.TrimSpace(payload.Notes)
@@ -537,11 +989,13 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name        string `json:"name"`
-		Location    string `json:"location"`
-		ScheduledAt string `json:"scheduled_at"`
-		Notes       string `json:"notes"`
-		EventID     int64  `json:"event_id"`
+		Name         string `json:"name"`
+		Location     string `json:"location"`
+		LocationType string `json:"location_type"`
+		LocationID   *int64 `json:"location_id"`
+		ScheduledAt  string `json:"scheduled_at"`
+		Notes        string `json:"notes"`
+		EventID      int64  `json:"event_id"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -556,7 +1010,6 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "event_id is required")
 		return
 	}
-
 	var scheduled *time.Time
 	if strings.TrimSpace(payload.ScheduledAt) != "" {
 		t, err := timeutil.ParseEventTimestamp(strings.TrimSpace(payload.ScheduledAt))
@@ -572,22 +1025,29 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	locationType, locationID, err := h.resolveWriteLocationReference(r.Context(), h.db, payload.EventID, payload.Location, payload.LocationType, payload.LocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid meal location reference: "+err.Error())
+		return
+	}
 
 	row := h.db.QueryRow(r.Context(),
 		`UPDATE logistics_meals
-         SET name = $1, location = $2, scheduled_at = $3, notes = $4, event_id = $5, season_id = $6
-         WHERE id = $7
-         RETURNING id, name, location, scheduled_at, notes, event_id, season_id, created_at`,
-		name, strings.TrimSpace(payload.Location), scheduled, strings.TrimSpace(payload.Notes), payload.EventID, seasonID, mealID,
+         SET name = $1, location = $2, location_type = $3, location_id = $4, scheduled_at = $5, notes = $6, event_id = $7, season_id = $8
+         WHERE id = $9
+         RETURNING id, name, location, location_type, location_id, scheduled_at, notes, event_id, season_id, created_at`,
+		name, strings.TrimSpace(payload.Location), locationType, locationID, scheduled, strings.TrimSpace(payload.Notes), payload.EventID, seasonID, mealID,
 	)
 
 	var m Meal
 	var loc sql.NullString
+	var locationTypeResult sql.NullString
+	var locationIDResult sql.NullInt64
 	var sched sql.NullTime
 	var notes sql.NullString
 	var eventID sql.NullInt64
 	var seasonResult sql.NullInt64
-	if err := row.Scan(&m.ID, &m.Name, &loc, &sched, &notes, &eventID, &seasonResult, &m.CreatedAt); err != nil {
+	if err := row.Scan(&m.ID, &m.Name, &loc, &locationTypeResult, &locationIDResult, &sched, &notes, &eventID, &seasonResult, &m.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "meal not found")
 		} else {
@@ -598,6 +1058,14 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 	if loc.Valid {
 		val := loc.String
 		m.Location = &val
+	}
+	if locationTypeResult.Valid {
+		val := locationTypeResult.String
+		m.LocationType = &val
+	}
+	if locationIDResult.Valid {
+		val := locationIDResult.Int64
+		m.LocationID = &val
 	}
 	if sched.Valid {
 		t := sched.Time
@@ -646,7 +1114,7 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
+		`SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
          FROM logistics_transports WHERE id = $1`,
 		id,
 	)
@@ -654,9 +1122,13 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	var scheduledAt sql.NullTime
 	var durationMinutes sql.NullInt32
 	var notes sql.NullString
+	var pickupLocationType sql.NullString
+	var pickupLocationID sql.NullInt64
+	var destinationType sql.NullString
+	var destinationID sql.NullInt64
 	var eventID sql.NullInt64
 	var seasonID sql.NullInt64
-	if err := row.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.PickupLocation, &pickupLocationType, &pickupLocationID, &t.Destination, &destinationType, &destinationID, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "transport not found")
 		return
 	}
@@ -670,6 +1142,22 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 	if notes.Valid {
 		t.Notes = notes.String
 	}
+	if pickupLocationType.Valid {
+		val := pickupLocationType.String
+		t.PickupLocationType = &val
+	}
+	if pickupLocationID.Valid {
+		val := pickupLocationID.Int64
+		t.PickupLocationID = &val
+	}
+	if destinationType.Valid {
+		val := destinationType.String
+		t.DestinationType = &val
+	}
+	if destinationID.Valid {
+		val := destinationID.Int64
+		t.DestinationID = &val
+	}
 	if eventID.Valid {
 		val := eventID.Int64
 		t.EventID = &val
@@ -678,9 +1166,16 @@ func (h *Handler) getTransport(w http.ResponseWriter, r *http.Request) {
 		val := seasonID.Int64
 		t.SeasonID = &val
 	}
+	if err := h.hydrateTransportLabels(r.Context(), h.db, &t); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to resolve transport locations")
+		return
+	}
 
 	vehicleRows, err := h.db.Query(r.Context(),
-		`SELECT name, driver, passenger_capacity, notes, event_vehicle_id FROM logistics_transport_vehicles WHERE transport_id = $1`,
+		`SELECT name, driver, passenger_capacity, notes, event_vehicle_id
+         FROM logistics_transport_vehicles
+         WHERE transport_id = $1
+         ORDER BY created_at ASC, id ASC`,
 		id,
 	)
 	if err != nil {
@@ -721,15 +1216,19 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		PickupLocation string             `json:"pickup_location"`
-		Destination    string             `json:"destination"`
-		PassengerCount int                `json:"passenger_count"`
-		DurationMin    *int               `json:"duration_minutes"`
-		ScheduledAt    string             `json:"scheduled_at"`
-		Notes          *string            `json:"notes"`
-		EventID        int64              `json:"event_id"`
-		VehicleIDs     *[]int64           `json:"vehicle_ids"`
-		Vehicles       []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
+		PickupLocation     string             `json:"pickup_location"`
+		PickupLocationType string             `json:"pickup_location_type"`
+		PickupLocationID   *int64             `json:"pickup_location_id"`
+		Destination        string             `json:"destination"`
+		DestinationType    string             `json:"destination_type"`
+		DestinationID      *int64             `json:"destination_id"`
+		PassengerCount     int                `json:"passenger_count"`
+		DurationMin        *int               `json:"duration_minutes"`
+		ScheduledAt        string             `json:"scheduled_at"`
+		Notes              *string            `json:"notes"`
+		EventID            int64              `json:"event_id"`
+		VehicleIDs         *[]int64           `json:"vehicle_ids"`
+		Vehicles           []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
 	}
 
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -788,6 +1287,16 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	pickupLocationType, pickupLocationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, pickup, payload.PickupLocationType, payload.PickupLocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid pickup location reference: "+err.Error())
+		return
+	}
+	destinationType, destinationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, dest, payload.DestinationType, payload.DestinationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid destination reference: "+err.Error())
+		return
+	}
 
 	// Preserve existing notes when not provided.
 	if notesVal == nil {
@@ -810,9 +1319,9 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 
 	tag, err := tx.Exec(r.Context(),
 		`UPDATE logistics_transports
-         SET pickup_location = $1, destination = $2, passenger_count = $3, duration_minutes = $4, scheduled_at = $5, notes = $6, event_id = $7, season_id = $8
-         WHERE id = $9`,
-		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
+         SET pickup_location = $1, pickup_location_type = $2, pickup_location_id = $3, destination = $4, destination_type = $5, destination_id = $6, passenger_count = $7, duration_minutes = $8, scheduled_at = $9, notes = $10, event_id = $11, season_id = $12
+         WHERE id = $13`,
+		pickup, pickupLocationType, pickupLocationID, dest, destinationType, destinationID, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update transport")
@@ -823,18 +1332,22 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// replace vehicles only when vehicle_ids are provided.
-	if payload.VehicleIDs != nil {
+	// replace vehicles only when explicit selections are provided.
+	if payload.VehicleIDs != nil || len(payload.Vehicles) > 0 {
 		if _, err := tx.Exec(r.Context(), `DELETE FROM logistics_transport_vehicles WHERE transport_id = $1`, id); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to clear vehicles")
 			return
 		}
-		if len(*payload.VehicleIDs) > 0 {
-			eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, *payload.VehicleIDs)
-			if err != nil {
-				httpx.Error(w, http.StatusBadRequest, err.Error())
-				return
-			}
+		selectedVehicleIDs := []int64(nil)
+		if payload.VehicleIDs != nil {
+			selectedVehicleIDs = *payload.VehicleIDs
+		}
+		eventVehicles, err := h.resolveLegacyVehicleSelections(r.Context(), tx, payload.EventID, selectedVehicleIDs, payload.Vehicles)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if len(eventVehicles) > 0 {
 			if err := h.attachEventVehicles(r.Context(), tx, id, eventVehicles); err != nil {
 				httpx.Error(w, http.StatusInternalServerError, "failed to save vehicles")
 				return
@@ -895,7 +1408,7 @@ func (h *Handler) attachEventVehiclesToGroundCrew(ctx context.Context, tx pgx.Tx
 }
 
 func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_ground_crews ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_ground_crews ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list ground crews")
 		return
@@ -909,10 +1422,14 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 		var gc Transport
 		var notes sql.NullString
 		var durationMinutes sql.NullInt32
+		var pickupLocationType sql.NullString
+		var pickupLocationID sql.NullInt64
+		var destinationType sql.NullString
+		var destinationID sql.NullInt64
 		var eventID sql.NullInt64
 		var seasonID sql.NullInt64
 		var scheduledAt sql.NullTime
-		if err := rows.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+		if err := rows.Scan(&gc.ID, &gc.PickupLocation, &pickupLocationType, &pickupLocationID, &gc.Destination, &destinationType, &destinationID, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse ground crew")
 			return
 		}
@@ -925,6 +1442,22 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 		}
 		if notes.Valid {
 			gc.Notes = notes.String
+		}
+		if pickupLocationType.Valid {
+			val := pickupLocationType.String
+			gc.PickupLocationType = &val
+		}
+		if pickupLocationID.Valid {
+			val := pickupLocationID.Int64
+			gc.PickupLocationID = &val
+		}
+		if destinationType.Valid {
+			val := destinationType.String
+			gc.DestinationType = &val
+		}
+		if destinationID.Valid {
+			val := destinationID.Int64
+			gc.DestinationID = &val
 		}
 		if eventID.Valid {
 			val := eventID.Int64
@@ -946,7 +1479,8 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 	vehicleRows, err := h.db.Query(r.Context(),
 		`SELECT ground_crew_id, name, driver, passenger_capacity, notes, event_vehicle_id
          FROM logistics_ground_crew_vehicles
-         WHERE ground_crew_id = ANY($1)`,
+         WHERE ground_crew_id = ANY($1)
+         ORDER BY created_at ASC, id ASC`,
 		groundCrewIDs,
 	)
 	if err != nil {
@@ -980,6 +1514,10 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range groundCrews {
+		if err := h.hydrateTransportLabels(r.Context(), h.db, &groundCrews[i]); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to resolve ground crew locations")
+			return
+		}
 		groundCrews[i].Vehicles = vehicleMap[groundCrews[i].ID]
 	}
 
@@ -988,14 +1526,18 @@ func (h *Handler) listGroundCrews(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		PickupLocation string             `json:"pickup_location"`
-		Destination    string             `json:"destination"`
-		PassengerCount int                `json:"passenger_count"`
-		ScheduledAt    string             `json:"scheduled_at"`
-		Notes          string             `json:"notes"`
-		EventID        int64              `json:"event_id"`
-		VehicleIDs     []int64            `json:"vehicle_ids"`
-		Vehicles       []TransportVehicle `json:"vehicles"`
+		PickupLocation     string             `json:"pickup_location"`
+		PickupLocationType string             `json:"pickup_location_type"`
+		PickupLocationID   *int64             `json:"pickup_location_id"`
+		Destination        string             `json:"destination"`
+		DestinationType    string             `json:"destination_type"`
+		DestinationID      *int64             `json:"destination_id"`
+		PassengerCount     int                `json:"passenger_count"`
+		ScheduledAt        string             `json:"scheduled_at"`
+		Notes              string             `json:"notes"`
+		EventID            int64              `json:"event_id"`
+		VehicleIDs         []int64            `json:"vehicle_ids"`
+		Vehicles           []TransportVehicle `json:"vehicles"`
 	}
 
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -1042,6 +1584,16 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	pickupLocationType, pickupLocationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, pickup, payload.PickupLocationType, payload.PickupLocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid pickup location reference: "+err.Error())
+		return
+	}
+	destinationType, destinationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, dest, payload.DestinationType, payload.DestinationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid destination reference: "+err.Error())
+		return
+	}
 
 	var groundCrew Transport
 	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
@@ -1049,10 +1601,10 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ground crew duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
 	}
 	row := tx.QueryRow(r.Context(),
-		`INSERT INTO logistics_ground_crews (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO logistics_ground_crews (pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id, created_at`,
-		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
+		pickup, pickupLocationType, pickupLocationID, dest, destinationType, destinationID, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
 	)
 	if err := row.Scan(&groundCrew.ID, &groundCrew.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create ground crew")
@@ -1060,20 +1612,28 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	groundCrew.PickupLocation = pickup
+	groundCrew.PickupLocationType = pickupLocationType
+	groundCrew.PickupLocationID = pickupLocationID
 	groundCrew.Destination = dest
+	groundCrew.DestinationType = destinationType
+	groundCrew.DestinationID = destinationID
 	groundCrew.PassengerCount = payload.PassengerCount
 	groundCrew.DurationMinutes = durationMinutes
 	groundCrew.ScheduledAt = scheduledAt
 	groundCrew.Notes = notes
 	groundCrew.EventID = &payload.EventID
 	groundCrew.SeasonID = seasonID
+	if err := h.hydrateTransportLabels(r.Context(), tx, &groundCrew); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to resolve ground crew locations")
+		return
+	}
 
-	if len(payload.VehicleIDs) > 0 {
-		eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, payload.VehicleIDs)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	eventVehicles, err := h.resolveLegacyVehicleSelections(r.Context(), tx, payload.EventID, payload.VehicleIDs, payload.Vehicles)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(eventVehicles) > 0 {
 		if err := h.attachEventVehiclesToGroundCrew(r.Context(), tx, groundCrew.ID, eventVehicles); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to attach vehicles")
 			return
@@ -1097,7 +1657,7 @@ func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(),
-		`SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
+		`SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at
          FROM logistics_ground_crews WHERE id = $1`,
 		id,
 	)
@@ -1105,9 +1665,13 @@ func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
 	var scheduledAt sql.NullTime
 	var durationMinutes sql.NullInt32
 	var notes sql.NullString
+	var pickupLocationType sql.NullString
+	var pickupLocationID sql.NullInt64
+	var destinationType sql.NullString
+	var destinationID sql.NullInt64
 	var eventID sql.NullInt64
 	var seasonID sql.NullInt64
-	if err := row.Scan(&gc.ID, &gc.PickupLocation, &gc.Destination, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
+	if err := row.Scan(&gc.ID, &gc.PickupLocation, &pickupLocationType, &pickupLocationID, &gc.Destination, &destinationType, &destinationID, &gc.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &gc.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "ground crew not found")
 		return
 	}
@@ -1121,6 +1685,22 @@ func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
 	if notes.Valid {
 		gc.Notes = notes.String
 	}
+	if pickupLocationType.Valid {
+		val := pickupLocationType.String
+		gc.PickupLocationType = &val
+	}
+	if pickupLocationID.Valid {
+		val := pickupLocationID.Int64
+		gc.PickupLocationID = &val
+	}
+	if destinationType.Valid {
+		val := destinationType.String
+		gc.DestinationType = &val
+	}
+	if destinationID.Valid {
+		val := destinationID.Int64
+		gc.DestinationID = &val
+	}
 	if eventID.Valid {
 		val := eventID.Int64
 		gc.EventID = &val
@@ -1129,9 +1709,16 @@ func (h *Handler) getGroundCrew(w http.ResponseWriter, r *http.Request) {
 		val := seasonID.Int64
 		gc.SeasonID = &val
 	}
+	if err := h.hydrateTransportLabels(r.Context(), h.db, &gc); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to resolve ground crew locations")
+		return
+	}
 
 	vehicleRows, err := h.db.Query(r.Context(),
-		`SELECT name, driver, passenger_capacity, notes, event_vehicle_id FROM logistics_ground_crew_vehicles WHERE ground_crew_id = $1`,
+		`SELECT name, driver, passenger_capacity, notes, event_vehicle_id
+         FROM logistics_ground_crew_vehicles
+         WHERE ground_crew_id = $1
+         ORDER BY created_at ASC, id ASC`,
 		id,
 	)
 	if err != nil {
@@ -1172,15 +1759,19 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		PickupLocation string             `json:"pickup_location"`
-		Destination    string             `json:"destination"`
-		PassengerCount int                `json:"passenger_count"`
-		DurationMin    *int               `json:"duration_minutes"`
-		ScheduledAt    string             `json:"scheduled_at"`
-		Notes          *string            `json:"notes"`
-		EventID        int64              `json:"event_id"`
-		VehicleIDs     *[]int64           `json:"vehicle_ids"`
-		Vehicles       []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
+		PickupLocation     string             `json:"pickup_location"`
+		PickupLocationType string             `json:"pickup_location_type"`
+		PickupLocationID   *int64             `json:"pickup_location_id"`
+		Destination        string             `json:"destination"`
+		DestinationType    string             `json:"destination_type"`
+		DestinationID      *int64             `json:"destination_id"`
+		PassengerCount     int                `json:"passenger_count"`
+		DurationMin        *int               `json:"duration_minutes"`
+		ScheduledAt        string             `json:"scheduled_at"`
+		Notes              *string            `json:"notes"`
+		EventID            int64              `json:"event_id"`
+		VehicleIDs         *[]int64           `json:"vehicle_ids"`
+		Vehicles           []TransportVehicle `json:"vehicles"` // ignored, kept for backward compatibility
 	}
 
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -1239,6 +1830,16 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	pickupLocationType, pickupLocationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, pickup, payload.PickupLocationType, payload.PickupLocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid pickup location reference: "+err.Error())
+		return
+	}
+	destinationType, destinationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, dest, payload.DestinationType, payload.DestinationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid destination reference: "+err.Error())
+		return
+	}
 
 	if notesVal == nil {
 		var existingNotes sql.NullString
@@ -1260,9 +1861,9 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 
 	tag, err := tx.Exec(r.Context(),
 		`UPDATE logistics_ground_crews
-         SET pickup_location = $1, destination = $2, passenger_count = $3, duration_minutes = $4, scheduled_at = $5, notes = $6, event_id = $7, season_id = $8
-         WHERE id = $9`,
-		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
+         SET pickup_location = $1, pickup_location_type = $2, pickup_location_id = $3, destination = $4, destination_type = $5, destination_id = $6, passenger_count = $7, duration_minutes = $8, scheduled_at = $9, notes = $10, event_id = $11, season_id = $12
+         WHERE id = $13`,
+		pickup, pickupLocationType, pickupLocationID, dest, destinationType, destinationID, payload.PassengerCount, durationMinutes, scheduledAt, notesVal, payload.EventID, seasonID, id,
 	)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update ground crew")
@@ -1273,17 +1874,21 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if payload.VehicleIDs != nil {
+	if payload.VehicleIDs != nil || len(payload.Vehicles) > 0 {
 		if _, err := tx.Exec(r.Context(), `DELETE FROM logistics_ground_crew_vehicles WHERE ground_crew_id = $1`, id); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to clear vehicles")
 			return
 		}
-		if len(*payload.VehicleIDs) > 0 {
-			eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, *payload.VehicleIDs)
-			if err != nil {
-				httpx.Error(w, http.StatusBadRequest, err.Error())
-				return
-			}
+		selectedVehicleIDs := []int64(nil)
+		if payload.VehicleIDs != nil {
+			selectedVehicleIDs = *payload.VehicleIDs
+		}
+		eventVehicles, err := h.resolveLegacyVehicleSelections(r.Context(), tx, payload.EventID, selectedVehicleIDs, payload.Vehicles)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if len(eventVehicles) > 0 {
 			if err := h.attachEventVehiclesToGroundCrew(r.Context(), tx, id, eventVehicles); err != nil {
 				httpx.Error(w, http.StatusInternalServerError, "failed to save vehicles")
 				return
@@ -1324,6 +1929,256 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 		httpClient: &http.Client{Timeout: 8 * time.Second},
 		mapsAPIKey: strings.TrimSpace(os.Getenv("GOOGLE_MAPS_API_KEY")),
 	}
+}
+
+// BackfillLegacyReferenceIDs resolves legacy string-only references into stable IDs.
+func BackfillLegacyReferenceIDs(ctx context.Context, db *pgxpool.Pool) error {
+	h := NewHandler(db)
+
+	type routeRow struct {
+		ID              int64
+		EventID         sql.NullInt64
+		PickupLocation  string
+		PickupType      sql.NullString
+		PickupID        sql.NullInt64
+		Destination     string
+		DestinationType sql.NullString
+		DestinationID   sql.NullInt64
+	}
+
+	backfillRoutes := func(table string) error {
+		rows, err := db.Query(ctx, fmt.Sprintf(
+			`SELECT id, event_id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id
+             FROM %s
+             WHERE event_id IS NOT NULL
+               AND ((pickup_location <> '' AND pickup_location_id IS NULL) OR (destination <> '' AND destination_id IS NULL))`,
+			table,
+		))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		var pending []routeRow
+		for rows.Next() {
+			var item routeRow
+			if err := rows.Scan(&item.ID, &item.EventID, &item.PickupLocation, &item.PickupType, &item.PickupID, &item.Destination, &item.DestinationType, &item.DestinationID); err != nil {
+				return err
+			}
+			pending = append(pending, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		updated := 0
+		for _, item := range pending {
+			if !item.EventID.Valid {
+				continue
+			}
+			pickupType := (*string)(nil)
+			pickupID := (*int64)(nil)
+			destinationType := (*string)(nil)
+			destinationID := (*int64)(nil)
+			var err error
+
+			if item.PickupID.Valid {
+				val := item.PickupID.Int64
+				pickupID = &val
+				if item.PickupType.Valid {
+					refType := item.PickupType.String
+					pickupType = &refType
+				}
+			} else {
+				preferredType := ""
+				if item.PickupType.Valid {
+					preferredType = item.PickupType.String
+				}
+				pickupType, pickupID, err = h.resolveLocationReference(ctx, db, item.EventID.Int64, item.PickupLocation, preferredType)
+				if err != nil {
+					log.Printf("legacy reference backfill skipped (%s id=%d pickup): %v", table, item.ID, err)
+				}
+			}
+
+			if item.DestinationID.Valid {
+				val := item.DestinationID.Int64
+				destinationID = &val
+				if item.DestinationType.Valid {
+					refType := item.DestinationType.String
+					destinationType = &refType
+				}
+			} else {
+				preferredType := ""
+				if item.DestinationType.Valid {
+					preferredType = item.DestinationType.String
+				}
+				destinationType, destinationID, err = h.resolveLocationReference(ctx, db, item.EventID.Int64, item.Destination, preferredType)
+				if err != nil {
+					log.Printf("legacy reference backfill skipped (%s id=%d destination): %v", table, item.ID, err)
+				}
+			}
+
+			if _, err := db.Exec(ctx, fmt.Sprintf(
+				`UPDATE %s
+                 SET pickup_location_type = COALESCE($1, pickup_location_type),
+                     pickup_location_id = COALESCE($2, pickup_location_id),
+                     destination_type = COALESCE($3, destination_type),
+                     destination_id = COALESCE($4, destination_id)
+                 WHERE id = $5`,
+				table,
+			), pickupType, pickupID, destinationType, destinationID, item.ID); err != nil {
+				log.Printf("legacy reference backfill update failed (%s id=%d): %v", table, item.ID, err)
+				continue
+			}
+			if pickupID != nil || destinationID != nil {
+				updated++
+			}
+		}
+		log.Printf("legacy reference backfill: %s updated %d/%d rows", table, updated, len(pending))
+		return nil
+	}
+
+	type mealRow struct {
+		ID           int64
+		EventID      sql.NullInt64
+		Location     sql.NullString
+		LocationType sql.NullString
+		LocationID   sql.NullInt64
+	}
+	rows, err := db.Query(ctx,
+		`SELECT id, event_id, location, location_type, location_id
+         FROM logistics_meals
+         WHERE event_id IS NOT NULL AND location IS NOT NULL AND location <> '' AND location_id IS NULL`,
+	)
+	if err != nil {
+		return err
+	}
+	var meals []mealRow
+	for rows.Next() {
+		var item mealRow
+		if err := rows.Scan(&item.ID, &item.EventID, &item.Location, &item.LocationType, &item.LocationID); err != nil {
+			rows.Close()
+			return err
+		}
+		meals = append(meals, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	mealsUpdated := 0
+	for _, item := range meals {
+		if !item.EventID.Valid || !item.Location.Valid {
+			continue
+		}
+		preferredType := ""
+		if item.LocationType.Valid {
+			preferredType = item.LocationType.String
+		}
+		locationType, locationID, err := h.resolveLocationReference(ctx, db, item.EventID.Int64, item.Location.String, preferredType)
+		if err != nil {
+			log.Printf("legacy meal reference backfill skipped (meal id=%d): %v", item.ID, err)
+			continue
+		}
+		if locationID == nil {
+			continue
+		}
+		if _, err := db.Exec(ctx,
+			`UPDATE logistics_meals
+             SET location_type = COALESCE($1, location_type),
+                 location_id = COALESCE($2, location_id)
+             WHERE id = $3`,
+			locationType, locationID, item.ID,
+		); err != nil {
+			log.Printf("legacy meal reference backfill update failed (meal id=%d): %v", item.ID, err)
+			continue
+		}
+		mealsUpdated++
+	}
+	log.Printf("legacy reference backfill: logistics_meals updated %d/%d rows", mealsUpdated, len(meals))
+
+	type vehicleLinkRow struct {
+		LinkID            int64
+		EventID           sql.NullInt64
+		Name              string
+		Driver            sql.NullString
+		PassengerCapacity int
+	}
+	backfillVehicleLinks := func(table string, parentColumn string) error {
+		rows, err := db.Query(ctx, fmt.Sprintf(
+			`SELECT lv.id, parent.event_id, lv.name, lv.driver, lv.passenger_capacity
+             FROM %s lv
+             JOIN %s parent ON parent.id = lv.%s
+             WHERE lv.event_vehicle_id IS NULL AND parent.event_id IS NOT NULL AND lv.name <> ''`,
+			table,
+			map[string]string{
+				"logistics_transport_vehicles":   "logistics_transports",
+				"logistics_ground_crew_vehicles": "logistics_ground_crews",
+			}[table],
+			parentColumn,
+		))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		var pending []vehicleLinkRow
+		for rows.Next() {
+			var item vehicleLinkRow
+			if err := rows.Scan(&item.LinkID, &item.EventID, &item.Name, &item.Driver, &item.PassengerCapacity); err != nil {
+				return err
+			}
+			pending = append(pending, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		updated := 0
+		for _, item := range pending {
+			if !item.EventID.Valid {
+				continue
+			}
+			vehicle := TransportVehicle{
+				Name:              item.Name,
+				PassengerCapacity: item.PassengerCapacity,
+			}
+			if item.Driver.Valid {
+				vehicle.Driver = item.Driver.String
+			}
+			eventVehicleID, err := h.resolveEventVehicleID(ctx, db, item.EventID.Int64, vehicle)
+			if err != nil {
+				log.Printf("legacy vehicle backfill skipped (%s id=%d): %v", table, item.LinkID, err)
+				continue
+			}
+			if eventVehicleID == nil {
+				continue
+			}
+			if _, err := db.Exec(ctx, fmt.Sprintf(`UPDATE %s SET event_vehicle_id = $1 WHERE id = $2`, table), eventVehicleID, item.LinkID); err != nil {
+				log.Printf("legacy vehicle backfill update failed (%s id=%d): %v", table, item.LinkID, err)
+				continue
+			}
+			updated++
+		}
+		log.Printf("legacy vehicle backfill: %s updated %d/%d rows", table, updated, len(pending))
+		return nil
+	}
+
+	if err := backfillRoutes("logistics_transports"); err != nil {
+		return err
+	}
+	if err := backfillRoutes("logistics_ground_crews"); err != nil {
+		return err
+	}
+	if err := backfillVehicleLinks("logistics_transport_vehicles", "transport_id"); err != nil {
+		return err
+	}
+	if err := backfillVehicleLinks("logistics_ground_crew_vehicles", "ground_crew_id"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // BackfillMissingRouteDurations computes duration_minutes for existing routes that are missing it.
@@ -1527,13 +2382,14 @@ type EventVehicle struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
-func (h *Handler) loadEventVehiclesForEvent(ctx context.Context, tx pgx.Tx, eventID int64, vehicleIDs []int64) ([]TransportVehicle, error) {
+func (h *Handler) loadEventVehiclesForEvent(ctx context.Context, q dbQuerier, eventID int64, vehicleIDs []int64) ([]TransportVehicle, error) {
 	if len(vehicleIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := tx.Query(ctx,
+	rows, err := q.Query(ctx,
 		`SELECT id, name, driver, passenger_capacity, notes FROM logistics_event_vehicles
-         WHERE event_id = $1 AND id = ANY($2)`,
+         WHERE event_id = $1 AND id = ANY($2)
+         ORDER BY array_position($2::bigint[], id::bigint)`,
 		eventID, vehicleIDs,
 	)
 	if err != nil {
@@ -1583,17 +2439,21 @@ func (h *Handler) attachEventVehicles(ctx context.Context, tx pgx.Tx, transportI
 }
 
 type Transport struct {
-	ID              int64              `json:"id"`
-	PickupLocation  string             `json:"pickup_location"`
-	Destination     string             `json:"destination"`
-	PassengerCount  int                `json:"passenger_count"`
-	DurationMinutes *int               `json:"duration_minutes,omitempty"`
-	ScheduledAt     *time.Time         `json:"scheduled_at,omitempty"`
-	Notes           string             `json:"notes,omitempty"`
-	EventID         *int64             `json:"event_id,omitempty"`
-	SeasonID        *int64             `json:"season_id,omitempty"`
-	Vehicles        []TransportVehicle `json:"vehicles"`
-	CreatedAt       time.Time          `json:"created_at"`
+	ID                 int64              `json:"id"`
+	PickupLocation     string             `json:"pickup_location"`
+	PickupLocationType *string            `json:"pickup_location_type,omitempty"`
+	PickupLocationID   *int64             `json:"pickup_location_id,omitempty"`
+	Destination        string             `json:"destination"`
+	DestinationType    *string            `json:"destination_type,omitempty"`
+	DestinationID      *int64             `json:"destination_id,omitempty"`
+	PassengerCount     int                `json:"passenger_count"`
+	DurationMinutes    *int               `json:"duration_minutes,omitempty"`
+	ScheduledAt        *time.Time         `json:"scheduled_at,omitempty"`
+	Notes              string             `json:"notes,omitempty"`
+	EventID            *int64             `json:"event_id,omitempty"`
+	SeasonID           *int64             `json:"season_id,omitempty"`
+	Vehicles           []TransportVehicle `json:"vehicles"`
+	CreatedAt          time.Time          `json:"created_at"`
 }
 
 type directionsAPIResponse struct {
@@ -1661,7 +2521,7 @@ func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, des
 }
 
 func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
+	rows, err := h.db.Query(r.Context(), `SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id, created_at FROM logistics_transports ORDER BY created_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list transports")
 		return
@@ -1675,10 +2535,14 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 		var t Transport
 		var notes sql.NullString
 		var durationMinutes sql.NullInt32
+		var pickupLocationType sql.NullString
+		var pickupLocationID sql.NullInt64
+		var destinationType sql.NullString
+		var destinationID sql.NullInt64
 		var eventID sql.NullInt64
 		var seasonID sql.NullInt64
 		var scheduledAt sql.NullTime
-		if err := rows.Scan(&t.ID, &t.PickupLocation, &t.Destination, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.PickupLocation, &pickupLocationType, &pickupLocationID, &t.Destination, &destinationType, &destinationID, &t.PassengerCount, &durationMinutes, &scheduledAt, &notes, &eventID, &seasonID, &t.CreatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse transport")
 			return
 		}
@@ -1691,6 +2555,22 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 		}
 		if notes.Valid {
 			t.Notes = notes.String
+		}
+		if pickupLocationType.Valid {
+			val := pickupLocationType.String
+			t.PickupLocationType = &val
+		}
+		if pickupLocationID.Valid {
+			val := pickupLocationID.Int64
+			t.PickupLocationID = &val
+		}
+		if destinationType.Valid {
+			val := destinationType.String
+			t.DestinationType = &val
+		}
+		if destinationID.Valid {
+			val := destinationID.Int64
+			t.DestinationID = &val
 		}
 		if eventID.Valid {
 			val := eventID.Int64
@@ -1712,7 +2592,8 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 	vehicleRows, err := h.db.Query(r.Context(),
 		`SELECT transport_id, name, driver, passenger_capacity, notes, event_vehicle_id
          FROM logistics_transport_vehicles
-         WHERE transport_id = ANY($1)`,
+         WHERE transport_id = ANY($1)
+         ORDER BY created_at ASC, id ASC`,
 		transportIDs,
 	)
 	if err != nil {
@@ -1746,6 +2627,10 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i := range transports {
+		if err := h.hydrateTransportLabels(r.Context(), h.db, &transports[i]); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to resolve transport locations")
+			return
+		}
 		transports[i].Vehicles = vehicleMap[transports[i].ID]
 	}
 
@@ -1754,14 +2639,18 @@ func (h *Handler) listTransports(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
-		PickupLocation string             `json:"pickup_location"`
-		Destination    string             `json:"destination"`
-		PassengerCount int                `json:"passenger_count"`
-		ScheduledAt    string             `json:"scheduled_at"`
-		Notes          string             `json:"notes"`
-		EventID        int64              `json:"event_id"`
-		VehicleIDs     []int64            `json:"vehicle_ids"`
-		Vehicles       []TransportVehicle `json:"vehicles"`
+		PickupLocation     string             `json:"pickup_location"`
+		PickupLocationType string             `json:"pickup_location_type"`
+		PickupLocationID   *int64             `json:"pickup_location_id"`
+		Destination        string             `json:"destination"`
+		DestinationType    string             `json:"destination_type"`
+		DestinationID      *int64             `json:"destination_id"`
+		PassengerCount     int                `json:"passenger_count"`
+		ScheduledAt        string             `json:"scheduled_at"`
+		Notes              string             `json:"notes"`
+		EventID            int64              `json:"event_id"`
+		VehicleIDs         []int64            `json:"vehicle_ids"`
+		Vehicles           []TransportVehicle `json:"vehicles"`
 	}
 
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -1808,6 +2697,16 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid event_id")
 		return
 	}
+	pickupLocationType, pickupLocationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, pickup, payload.PickupLocationType, payload.PickupLocationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid pickup location reference: "+err.Error())
+		return
+	}
+	destinationType, destinationID, err := h.resolveWriteLocationReference(r.Context(), tx, payload.EventID, dest, payload.DestinationType, payload.DestinationID)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid destination reference: "+err.Error())
+		return
+	}
 
 	var transport Transport
 	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
@@ -1815,10 +2714,10 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		log.Printf("transport duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
 	}
 	row := tx.QueryRow(r.Context(),
-		`INSERT INTO logistics_transports (pickup_location, destination, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO logistics_transports (pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id, created_at`,
-		pickup, dest, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
+		pickup, pickupLocationType, pickupLocationID, dest, destinationType, destinationID, payload.PassengerCount, durationMinutes, scheduledAt, notes, payload.EventID, seasonID,
 	)
 	if err := row.Scan(&transport.ID, &transport.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create transport")
@@ -1826,20 +2725,28 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	transport.PickupLocation = pickup
+	transport.PickupLocationType = pickupLocationType
+	transport.PickupLocationID = pickupLocationID
 	transport.Destination = dest
+	transport.DestinationType = destinationType
+	transport.DestinationID = destinationID
 	transport.PassengerCount = payload.PassengerCount
 	transport.DurationMinutes = durationMinutes
 	transport.ScheduledAt = scheduledAt
 	transport.Notes = notes
 	transport.EventID = &payload.EventID
 	transport.SeasonID = seasonID
+	if err := h.hydrateTransportLabels(r.Context(), tx, &transport); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to resolve transport locations")
+		return
+	}
 
-	if len(payload.VehicleIDs) > 0 {
-		eventVehicles, err := h.loadEventVehiclesForEvent(r.Context(), tx, payload.EventID, payload.VehicleIDs)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	eventVehicles, err := h.resolveLegacyVehicleSelections(r.Context(), tx, payload.EventID, payload.VehicleIDs, payload.Vehicles)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(eventVehicles) > 0 {
 		if err := h.attachEventVehicles(r.Context(), tx, transport.ID, eventVehicles); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to attach vehicles")
 			return
@@ -2046,17 +2953,22 @@ func (h *Handler) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	// Remove any transport rows explicitly linked to this event vehicle,
-	// plus legacy rows without an event_vehicle_id but matching the same event and name.
+	// Remove any transport rows explicitly linked to this event vehicle.
+	// Legacy rows without an event_vehicle_id are left untouched because matching by name is ambiguous.
 	if _, err := tx.Exec(r.Context(),
 		`DELETE FROM logistics_transport_vehicles
-         WHERE event_vehicle_id = $1
-            OR (event_vehicle_id IS NULL AND transport_id IN (
-              SELECT id FROM logistics_transports WHERE event_id = $2
-            ) AND name = $3)`,
-		id, vehicle.EventID, vehicle.Name,
+         WHERE event_vehicle_id = $1`,
+		id,
 	); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to detach vehicle from transports")
+		return
+	}
+	if _, err := tx.Exec(r.Context(),
+		`DELETE FROM logistics_ground_crew_vehicles
+         WHERE event_vehicle_id = $1`,
+		id,
+	); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to detach vehicle from ground crews")
 		return
 	}
 

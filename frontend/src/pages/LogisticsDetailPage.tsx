@@ -34,8 +34,6 @@ type LocationOption = {
 };
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
-const normalizeName = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim().toLowerCase();
-
 const LogisticsDetailPage = () => {
   const { transportId } = useParams();
   const navigate = useNavigate();
@@ -232,18 +230,6 @@ const LogisticsDetailPage = () => {
     }
   }, [selectedEventId]);
 
-  const locationCoordinates = (name: string | null | undefined) => {
-    const target = normalizeName(name || '');
-    if (!target) return null;
-    const accommodation = accommodations.find((a) => normalizeName(a.name || '') === target);
-    if (accommodation?.coordinates) return accommodation.coordinates;
-    const other = others.find((o) => normalizeName(o.name || '') === target);
-    if (other?.coordinates) return other.coordinates;
-    const af = airfields.find((a) => normalizeName(a.name || '') === target);
-    if (af?.coordinates) return af.coordinates;
-    return null;
-  };
-
   const buildOptionKey = (type: LocationOption['type'], id: number | string, label: string) =>
     `${type}#${id ?? label}`;
   const normalizeLocationValue = (val: string) => val.toLowerCase().replace(/^#?\s*\d+\s*/, '').trim();
@@ -366,13 +352,10 @@ const LogisticsDetailPage = () => {
         }
         payload.duration_minutes = Math.round(parsedDuration);
       }
-      const fallbackVehicleIds =
-        selectedVehicleIds.length > 0
-          ? [...selectedVehicleIds]
-          : loadedVehicles
-              .map((v) => v.event_vehicle_id)
-              .filter((id): id is number => typeof id === 'number');
-      payload.vehicle_ids = fallbackVehicleIds;
+      const existingVehicleIds = loadedVehicles
+        .map((v) => v.event_vehicle_id)
+        .filter((id): id is number => typeof id === 'number');
+      payload.vehicle_ids = Array.from(new Set([...existingVehicleIds, ...selectedVehicleIds]));
       if (showVehicleForm && newVehicle.name.trim()) {
         const created = await createEventVehicle({
           event_id: Number(selectedEventId),
@@ -381,9 +364,21 @@ const LogisticsDetailPage = () => {
           passenger_capacity: Number(newVehicle.passenger_capacity) || 0,
           notes: newVehicle.notes.trim() || undefined
         });
-        payload.vehicle_ids = [...(payload.vehicle_ids || []), created.id];
+        payload.vehicle_ids = Array.from(new Set([...(payload.vehicle_ids || []), created.id]));
       }
-      await updateTransport(Number(transportId), payload);
+      const updated = await updateTransport(Number(transportId), payload);
+      const updatedVehicles = Array.isArray(updated.vehicles) ? updated.vehicles : [];
+      const updatedVehicleIds = updatedVehicles
+        .map((v) => {
+          if (typeof v.event_vehicle_id === 'number') return v.event_vehicle_id;
+          if (typeof (v as any).id === 'number') return (v as any).id;
+          return undefined;
+        })
+        .filter((id): id is number => typeof id === 'number');
+      setLoadedVehicles(updatedVehicles);
+      setSelectedVehicleIds(updatedVehicleIds);
+      setShowVehicleForm(false);
+      setNewVehicle({ name: '', driver: '', passenger_capacity: '', notes: '' });
       setMessage('Transport updated');
       setSaved(true);
     } catch (err) {
@@ -394,8 +389,8 @@ const LogisticsDetailPage = () => {
   };
 
   const transportComplete = (() => {
-    const pickupCoords = locationCoordinates(form.pickup_location);
-    const destCoords = locationCoordinates(form.destination);
+    const pickupCoords = pickupCoordinates;
+    const destCoords = destinationCoordinates;
     const passengerCount = Number(form.passenger_count);
     const hasPassengers = Number.isFinite(passengerCount) && passengerCount > 0;
     const hasVehicles =
@@ -887,58 +882,60 @@ const LogisticsDetailPage = () => {
                 notes?: string;
                 removable: boolean;
               };
-              const items: DisplayVehicle[] =
-                selectedVehicleIds.length > 0
-                  ? selectedVehicleIds.reduce<DisplayVehicle[]>((acc, id) => {
-                      const fromExisting = existingVehicles.find((ev) => ev.id === id);
-                      if (fromExisting) {
-                        acc.push({
-                          id,
-                          name: fromExisting.name,
-                          driver: fromExisting.driver,
-                          passenger_capacity: fromExisting.passenger_capacity,
-                          notes: fromExisting.notes,
-                          removable: true
-                        });
-                        return acc;
-                      }
-                      const fallback = loadedVehicles.find(
-                        (lv) =>
-                          lv.event_vehicle_id === id ||
-                          ((lv as any).id && typeof (lv as any).id === 'number' && (lv as any).id === id)
-                      );
-                      if (fallback) {
-                        acc.push({
-                          id,
-                          name: fallback.name,
-                          driver: fallback.driver,
-                          passenger_capacity: fallback.passenger_capacity,
-                          notes: fallback.notes,
-                          removable: true
-                        });
-                      }
-                      return acc;
-                    }, [])
-                  : [];
+              const items: DisplayVehicle[] = [];
+              const seen = new Set<number>();
 
-              if (items.length === 0 && loadedVehicles.length > 0) {
-                loadedVehicles.forEach((v, idx) => {
-                  const removableId =
-                    typeof v.event_vehicle_id === 'number'
-                      ? v.event_vehicle_id
-                      : (v as any).id && typeof (v as any).id === 'number'
-                      ? (v as any).id
-                      : idx;
-                  items.push({
-                    id: removableId as number,
-                    name: v.name,
-                    driver: v.driver,
-                    passenger_capacity: v.passenger_capacity,
-                    notes: v.notes,
-                    removable: typeof v.event_vehicle_id === 'number' || typeof (v as any).id === 'number'
-                  });
+              loadedVehicles.forEach((v, idx) => {
+                const removableId =
+                  typeof v.event_vehicle_id === 'number'
+                    ? v.event_vehicle_id
+                    : (v as any).id && typeof (v as any).id === 'number'
+                    ? (v as any).id
+                    : idx;
+                if (seen.has(removableId as number)) return;
+                seen.add(removableId as number);
+                items.push({
+                  id: removableId as number,
+                  name: v.name,
+                  driver: v.driver,
+                  passenger_capacity: v.passenger_capacity,
+                  notes: v.notes,
+                  removable: typeof v.event_vehicle_id === 'number' || typeof (v as any).id === 'number'
                 });
-              }
+              });
+
+              selectedVehicleIds.forEach((id) => {
+                if (seen.has(id)) return;
+                const fromExisting = existingVehicles.find((ev) => ev.id === id);
+                if (fromExisting) {
+                  seen.add(id);
+                  items.push({
+                    id,
+                    name: fromExisting.name,
+                    driver: fromExisting.driver,
+                    passenger_capacity: fromExisting.passenger_capacity,
+                    notes: fromExisting.notes,
+                    removable: true
+                  });
+                  return;
+                }
+                const fallback = loadedVehicles.find(
+                  (lv) =>
+                    lv.event_vehicle_id === id ||
+                    ((lv as any).id && typeof (lv as any).id === 'number' && (lv as any).id === id)
+                );
+                if (fallback) {
+                  seen.add(id);
+                  items.push({
+                    id,
+                    name: fallback.name,
+                    driver: fallback.driver,
+                    passenger_capacity: fallback.passenger_capacity,
+                    notes: fallback.notes,
+                    removable: true
+                  });
+                }
+              });
 
               if (items.length === 0) return null;
 
