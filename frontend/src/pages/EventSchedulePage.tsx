@@ -47,6 +47,8 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
+const OVERLAY_EXIT_MS = 180;
+
 type EntryType = 'Innhopp' | 'Transport' | 'Ground Crew' | 'Accommodation' | 'Other' | 'Meal';
 type DayBucket = {
   date: Date;
@@ -246,8 +248,10 @@ const EventSchedulePage = () => {
   const [pendingPickerDate, setPendingPickerDate] = useState<Date | null>(null);
   const pickerPortalRef = useRef<HTMLDivElement | null>(null);
   const [previewEntry, setPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
+  const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
+  const [previewClosing, setPreviewClosing] = useState(false);
   const previewCardStyle = useMemo(() => {
-    if (!previewEntry) return undefined;
+    if (!renderedPreviewEntry) return undefined;
     return {
       position: 'relative' as const,
       width: 'min(720px, 92vw)',
@@ -259,22 +263,27 @@ const EventSchedulePage = () => {
       border: '1px solid var(--modal-border)',
       color: 'var(--text-strong)'
     };
-  }, [previewEntry]);
+  }, [renderedPreviewEntry]);
 
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const hasOverlay = !!previewEntry || !!timePicker;
-    if (hasOverlay) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+    if (previewEntry) {
+      setRenderedPreviewEntry(previewEntry);
+      setPreviewClosing(false);
+      return;
     }
-    return () => {
-      if (hasOverlay) {
-        document.body.style.overflow = '';
-      }
-    };
-  }, [previewEntry, timePicker]);
+    if (!renderedPreviewEntry) return;
+
+    setPreviewClosing(true);
+    const timeoutId = window.setTimeout(() => {
+      setRenderedPreviewEntry(null);
+      setPreviewClosing(false);
+    }, OVERLAY_EXIT_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [previewEntry, renderedPreviewEntry]);
+  const closePreview = useCallback(() => {
+    setPreviewEntry(null);
+  }, []);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
     const sourceRow = (rowNode.querySelector('.schedule-entry') as HTMLElement | null) || rowNode;
@@ -1581,7 +1590,8 @@ const EventSchedulePage = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [timePicker]);
 
-  const overlayOpen = Boolean(timePicker || previewEntry);
+  const previewOverlayEntry = previewEntry ?? renderedPreviewEntry;
+  const overlayOpen = Boolean(timePicker || renderedPreviewEntry);
 
   useEffect(() => {
     if (!overlayOpen || typeof document === 'undefined') return;
@@ -2330,13 +2340,11 @@ const EventSchedulePage = () => {
             document.body
           )
         : null}
-      {previewEntry &&
+      {previewOverlayEntry &&
         typeof document !== 'undefined' &&
         createPortal(
           <div
-            onClick={() => {
-              setPreviewEntry(null);
-            }}
+            onClick={closePreview}
             role="button"
             tabIndex={-1}
             style={{
@@ -2345,18 +2353,20 @@ const EventSchedulePage = () => {
               background: 'var(--overlay-scrim)',
               backdropFilter: 'blur(6px)',
               zIndex: 9999,
-              pointerEvents: 'auto',
+              pointerEvents: previewClosing ? 'none' : 'auto',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '2rem 1rem'
+              padding: '2rem 1rem',
+              opacity: previewClosing ? 0 : 1,
+              transition: `opacity ${OVERLAY_EXIT_MS}ms ease`
             }}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
-                setPreviewEntry(null);
-              } else if (e.key === 'Enter' && previewEntry.entry.to) {
-                navigate(previewEntry.entry.to);
-                setPreviewEntry(null);
+                closePreview();
+              } else if (e.key === 'Enter' && previewOverlayEntry.entry.to) {
+                navigate(previewOverlayEntry.entry.to);
+                closePreview();
               }
             }}
           >
@@ -2364,13 +2374,18 @@ const EventSchedulePage = () => {
               className="card overlay-panel-with-close"
               onClick={(e) => {
                 e.stopPropagation();
-                if (previewEntry.entry.to) {
-                  setHighlightId(previewEntry.entry.id);
-                  navigate(previewEntry.entry.to);
+                if (previewOverlayEntry.entry.to) {
+                  setHighlightId(previewOverlayEntry.entry.id);
+                  navigate(previewOverlayEntry.entry.to);
                 }
-                setPreviewEntry(null);
+                closePreview();
               }}
-              style={previewCardStyle}
+              style={{
+                ...(previewCardStyle ?? {}),
+                opacity: previewClosing ? 0 : 1,
+                transform: previewClosing ? 'translateY(8px) scale(0.985)' : 'translateY(0) scale(1)',
+                transition: `opacity ${OVERLAY_EXIT_MS}ms ease, transform ${OVERLAY_EXIT_MS}ms ease`
+              }}
             >
             <button
               type="button"
@@ -2378,90 +2393,90 @@ const EventSchedulePage = () => {
               aria-label="Close overlay"
               onClick={(e) => {
                 e.stopPropagation();
-                setPreviewEntry(null);
+                closePreview();
               }}
             >
               ×
             </button>
             <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>{previewEntry.entry.title}</h3>
+              <h3 style={{ margin: 0 }}>{previewOverlayEntry.entry.title}</h3>
               <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                 {(() => {
-                  const badgeStyle = typeBadgeStyles[previewEntry.entry.type];
+                  const badgeStyle = typeBadgeStyles[previewOverlayEntry.entry.type];
                   const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
-                  if (previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') {
+                  if (previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') {
                     return (
                       <>
                         <span
-                          className={`badge ${previewEntry.entry.transportComplete ? 'success' : 'danger'}`}
+                          className={`badge ${previewOverlayEntry.entry.transportComplete ? 'success' : 'danger'}`}
                           style={compactBadgeStyle}
                         >
-                          {previewEntry.entry.transportComplete ? '✓' : '!'}
+                          {previewOverlayEntry.entry.transportComplete ? '✓' : '!'}
                         </span>
                         <span className="badge schedule-type-badge" style={badgeStyle}>
-                          {previewEntry.entry.type}
+                          {previewOverlayEntry.entry.type}
                         </span>
                       </>
                     );
                   }
-                  if (previewEntry.entry.type === 'Accommodation') {
+                  if (previewOverlayEntry.entry.type === 'Accommodation') {
                     return (
                       <>
                         <span
                           className={`badge ${
-                            previewEntry.entry.booked && !previewEntry.entry.missingCoordinates ? 'success' : 'danger'
+                            previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? 'success' : 'danger'
                           }`}
                           style={compactBadgeStyle}
                         >
-                          {previewEntry.entry.booked && !previewEntry.entry.missingCoordinates ? '✓' : '!'}
+                          {previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? '✓' : '!'}
                         </span>
                         <span className="badge schedule-type-badge" style={badgeStyle}>
-                          {previewEntry.entry.type}
+                          {previewOverlayEntry.entry.type}
                         </span>
                       </>
                     );
                   }
-                  if (previewEntry.entry.type === 'Innhopp') {
+                  if (previewOverlayEntry.entry.type === 'Innhopp') {
                     return (
                       <>
                         <span
-                          className={`badge ${previewEntry.entry.ready ? 'success' : 'danger'}`}
+                          className={`badge ${previewOverlayEntry.entry.ready ? 'success' : 'danger'}`}
                           style={compactBadgeStyle}
                         >
-                          {previewEntry.entry.ready ? '✓' : '!'}
+                          {previewOverlayEntry.entry.ready ? '✓' : '!'}
                         </span>
                         <span className="badge schedule-type-badge" style={badgeStyle}>
-                          {previewEntry.entry.type}
+                          {previewOverlayEntry.entry.type}
                         </span>
                       </>
                     );
                   }
-                  if (previewEntry.entry.type === 'Other') {
+                  if (previewOverlayEntry.entry.type === 'Other') {
                     return (
                       <>
                         <span
-                          className={`badge ${previewEntry.entry.otherComplete ? 'success' : 'danger'}`}
+                          className={`badge ${previewOverlayEntry.entry.otherComplete ? 'success' : 'danger'}`}
                           style={compactBadgeStyle}
                         >
-                          {previewEntry.entry.otherComplete ? '✓' : '!'}
+                          {previewOverlayEntry.entry.otherComplete ? '✓' : '!'}
                         </span>
                         <span className="badge schedule-type-badge" style={badgeStyle}>
-                          {previewEntry.entry.type}
+                          {previewOverlayEntry.entry.type}
                         </span>
                       </>
                     );
                   }
-                  if (previewEntry.entry.type === 'Meal') {
+                  if (previewOverlayEntry.entry.type === 'Meal') {
                     return (
                       <>
                         <span
-                          className={`badge ${previewEntry.entry.mealComplete ? 'success' : 'danger'}`}
+                          className={`badge ${previewOverlayEntry.entry.mealComplete ? 'success' : 'danger'}`}
                           style={compactBadgeStyle}
                         >
-                          {previewEntry.entry.mealComplete ? '✓' : '!'}
+                          {previewOverlayEntry.entry.mealComplete ? '✓' : '!'}
                         </span>
                         <span className="badge schedule-type-badge" style={badgeStyle}>
-                          {previewEntry.entry.type}
+                          {previewOverlayEntry.entry.type}
                         </span>
                       </>
                     );
@@ -2482,28 +2497,28 @@ const EventSchedulePage = () => {
                   </div>
                 );
 
-                if (previewEntry.entry.type === 'Innhopp') {
+                if (previewOverlayEntry.entry.type === 'Innhopp') {
                   const fields: React.ReactNode[] = [];
-                  if (previewEntry.entry.scheduledAt) {
-                    fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(previewEntry.entry.scheduledAt)));
+                  if (previewOverlayEntry.entry.scheduledAt) {
+                    fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(previewOverlayEntry.entry.scheduledAt)));
                   }
-                  fields.push(renderField('reason', 'REASON FOR CHOICE', previewEntry.entry.innhoppReason || '—'));
+                  fields.push(renderField('reason', 'REASON FOR CHOICE', previewOverlayEntry.entry.innhoppReason || '—'));
                   fields.push(
                     renderField(
                       'elevation',
                       'ELEVATION',
-                      previewEntry.entry.innhoppElevation != null
-                        ? formatMetersWithFeet(previewEntry.entry.innhoppElevation)
+                      previewOverlayEntry.entry.innhoppElevation != null
+                        ? formatMetersWithFeet(previewOverlayEntry.entry.innhoppElevation)
                         : '—'
                     )
                   );
-                  fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', previewEntry.entry.innhoppTakeoffName || '—'));
+                  fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', previewOverlayEntry.entry.innhoppTakeoffName || '—'));
                   fields.push(
                     renderField(
                       'elevation_diff',
                       'ELEVATION DIFFERENCE',
-                      previewEntry.entry.innhoppElevationDiff != null
-                        ? formatMetersWithFeet(previewEntry.entry.innhoppElevationDiff)
+                      previewOverlayEntry.entry.innhoppElevationDiff != null
+                        ? formatMetersWithFeet(previewOverlayEntry.entry.innhoppElevationDiff)
                         : '—'
                     )
                   );
@@ -2511,9 +2526,9 @@ const EventSchedulePage = () => {
                     renderField(
                       'rescue_boat',
                       'RESCUE BOAT',
-                      previewEntry.entry.innhoppRescueBoat == null
+                      previewOverlayEntry.entry.innhoppRescueBoat == null
                         ? '—'
-                        : previewEntry.entry.innhoppRescueBoat
+                        : previewOverlayEntry.entry.innhoppRescueBoat
                         ? 'Yes'
                         : 'No'
                     )
@@ -2522,9 +2537,9 @@ const EventSchedulePage = () => {
                     renderField(
                       'primary',
                       'PRIMARY AREA',
-                      previewEntry.entry.innhoppPrimaryName
-                        ? `${previewEntry.entry.innhoppPrimaryName}${
-                            previewEntry.entry.innhoppPrimarySize ? ` (${previewEntry.entry.innhoppPrimarySize})` : ''
+                      previewOverlayEntry.entry.innhoppPrimaryName
+                        ? `${previewOverlayEntry.entry.innhoppPrimaryName}${
+                            previewOverlayEntry.entry.innhoppPrimarySize ? ` (${previewOverlayEntry.entry.innhoppPrimarySize})` : ''
                           }`
                         : '—'
                     )
@@ -2533,30 +2548,30 @@ const EventSchedulePage = () => {
                     renderField(
                       'secondary',
                       'SECONDARY AREA',
-                      previewEntry.entry.innhoppSecondaryName
-                        ? `${previewEntry.entry.innhoppSecondaryName}${
-                            previewEntry.entry.innhoppSecondarySize ? ` (${previewEntry.entry.innhoppSecondarySize})` : ''
+                      previewOverlayEntry.entry.innhoppSecondaryName
+                        ? `${previewOverlayEntry.entry.innhoppSecondaryName}${
+                            previewOverlayEntry.entry.innhoppSecondarySize ? ` (${previewOverlayEntry.entry.innhoppSecondarySize})` : ''
                           }`
                         : '—'
                     )
                   );
-                  fields.push(renderField('risk', 'RISK ASSESSMENT', previewEntry.entry.innhoppRisk || '—'));
+                  fields.push(renderField('risk', 'RISK ASSESSMENT', previewOverlayEntry.entry.innhoppRisk || '—'));
                   fields.push(
-                    renderField('minimum', 'MINIMUM REQUIREMENTS', previewEntry.entry.innhoppMinimumRequirements || '—')
+                    renderField('minimum', 'MINIMUM REQUIREMENTS', previewOverlayEntry.entry.innhoppMinimumRequirements || '—')
                   );
-                  fields.push(renderField('notes', 'NOTES', (previewEntry.entry as any).notes || '—'));
+                  fields.push(renderField('notes', 'NOTES', (previewOverlayEntry.entry as any).notes || '—'));
                   fields.push(
                     renderField(
                       'landowners',
                       'LANDOWNERS PERMISSION',
-                      previewEntry.entry.innhoppLandOwnerPermission == null
+                      previewOverlayEntry.entry.innhoppLandOwnerPermission == null
                         ? '—'
-                        : previewEntry.entry.innhoppLandOwnerPermission
+                        : previewOverlayEntry.entry.innhoppLandOwnerPermission
                         ? 'Yes'
                         : 'No'
                     )
                   );
-                  if (previewEntry.entry.innhoppCoordinates && canOpenMapsActions) {
+                  if (previewOverlayEntry.entry.innhoppCoordinates && canOpenMapsActions) {
                     fields.push(
                       <div
                         key="open-maps"
@@ -2578,7 +2593,7 @@ const EventSchedulePage = () => {
                               e.stopPropagation();
                               window.open(
                                 `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                  previewEntry.entry.innhoppCoordinates || ''
+                                  previewOverlayEntry.entry.innhoppCoordinates || ''
                                 )}`,
                                 '_blank'
                               );
@@ -2595,21 +2610,21 @@ const EventSchedulePage = () => {
 
                 return (
                   <>
-                    {previewEntry.entry.type === 'Accommodation' ? (
+                    {previewOverlayEntry.entry.type === 'Accommodation' ? (
                       <>
                         <div key="booked">
                           <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>BOOKED</div>
-                          <div>{previewEntry.entry.booked ? 'Yes' : 'No'}</div>
+                          <div>{previewOverlayEntry.entry.booked ? 'Yes' : 'No'}</div>
                         </div>
-                        {previewEntry.entry.scheduledAt ? (
+                        {previewOverlayEntry.entry.scheduledAt ? (
                           <div key="scheduled">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
-                            <div>{formatDateTime(previewEntry.entry.scheduledAt)}</div>
+                            <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
                           </div>
                         ) : null}
                         <div key="notes">
                           <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
-                          <div>{(previewEntry.entry as any).notes || '—'}</div>
+                          <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
                         </div>
                         <div
                           style={{
@@ -2618,7 +2633,7 @@ const EventSchedulePage = () => {
                             justifyContent: 'center'
                           }}
                         >
-                          {previewEntry.entry.coordinates && canOpenMapsActions ? (
+                          {previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
                             <button
                               type="button"
                               className="link-button"
@@ -2627,7 +2642,7 @@ const EventSchedulePage = () => {
                                 e.stopPropagation();
                                 window.open(
                                   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                    previewEntry.entry.coordinates || ''
+                                    previewOverlayEntry.entry.coordinates || ''
                                   )}`,
                                   '_blank'
                                 );
@@ -2642,42 +2657,42 @@ const EventSchedulePage = () => {
                       </>
                     ) : (
                       <>
-                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') ? (
+                        {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') ? (
                           <div key="duration">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>DURATION</div>
-                            <div>{previewEntry.entry.routeDurationLabel || 'Unavailable'}</div>
+                            <div>{previewOverlayEntry.entry.routeDurationLabel || 'Unavailable'}</div>
                           </div>
-                        ) : previewEntry.entry.subtitle ? (
+                        ) : previewOverlayEntry.entry.subtitle ? (
                           <div key="subtitle">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SUBTITLE</div>
-                            <div>{previewEntry.entry.subtitle}</div>
+                            <div>{previewOverlayEntry.entry.subtitle}</div>
                           </div>
                         ) : null}
-                        {previewEntry.entry.type === 'Meal' && (
+                        {previewOverlayEntry.entry.type === 'Meal' && (
                           <div key="meal-location">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>LOCATION</div>
-                            <div>{(previewEntry.entry as any).location || '—'}</div>
+                            <div>{(previewOverlayEntry.entry as any).location || '—'}</div>
                           </div>
                         )}
-                        {previewEntry.entry.scheduledAt ? (
+                        {previewOverlayEntry.entry.scheduledAt ? (
                           <div key="scheduled">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
-                            <div>{formatDateTime(previewEntry.entry.scheduledAt)}</div>
+                            <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
                           </div>
                         ) : null}
                         <div key="notes">
                           <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
-                          <div>{(previewEntry.entry as any).notes || '—'}</div>
+                          <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
                         </div>
-                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
-                        (previewEntry.entry as any).vehicles ? (
+                        {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') &&
+                        (previewOverlayEntry.entry as any).vehicles ? (
                           <div key="vehicles">
                             <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
                             <div style={{ marginTop: '0.15rem' }}>
-                              {((previewEntry.entry as any).vehicles as any[]).length === 0 ? (
+                              {((previewOverlayEntry.entry as any).vehicles as any[]).length === 0 ? (
                                 <div className="muted">—</div>
                               ) : (
-                                ((previewEntry.entry as any).vehicles as any[]).map((v, idx) => (
+                                ((previewOverlayEntry.entry as any).vehicles as any[]).map((v, idx) => (
                                   <div key={idx} className="muted">
                                     <strong>{v.name}</strong>
                                     {v.driver ? ` (Driver: ${v.driver})` : ''}
@@ -2689,9 +2704,9 @@ const EventSchedulePage = () => {
                           </div>
                         ) : null}
                         {canOpenMapsActions &&
-                        (previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
-                        (previewEntry.entry as any).transportRouteOrigin &&
-                        (previewEntry.entry as any).transportRouteDestination ? (
+                        (previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') &&
+                        (previewOverlayEntry.entry as any).transportRouteOrigin &&
+                        (previewOverlayEntry.entry as any).transportRouteDestination ? (
                           <div
                             key="route"
                             style={{
@@ -2706,8 +2721,8 @@ const EventSchedulePage = () => {
                               style={{ fontSize: '1rem' }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                const origin = (previewEntry.entry as any).transportRouteOrigin || '';
-                                const dest = (previewEntry.entry as any).transportRouteDestination || '';
+                                const origin = (previewOverlayEntry.entry as any).transportRouteOrigin || '';
+                                const dest = (previewOverlayEntry.entry as any).transportRouteDestination || '';
                                 window.open(
                                   `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
                                     origin
@@ -2720,7 +2735,7 @@ const EventSchedulePage = () => {
                             </button>
                           </div>
                         ) : null}
-                        {previewEntry.entry.type === 'Other' && previewEntry.entry.coordinates && canOpenMapsActions ? (
+                        {previewOverlayEntry.entry.type === 'Other' && previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
                           <div
                             key="other-maps"
                             style={{
@@ -2737,7 +2752,7 @@ const EventSchedulePage = () => {
                                 e.stopPropagation();
                                 window.open(
                                   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                    previewEntry.entry.coordinates || ''
+                                    previewOverlayEntry.entry.coordinates || ''
                                   )}`,
                                   '_blank'
                                 );

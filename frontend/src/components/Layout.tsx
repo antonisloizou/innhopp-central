@@ -101,15 +101,7 @@ const Layout = () => {
                   end={item.to === '/events'}
                   reloadDocument={forceDocumentNavigation}
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                  onClick={(event) => {
-                    if (forceDocumentNavigation) {
-                      handleNavClick();
-                      return;
-                    }
-                    event.preventDefault();
-                    handleNavClick();
-                    navigate(item.to);
-                  }}
+                  onClick={handleNavClick}
                 >
                   {item.label}
                 </NavLink>
@@ -121,15 +113,7 @@ const Layout = () => {
               to="/profile"
               reloadDocument={forceDocumentNavigation}
               className={({ isActive }) => (isActive ? 'nav-user nav-user-link active' : 'nav-user nav-user-link')}
-              onClick={(event) => {
-                if (forceDocumentNavigation) {
-                  handleNavClick();
-                  return;
-                }
-                event.preventDefault();
-                handleNavClick();
-                navigate('/profile');
-              }}
+              onClick={handleNavClick}
             >
               {user?.full_name || user?.email}
             </NavLink>
