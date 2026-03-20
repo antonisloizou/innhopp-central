@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Event, Season, listEvents, listSeasons } from '../api/events';
-import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
+import { canManageEvents } from '../auth/access';
+import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/events';
+import { ParticipantProfile, getMyParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
 const normalizeEvents = (raw: Event[]) =>
@@ -19,6 +21,8 @@ const formatDate = (value?: string | null) =>
     : 'TBD';
 
 const EventCalendarPage = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +30,12 @@ const EventCalendarPage = () => {
   const [showPast, setShowPast] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
+  const [myParticipantProfile, setMyParticipantProfile] = useState<ParticipantProfile | null>(null);
+  const [seasonMenuOpen, setSeasonMenuOpen] = useState(false);
+  const [deletingSeasonId, setDeletingSeasonId] = useState<number | null>(null);
+  const canManage = canManageEvents(user);
+  const forceDocumentNavigation = !!user?.impersonator;
+  const seasonMenuRef = useRef<HTMLDivElement | null>(null);
 
   const seasonLookup = useMemo(() => {
     const map = new Map<number, Season>();
@@ -39,15 +49,44 @@ const EventCalendarPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [seasonResponse, eventResponse, participantResponse] = await Promise.all([
+        const [seasonResponse, eventResponse] = await Promise.all([
           listSeasons(),
-          listEvents(),
-          listParticipantProfiles()
+          listEvents()
         ]);
         if (cancelled) return;
         setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
         setEvents(normalizeEvents(eventResponse as Event[]));
-        setParticipants(Array.isArray(participantResponse) ? participantResponse : []);
+
+        try {
+          const myProfileResponse = await getMyParticipantProfile();
+          if (cancelled) return;
+          setMyParticipantProfile(myProfileResponse);
+        } catch (myProfileError) {
+          const status = (myProfileError as Error & { status?: number })?.status;
+          if (!cancelled && (status === 403 || status === 404)) {
+            setMyParticipantProfile(null);
+          } else {
+            throw myProfileError;
+          }
+        }
+
+        try {
+          const participantResponse = await listParticipantProfiles();
+          if (cancelled) return;
+          setParticipants(Array.isArray(participantResponse) ? participantResponse : []);
+        } catch (participantError) {
+          if (
+            !cancelled &&
+            typeof participantError === "object" &&
+            participantError !== null &&
+            'status' in participantError &&
+            participantError.status === 403
+          ) {
+            setParticipants([]);
+            return;
+          }
+          throw participantError;
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load events');
@@ -64,6 +103,29 @@ const EventCalendarPage = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!seasonMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (seasonMenuRef.current?.contains(target)) return;
+      setSeasonMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSeasonMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [seasonMenuOpen]);
+
   const isPastEvent = (event: Event) => {
     if (event.status === 'past') return true;
     const ends = parseEventLocal(event.ends_at);
@@ -78,6 +140,15 @@ const EventCalendarPage = () => {
     if (selectedSeason && event.season_id !== Number(selectedSeason)) return false;
     return true;
   });
+
+  const myEvents = useMemo(
+    () =>
+      events.filter((event) => {
+        if (!myParticipantProfile) return false;
+        return Array.isArray(event.participant_ids) && event.participant_ids.includes(myParticipantProfile.id);
+      }),
+    [events, myParticipantProfile]
+  );
 
   const groupedEvents = useMemo(() => {
     const map = new Map<number, Event[]>();
@@ -103,6 +174,31 @@ const EventCalendarPage = () => {
         events: group
       }));
   }, [visibleEvents, seasonLookup]);
+
+  const groupedMyEvents = useMemo(() => {
+    const map = new Map<number, Event[]>();
+    myEvents.forEach((event) => {
+      const list = map.get(event.season_id) || [];
+      list.push(event);
+      map.set(event.season_id, list);
+    });
+
+    const sortNameDesc = (a: number, b: number) => {
+      const nameA = seasonLookup.get(a)?.name || `Season ${a}`;
+      const nameB = seasonLookup.get(b)?.name || `Season ${b}`;
+      const cmp = nameB.localeCompare(nameA);
+      if (cmp !== 0) return cmp;
+      return b - a;
+    };
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => sortNameDesc(a, b))
+      .map(([seasonId, group]) => ({
+        seasonId,
+        label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
+        events: group
+      }));
+  }, [myEvents, seasonLookup]);
 
   const participantLookup = useMemo(() => {
     const map = new Map<number, ParticipantProfile>();
@@ -132,20 +228,278 @@ const EventCalendarPage = () => {
     setShowPast(allPast);
   }, [events, selectedSeason]);
 
-  const firstSeasonLabel = groupedEvents[0]?.label || null;
+  const selectedSeasonName = selectedSeason
+    ? seasons.find((season) => season.id === Number(selectedSeason))?.name || 'Unknown season'
+    : 'All seasons';
+
+  const refreshCalendarData = async () => {
+    const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
+    setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
+    setEvents(normalizeEvents(eventResponse as Event[]));
+  };
+
+  const handleDeleteSeason = async (season: Season) => {
+    const confirmed = window.confirm(`Delete "${season.name}"? This will also delete its events.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingSeasonId(season.id);
+      setError(null);
+      await deleteSeason(season.id);
+      await refreshCalendarData();
+      if (selectedSeason === String(season.id)) {
+        setSelectedSeason('');
+      }
+      setSeasonMenuOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete season');
+    } finally {
+      setDeletingSeasonId(null);
+    }
+  };
+
+  const renderEventGroups = (
+    groups: { seasonId: number; label: string; events: Event[] }[],
+    options?: { showFirstHeading?: boolean }
+  ) => (
+    <div className="stack">
+      {groups.map((group, idx) => (
+        <div key={group.seasonId} className="stack">
+          {idx === 0 && !options?.showFirstHeading ? null : (
+            <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+              <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>{group.label}</span>
+            </p>
+          )}
+          <div className="stack">
+            {group.events.map((event) => (
+              <Link
+                key={event.id}
+                className="card-link"
+                to={`/events/${event.id}`}
+                reloadDocument={forceDocumentNavigation}
+                state={{ suppressHighlight: true }}
+              >
+                <article className="card event-summary-card">
+                  {(() => {
+                    const nonStaffCount = countNonStaff(event.participant_ids);
+                    const slotCount = event.slots ?? 0;
+                    const remaining = Math.max(slotCount - nonStaffCount, 0);
+                    const isFull = remaining === 0;
+                    const past = isPastEvent(event);
+                    return (
+                      <>
+                        <header className="card-header event-card-header">
+                          <div>
+                            <h3>{event.name}</h3>
+                            <p className="muted event-location">{event.location || 'Location TBD'}</p>
+                          </div>
+                          <div className="event-card-badges">
+                            <span className={`badge status-${event.status}`}>
+                              {event.status}
+                            </span>
+                            {!past && (
+                              <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                              </span>
+                            )}
+                          </div>
+                        </header>
+                        <dl className="card-details">
+                          <div>
+                            <dt>Starts</dt>
+                            <dd>{formatDate(event.starts_at)}</dd>
+                          </div>
+                          <div>
+                            <dt>Ends</dt>
+                            <dd>{formatDate(event.ends_at)}</dd>
+                          </div>
+                          <div>
+                            <dt>Participants</dt>
+                            <dd>{countNonStaff(event.participant_ids)}</dd>
+                          </div>
+                          <div>
+                            <dt>INNHOPPS</dt>
+                            <dd>{event.innhopps?.length ?? 0}</dd>
+                          </div>
+                          <div>
+                            <dt>Slots</dt>
+                            <dd>{slotCount}</dd>
+                          </div>
+                        </dl>
+                      </>
+                    );
+                  })()}
+                </article>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <section className="stack">
-      <header className="page-header">
-        <div>
-          <h2 style={{ margin: 0 }}>Event Calendar</h2>
-        </div>
-      </header>
       <div className="stack">
+        {myEvents.length > 0 && (
+          <article className="card">
+            <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{ flex: 1, fontWeight: 800, fontSize: '1.25rem' }}>My Events</div>
+              <span className="badge neutral">
+                {myEvents.length} {myEvents.length === 1 ? 'event' : 'events'}
+              </span>
+            </header>
+            {renderEventGroups(groupedMyEvents, { showFirstHeading: true })}
+          </article>
+        )}
+
         <article className="card">
           <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ flex: 1, fontWeight: 800, fontSize: '1.25rem' }}>
-              {firstSeasonLabel || 'Events'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+              <div style={{ fontWeight: 800, fontSize: '1.25rem' }}>Event Calendar</div>
+              <div
+                ref={seasonMenuRef}
+                style={{ position: 'relative', minWidth: '220px' }}
+              >
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => setSeasonMenuOpen((open) => !open)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: '0.5rem',
+                    border: '1px solid var(--panel-input-border)',
+                    background: 'var(--panel-input-bg)',
+                    color: 'var(--text-strong)',
+                    fontSize: '1rem'
+                  }}
+                >
+                  <span>{selectedSeasonName}</span>
+                  <span aria-hidden="true">{seasonMenuOpen ? '▴' : '▾'}</span>
+                </button>
+                {seasonMenuOpen && (
+                  <div
+                    className="card"
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 0.35rem)',
+                      left: 0,
+                      zIndex: 20,
+                      minWidth: '280px',
+                      padding: '0.35rem',
+                      boxShadow: 'var(--panel-card-shadow)',
+                      background: 'var(--modal-surface)',
+                      border: '1px solid var(--modal-border)',
+                      backdropFilter: 'blur(10px)'
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        setSelectedSeason('');
+                        setSeasonMenuOpen(false);
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.55rem 0.65rem',
+                        borderRadius: '0.5rem'
+                      }}
+                    >
+                      <span>All seasons</span>
+                      {!selectedSeason && <span className="badge neutral">Selected</span>}
+                    </button>
+                    {[...seasons]
+                      .sort((a, b) => b.name.localeCompare(a.name))
+                      .map((season) => (
+                        <div
+                          key={season.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem'
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => {
+                              setSelectedSeason(String(season.id));
+                              setSeasonMenuOpen(false);
+                            }}
+                            style={{
+                              flex: 1,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              minWidth: 0,
+                              padding: '0.55rem 0.65rem',
+                              borderRadius: '0.5rem'
+                            }}
+                          >
+                            <span
+                              style={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {season.name}
+                            </span>
+                            {selectedSeason === String(season.id) && <span className="badge neutral">Selected</span>}
+                          </button>
+                          {canManage && (
+                            <button
+                              type="button"
+                              className="ghost danger"
+                              aria-label={`Delete ${season.name}`}
+                              disabled={deletingSeasonId === season.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleDeleteSeason(season);
+                              }}
+                              style={{
+                                padding: '0.4rem 0.6rem',
+                                lineHeight: 1,
+                                fontSize: '1rem'
+                              }}
+                            >
+                              {deletingSeasonId === season.id ? '…' : 'x'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          setSeasonMenuOpen(false);
+                          navigate('/seasons/new');
+                        }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0.55rem 0.65rem',
+                          borderRadius: '0.5rem',
+                          fontWeight: 700
+                        }}
+                      >
+                        Create season
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <span className="badge neutral">
               {visibleEvents.length} {visibleEvents.length === 1 ? 'event' : 'events'}
@@ -156,87 +510,17 @@ const EventCalendarPage = () => {
           ) : error ? (
             <p className="error-text">{error}</p>
           ) : visibleEvents.length === 0 ? (
-            <p className="muted">No events yet. Use the actions below to add one.</p>
+            <p className="muted">No future events scheduled</p>
           ) : (
-            <div className="stack">
-              {groupedEvents.map((group, idx) => (
-                <div key={group.seasonId} className="stack">
-                  {idx === 0 ? null : (
-                    <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-                      <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>{group.label}</span>
-                    </p>
-                  )}
-                  <div className="stack">
-                    {group.events.map((event) => (
-                      <Link
-                        key={event.id}
-                        className="card-link"
-                        to={`/events/${event.id}`}
-                        state={{ suppressHighlight: true }}
-                      >
-                        <article className="card event-summary-card">
-                          {(() => {
-                            const nonStaffCount = countNonStaff(event.participant_ids);
-                            const slotCount = event.slots ?? 0;
-                            const remaining = Math.max(slotCount - nonStaffCount, 0);
-                            const isFull = remaining === 0;
-                            const past = isPastEvent(event);
-                            return (
-                              <>
-                                <header className="card-header event-card-header">
-                                  <div>
-                                    <h3>{event.name}</h3>
-                                    <p className="muted event-location">{event.location || 'Location TBD'}</p>
-                                  </div>
-                                  <div className="event-card-badges">
-                                    <span className={`badge status-${event.status}`}>
-                                      {event.status}
-                                    </span>
-                                    {!past && (
-                                      <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                                        {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                                      </span>
-                                    )}
-                                  </div>
-                                </header>
-                                <dl className="card-details">
-                                <div>
-                                  <dt>Starts</dt>
-                                  <dd>{formatDate(event.starts_at)}</dd>
-                                </div>
-                                <div>
-                              <dt>Ends</dt>
-                              <dd>{formatDate(event.ends_at)}</dd>
-                            </div>
-                            <div>
-                              <dt>Participants</dt>
-                              <dd>{countNonStaff(event.participant_ids)}</dd>
-                            </div>
-                            <div>
-                                  <dt>INNHOPPS</dt>
-                                  <dd>{event.innhopps?.length ?? 0}</dd>
-                                </div>
-                                <div>
-                                  <dt>Slots</dt>
-                                  <dd>{slotCount}</dd>
-                                </div>
-                              </dl>
-                              </>
-                            );
-                          })()}
-                        </article>
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            renderEventGroups(groupedEvents, { showFirstHeading: !selectedSeason })
           )}
           <footer className="card-footer">
             <div className="card-actions">
-              <Link className="primary button-link" to="/events/new">
-                Create event
-              </Link>
+              {canManage && (
+                <Link className="primary button-link" to="/events/new">
+                  Create event
+                </Link>
+              )}
               <button className="ghost" type="button" onClick={() => setShowPast((v) => !v)}>
                 {showPast ? 'Hide past events' : 'Show past events'}
               </button>
@@ -244,33 +528,11 @@ const EventCalendarPage = () => {
           </footer>
         </article>
 
-        <article className="card">
-          <div className="form-grid">
-            <label className="form-field">
-              <span>Season</span>
-              <select
-                value={selectedSeason}
-                onChange={(e) => setSelectedSeason(e.target.value)}
-                style={{ width: '16.666%', minWidth: '140px' }}
-              >
-                <option value="">All seasons</option>
-                {[...seasons]
-                  .sort((a, b) => b.name.localeCompare(a.name))
-                  .map((season) => (
-                    <option key={season.id} value={season.id}>
-                      {season.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            {seasons.length === 0 && <p className="muted">No seasons yet. Create one to get started.</p>}
-          </div>
-          <footer className="card-footer">
-            <Link className="primary button-link" to="/seasons/new">
-              Create season
-            </Link>
-          </footer>
-        </article>
+        {seasons.length === 0 && !canManage && (
+          <article className="card">
+            <p className="muted">No seasons yet. Create one to get started.</p>
+          </article>
+        )}
       </div>
     </section>
   );

@@ -107,6 +107,7 @@ var RoleMatrix = map[Permission][]Role{
 		RoleGroundCrew,
 		RoleDriver,
 		RolePacker,
+		RoleParticipant,
 	},
 	PermissionManageLogistics: {
 		RoleAdmin,

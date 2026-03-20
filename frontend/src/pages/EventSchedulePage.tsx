@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, useRef, useCallback, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
+import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
 import {
   Accommodation,
   Event,
@@ -177,6 +179,9 @@ const EventSchedulePage = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
+  const participantOnly = isParticipantOnlySession(user);
+  const canOpenMapsActions = canUseStaffMapsActions(user);
   const [eventData, setEventData] = useState<Event | null>(null);
   const [transports, setTransports] = useState<Transport[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
@@ -376,6 +381,7 @@ const EventSchedulePage = () => {
     Other: true,
     Meal: true
   });
+  const visibleGroundCrews = participantOnly ? [] : groundCrews;
   const locationCoordinates = useCallback(
     (name: string | null | undefined) => {
       if (!name) return null;
@@ -401,12 +407,13 @@ const EventSchedulePage = () => {
       setLoading(true);
       setError(null);
       try {
+        const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
         const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
           getEvent(Number(eventId)),
           listTransports(),
           listGroundCrews(),
           listAccommodations(Number(eventId)),
-          listParticipantProfiles(),
+          participantPromise,
           listOthers(),
           listMeals(),
           listAirfields()
@@ -434,7 +441,8 @@ const EventSchedulePage = () => {
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [eventId, participantOnly]);
+
   const reload = useCallback(
     async (options?: { preserveLoading?: boolean }) => {
     if (!eventId) return;
@@ -444,12 +452,13 @@ const EventSchedulePage = () => {
       }
     setMessage(null);
     try {
+      const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
       const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
         getEvent(Number(eventId)),
         listTransports(),
         listGroundCrews(),
         listAccommodations(Number(eventId)),
-        listParticipantProfiles(),
+        participantPromise,
         listOthers(),
         listMeals(),
         listAirfields()
@@ -470,7 +479,7 @@ const EventSchedulePage = () => {
         }
     }
     },
-    [eventId]
+    [eventId, participantOnly]
   );
 
   const dayBuckets: DayBucket[] = useMemo(() => {
@@ -484,7 +493,7 @@ const EventSchedulePage = () => {
       const key = extractDateKey(t.scheduled_at || undefined);
       if (key) keys.add(key);
     });
-    groundCrews.forEach((g) => {
+    visibleGroundCrews.forEach((g) => {
       const key = extractDateKey(g.scheduled_at || undefined);
       if (key) keys.add(key);
     });
@@ -514,7 +523,7 @@ const EventSchedulePage = () => {
     const buckets = bucketDates.map(({ key, date }) => {
       const innhoppItems = innhopps.filter((i) => extractDateKey(i.scheduled_at || undefined) === key);
       const transportItems = transports.filter((t) => extractDateKey(t.scheduled_at || undefined) === key);
-      const groundCrewItems = groundCrews.filter((g) => extractDateKey(g.scheduled_at || undefined) === key);
+      const groundCrewItems = visibleGroundCrews.filter((g) => extractDateKey(g.scheduled_at || undefined) === key);
       const accommodationItems = accommodations.filter(
         (a) =>
           extractDateKey(a.check_in_at || undefined) === key || extractDateKey(a.check_out_at || undefined) === key
@@ -535,7 +544,7 @@ const EventSchedulePage = () => {
     });
 
     const unscheduledTransports = transports.filter((t) => !t.scheduled_at || extractDateKey(t.scheduled_at) === '');
-    const unscheduledGroundCrews = groundCrews.filter((g) => !g.scheduled_at || extractDateKey(g.scheduled_at) === '');
+    const unscheduledGroundCrews = visibleGroundCrews.filter((g) => !g.scheduled_at || extractDateKey(g.scheduled_at) === '');
     const unscheduledOthers = others.filter((o) => !o.scheduled_at || extractDateKey(o.scheduled_at) === '');
     const unscheduledMeals = meals.filter((m) => !m.scheduled_at || extractDateKey(m.scheduled_at) === '');
     if ((unscheduledTransports.length > 0 || unscheduledGroundCrews.length > 0 || unscheduledOthers.length > 0 || unscheduledMeals.length > 0) && !keys.has('unscheduled')) {
@@ -553,7 +562,15 @@ const EventSchedulePage = () => {
     }
 
     return buckets;
-  }, [eventData, transports, groundCrews, accommodations, others, meals]);
+  }, [eventData, transports, visibleGroundCrews, accommodations, others, meals]);
+
+  const allDatedBucketsArePast = useMemo(() => {
+    const datedBuckets = dayBuckets.filter((day) => day.key !== 'unscheduled');
+    if (datedBuckets.length === 0) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return datedBuckets.every((day) => day.date < today);
+  }, [dayBuckets]);
 
   const resetPointerDrag = useCallback(() => {
     pointerDragRef.current = null;
@@ -796,6 +813,9 @@ const EventSchedulePage = () => {
     return minutes;
   };
   const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'];
+  const visibleTypeFilterOrder = participantOnly
+    ? typeFilterOrder.filter((type) => type !== 'Ground Crew')
+    : typeFilterOrder;
   const deriveType = (id: string): EntryType | null => {
     if (id.startsWith('i-')) return 'Innhopp';
     if (id.startsWith('t-')) return 'Transport';
@@ -823,7 +843,7 @@ const EventSchedulePage = () => {
           title: `Innhopp #${i.sequence}: ${i.name}`,
           subtitle: '',
           type: 'Innhopp',
-          to: eventData ? `/events/${eventData.id}/innhopps/${i.id}` : undefined,
+          to: participantOnly ? undefined : eventData ? `/events/${eventData.id}/innhopps/${i.id}` : undefined,
           ready: isInnhoppReady(i),
           missingCoordinates: !hasText(i.coordinates),
           description: i.reason_for_choice || i.primary_landing_area?.description || null,
@@ -876,7 +896,7 @@ const EventSchedulePage = () => {
           title: `${cleanLocation(t.pickup_location)} → ${cleanLocation(t.destination)}`,
           subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
           type: 'Transport',
-          to: `/logistics/${t.id}`,
+          to: participantOnly ? undefined : `/logistics/${t.id}`,
           transportComplete: complete,
           missingCoordinates: !pickupCoords || !destCoords,
           transportRouteOrigin: pickupCoords || null,
@@ -920,7 +940,7 @@ const EventSchedulePage = () => {
           title: `${cleanLocation(g.pickup_location)} → ${cleanLocation(g.destination)}`,
           subtitle: `${routeDurationLabel} • ${routeVehiclesLabel}`,
           type: 'Ground Crew',
-          to: `/logistics/ground-crew/${g.id}`,
+          to: participantOnly ? undefined : `/logistics/ground-crew/${g.id}`,
           transportComplete: complete,
           missingCoordinates: !pickupCoords || !destCoords,
           transportRouteOrigin: pickupCoords || null,
@@ -943,7 +963,7 @@ const EventSchedulePage = () => {
           title: o.name || 'Other logistics',
           subtitle: '',
           type: 'Other',
-          to: `/logistics/others/${o.id}`,
+          to: participantOnly ? undefined : `/logistics/others/${o.id}`,
           missingCoordinates: !hasText(o.coordinates),
           coordinates: o.coordinates || null,
           description: o.description || null,
@@ -963,7 +983,7 @@ const EventSchedulePage = () => {
           title: m.name,
           subtitle: '',
           type: 'Meal',
-          to: `/logistics/meals/${m.id}`,
+          to: participantOnly ? undefined : `/logistics/meals/${m.id}`,
           mealComplete: hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at),
           location: m.location || null,
           notes: m.notes || null,
@@ -984,7 +1004,7 @@ const EventSchedulePage = () => {
             type: 'Accommodation',
             booked: !!a.booked,
             coordinates: a.coordinates || null,
-            to: `/events/${eventId}/accommodations/${a.id}`,
+            to: participantOnly ? undefined : `/events/${eventId}/accommodations/${a.id}`,
             missingCoordinates: !hasText(a.coordinates),
             notes: a.notes || null,
             scheduledAt: a.check_in_at
@@ -1003,7 +1023,7 @@ const EventSchedulePage = () => {
             type: 'Accommodation',
             booked: !!a.booked,
             coordinates: a.coordinates || null,
-            to: `/events/${eventId}/accommodations/${a.id}`,
+            to: participantOnly ? undefined : `/events/${eventId}/accommodations/${a.id}`,
             missingCoordinates: !hasText(a.coordinates),
             notes: a.notes || null,
             scheduledAt: a.check_out_at
@@ -1019,7 +1039,7 @@ const EventSchedulePage = () => {
             type: 'Accommodation',
             booked: !!a.booked,
             coordinates: a.coordinates || null,
-            to: `/events/${eventId}/accommodations/${a.id}`,
+            to: participantOnly ? undefined : `/events/${eventId}/accommodations/${a.id}`,
             missingCoordinates: !hasText(a.coordinates),
             scheduledAt: null
           });
@@ -1033,7 +1053,7 @@ const EventSchedulePage = () => {
           return a.sortValue - b.sortValue;
         });
     },
-    [airfields, eventData, eventId, locationCoordinates, typeFilters]
+    [airfields, eventData, eventId, locationCoordinates, participantOnly, typeFilters]
   );
 
   const resolveDropTarget = useCallback(
@@ -1215,7 +1235,7 @@ const EventSchedulePage = () => {
     setExpandedDays((prev) => {
       const next = { ...prev };
       dayBuckets.forEach((day) => {
-        if (expandAllDaysRef.current) {
+        if (expandAllDaysRef.current || allDatedBucketsArePast) {
           next[day.key] = true;
           return;
         }
@@ -1228,7 +1248,7 @@ const EventSchedulePage = () => {
     if (expandAllDaysRef.current) {
       expandAllDaysRef.current = false;
     }
-  }, [dayBuckets]);
+  }, [allDatedBucketsArePast, dayBuckets]);
 
   const updateScheduledAt = useCallback(
     async (entry: { id: string; type: EntryType }, newIso?: string | null) => {
@@ -1588,22 +1608,23 @@ const EventSchedulePage = () => {
     <section className="stack">
       <header className="page-header event-schedule-header">
         <div className="event-schedule-headline">
-          <div className="event-schedule-actions" ref={actionMenuRef}>
-            <button
-              className="ghost event-schedule-gear"
-              type="button"
-              aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
-              aria-expanded={actionMenuOpen}
-              aria-controls="event-schedule-actions-menu"
-              onClick={() => setActionMenuOpen((open) => !open)}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
-                />
-              </svg>
-            </button>
-            {actionMenuOpen && (
+          {!participantOnly && (
+            <div className="event-schedule-actions" ref={actionMenuRef}>
+              <button
+                className="ghost event-schedule-gear"
+                type="button"
+                aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
+                aria-expanded={actionMenuOpen}
+                aria-controls="event-schedule-actions-menu"
+                onClick={() => setActionMenuOpen((open) => !open)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
+                  />
+                </svg>
+              </button>
+              {actionMenuOpen && (
               <div className="event-schedule-menu" id="event-schedule-actions-menu" role="menu">
                 <button
                   className="event-schedule-menu-item"
@@ -1668,8 +1689,9 @@ const EventSchedulePage = () => {
                   Back
                 </button>
               </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
           <div className="event-schedule-headline-text">
             <div className="event-schedule-title-row">
               <h2 style={{ margin: 0 }}>{eventData.name}</h2>
@@ -1733,7 +1755,7 @@ const EventSchedulePage = () => {
         >
           <strong>Show:</strong>
           <div className="event-schedule-filter-list">
-            {typeFilterOrder.map((type) => {
+            {visibleTypeFilterOrder.map((type) => {
               const selected = typeFilters[type];
               const base = typeBadgeStyles[type];
               const inverted = selected
@@ -2081,9 +2103,10 @@ const EventSchedulePage = () => {
                           style={{ fontWeight: 600 }}
                           className="muted schedule-time"
                           data-ghost-time="time"
-                          role="button"
-                          tabIndex={0}
+                          role={participantOnly ? undefined : 'button'}
+                          tabIndex={participantOnly ? undefined : 0}
                           onClick={(e) => {
+                            if (participantOnly) return;
                             e.stopPropagation();
                             setTimePicker({
                               entry: item,
@@ -2093,6 +2116,7 @@ const EventSchedulePage = () => {
                             });
                           }}
                           onKeyDown={(e) => {
+                            if (participantOnly) return;
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               e.stopPropagation();
@@ -2104,7 +2128,7 @@ const EventSchedulePage = () => {
                               });
                             }
                           }}
-                          title="Edit time"
+                          title={participantOnly ? undefined : 'Edit time'}
                         >
                           {item.hourKey}
                         </div>
@@ -2113,8 +2137,11 @@ const EventSchedulePage = () => {
                           <button
                             type="button"
                             aria-label={`Drag ${item.title}`}
-                            title="Drag to reorder"
-                            onPointerDown={(e) => handleDragHandlePointerDown(item, e)}
+                            title={participantOnly ? 'Read only' : 'Drag to reorder'}
+                            onPointerDown={(e) => {
+                              if (participantOnly) return;
+                              handleDragHandlePointerDown(item, e);
+                            }}
                             style={{
                               alignSelf: 'center',
                               border: 0,
@@ -2126,7 +2153,7 @@ const EventSchedulePage = () => {
                               lineHeight: 1,
                               touchAction: 'none'
                             }}
-                            disabled={savingDrag}
+                            disabled={savingDrag || participantOnly}
                           >
                             ⋮⋮
                           </button>
@@ -2493,7 +2520,7 @@ const EventSchedulePage = () => {
                         : 'No'
                     )
                   );
-                  if (previewEntry.entry.innhoppCoordinates) {
+                  if (previewEntry.entry.innhoppCoordinates && canOpenMapsActions) {
                     fields.push(
                       <div
                         key="open-maps"
@@ -2555,7 +2582,7 @@ const EventSchedulePage = () => {
                             justifyContent: 'center'
                           }}
                         >
-                          {previewEntry.entry.coordinates ? (
+                          {previewEntry.entry.coordinates && canOpenMapsActions ? (
                             <button
                               type="button"
                               className="link-button"
@@ -2625,7 +2652,8 @@ const EventSchedulePage = () => {
                             </div>
                           </div>
                         ) : null}
-                        {(previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
+                        {canOpenMapsActions &&
+                        (previewEntry.entry.type === 'Transport' || previewEntry.entry.type === 'Ground Crew') &&
                         (previewEntry.entry as any).transportRouteOrigin &&
                         (previewEntry.entry as any).transportRouteDestination ? (
                           <div
@@ -2656,7 +2684,7 @@ const EventSchedulePage = () => {
                             </button>
                           </div>
                         ) : null}
-                        {previewEntry.entry.type === 'Other' && previewEntry.entry.coordinates ? (
+                        {previewEntry.entry.type === 'Other' && previewEntry.entry.coordinates && canOpenMapsActions ? (
                           <div
                             key="other-maps"
                             style={{

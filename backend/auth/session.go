@@ -17,12 +17,22 @@ import (
 // Claims represents the authenticated user context embedded within a session
 // token. Roles are expressed as their canonical lowercase string value.
 type Claims struct {
+	AccountID    int64               `json:"account_id"`
+	Email        string              `json:"email"`
+	FullName     string              `json:"full_name"`
+	Roles        []string            `json:"roles"`
+	Impersonator *ImpersonatorClaims `json:"impersonator,omitempty"`
+	IssuedAt     int64               `json:"iat"`
+	ExpiresAt    int64               `json:"exp"`
+}
+
+// ImpersonatorClaims captures the original authenticated identity when an
+// admin temporarily assumes a participant session.
+type ImpersonatorClaims struct {
 	AccountID int64    `json:"account_id"`
 	Email     string   `json:"email"`
 	FullName  string   `json:"full_name"`
 	Roles     []string `json:"roles"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
 }
 
 type contextKey string

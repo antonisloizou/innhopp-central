@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/logo.webp';
-
-const navItems = [
-  { to: '/events', label: 'Events' },
-  { to: '/participants', label: 'Participants' },
-  { to: '/logistics', label: 'Logistics' }
-];
+import { useAuth } from '../auth/AuthProvider';
+import { isParticipantOnlySession } from '../auth/access';
 
 const Layout = () => {
+  const { logout, stopImpersonating, user } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const participantOnly = isParticipantOnlySession(user);
+  const forceDocumentNavigation = !!user?.impersonator;
+  const navItems = participantOnly
+    ? [{ to: '/events', label: 'Events' }]
+    : [
+        { to: '/events', label: 'Events' },
+        { to: '/participants', label: 'Participants' },
+        { to: '/logistics', label: 'Logistics' }
+      ];
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window === 'undefined') return 'dark';
     const stored = window.localStorage.getItem('innhopp-theme');
@@ -44,6 +53,21 @@ const Layout = () => {
 
   const handleNavClick = () => setNavOpen(false);
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  const handleLogout = async () => {
+    await logout();
+    setNavOpen(false);
+    navigate('/login', { replace: true });
+  };
+
+  const handleStopImpersonation = async () => {
+    try {
+      setRestoring(true);
+      await stopImpersonating();
+      window.location.replace(`${location.pathname}${location.search}${location.hash}`);
+    } finally {
+      setRestoring(false);
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -74,8 +98,18 @@ const Layout = () => {
               <li key={item.to}>
                 <NavLink
                   to={item.to}
+                  end={item.to === '/events'}
+                  reloadDocument={forceDocumentNavigation}
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                  onClick={handleNavClick}
+                  onClick={(event) => {
+                    if (forceDocumentNavigation) {
+                      handleNavClick();
+                      return;
+                    }
+                    event.preventDefault();
+                    handleNavClick();
+                    navigate(item.to);
+                  }}
                 >
                   {item.label}
                 </NavLink>
@@ -83,9 +117,25 @@ const Layout = () => {
             ))}
           </ul>
           <div className="nav-bottom">
-            <NavLink to="/login" className="nav-link logout-link">
-              Sign out
+            <NavLink
+              to="/profile"
+              reloadDocument={forceDocumentNavigation}
+              className={({ isActive }) => (isActive ? 'nav-user nav-user-link active' : 'nav-user nav-user-link')}
+              onClick={(event) => {
+                if (forceDocumentNavigation) {
+                  handleNavClick();
+                  return;
+                }
+                event.preventDefault();
+                handleNavClick();
+                navigate('/profile');
+              }}
+            >
+              {user?.full_name || user?.email}
             </NavLink>
+            <button type="button" className="nav-link logout-link" onClick={() => void handleLogout()}>
+              Sign out
+            </button>
             <div className="nav-footer">
               <button
                 type="button"
@@ -100,7 +150,29 @@ const Layout = () => {
         </nav>
         {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
         <main className="app-content">
-          <Outlet />
+          {user?.impersonator && (
+            <section className="card" style={{ marginBottom: '1rem' }}>
+              <div className="page-header" style={{ gap: '1rem' }}>
+                <div>
+                  <strong>Impersonating {user.full_name || user.email}</strong>
+                  <p className="muted" style={{ margin: '0.35rem 0 0' }}>
+                    Original admin: {user.impersonator.full_name || user.impersonator.email}
+                  </p>
+                </div>
+                <div className="card-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={restoring}
+                    onClick={() => void handleStopImpersonation()}
+                  >
+                    {restoring ? 'Restoring…' : 'Stop impersonating'}
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+          <Outlet key={location.pathname} />
         </main>
       </div>
     </div>

@@ -51,6 +51,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewSeasons)).Get("/seasons", h.listSeasons)
 	r.With(enforcer.Authorize(rbac.PermissionManageSeasons)).Post("/seasons", h.createSeason)
 	r.With(enforcer.Authorize(rbac.PermissionViewSeasons)).Get("/seasons/{seasonID}", h.getSeason)
+	r.With(enforcer.Authorize(rbac.PermissionManageSeasons)).Delete("/seasons/{seasonID}", h.deleteSeason)
 
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events", h.listEvents)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events", h.createEvent)
@@ -365,6 +366,26 @@ func (h *Handler) getSeason(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, season)
 }
 
+func (h *Handler) deleteSeason(w http.ResponseWriter, r *http.Request) {
+	seasonID, err := strconv.ParseInt(chi.URLParam(r, "seasonID"), 10, 64)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid season id")
+		return
+	}
+
+	commandTag, err := h.db.Exec(r.Context(), `DELETE FROM seasons WHERE id = $1`, seasonID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to delete season")
+		return
+	}
+	if commandTag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "season not found")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(), `SELECT id, season_id, name, location, status, starts_at, ends_at, slots, created_at FROM events ORDER BY starts_at DESC`)
 	if err != nil {
@@ -385,6 +406,11 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 
 	if err := rows.Err(); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list events")
+		return
+	}
+
+	if err := h.syncEventStatuses(r.Context(), events); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to sync event statuses")
 		return
 	}
 
@@ -1478,7 +1504,12 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 		return Event{}, err
 	}
 
-	events, err := h.attachEventRelations(ctx, []Event{event})
+	events := []Event{event}
+	if err := h.syncEventStatuses(ctx, events); err != nil {
+		return Event{}, err
+	}
+
+	events, err := h.attachEventRelations(ctx, events)
 	if err != nil {
 		return Event{}, err
 	}
@@ -2383,6 +2414,41 @@ func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64, 
 	}
 
 	return result, nil
+}
+
+func (h *Handler) syncEventStatuses(ctx context.Context, events []Event) error {
+	now := time.Now().UTC()
+	for i := range events {
+		nextStatus := deriveEventStatus(events[i], now)
+		if nextStatus == events[i].Status {
+			continue
+		}
+		if _, err := h.db.Exec(ctx, `UPDATE events SET status = $1 WHERE id = $2`, nextStatus, events[i].ID); err != nil {
+			return err
+		}
+		events[i].Status = nextStatus
+	}
+	return nil
+}
+
+func deriveEventStatus(event Event, now time.Time) string {
+	end := event.StartsAt
+	if event.EndsAt != nil {
+		end = *event.EndsAt
+	}
+
+	switch {
+	case now.After(end):
+		return "past"
+	case !now.Before(event.StartsAt) && !now.After(end):
+		if event.Status != "draft" {
+			return "live"
+		}
+	case now.Before(event.StartsAt) && event.Status == "past":
+		return "draft"
+	}
+
+	return event.Status
 }
 
 func normalizeEventStatus(raw string) (string, error) {

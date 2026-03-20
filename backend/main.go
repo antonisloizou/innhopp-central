@@ -74,7 +74,10 @@ func main() {
 		ClientID:     os.Getenv("OIDC_CLIENT_ID"),
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 		RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
+		FrontendURL:  os.Getenv("FRONTEND_URL"),
+		DevAllowAll:  strings.EqualFold(os.Getenv("DEV_ALLOW_ALL"), "true"),
 	}
+	logMissingOIDCConfig(authConfig)
 
 	authHandler, err := auth.NewHandler(pool, sessionManager, authConfig)
 	if err != nil {
@@ -97,7 +100,7 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	devBypass := strings.EqualFold(os.Getenv("DEV_ALLOW_ALL"), "true")
+	devBypass := authConfig.DevAllowAll
 
 	enforcer := rbac.NewEnforcer(func(r *http.Request) []rbac.Role {
 		if devBypass {
@@ -129,6 +132,32 @@ func main() {
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, router); err != nil {
 		log.Fatalf("server error: %v", err)
+	}
+}
+
+func logMissingOIDCConfig(cfg auth.Config) {
+	missing := make([]string, 0, 4)
+	if strings.TrimSpace(cfg.Issuer) == "" {
+		missing = append(missing, "OIDC_ISSUER")
+	}
+	if strings.TrimSpace(cfg.ClientID) == "" {
+		missing = append(missing, "OIDC_CLIENT_ID")
+	}
+	if strings.TrimSpace(cfg.RedirectURL) == "" {
+		missing = append(missing, "OIDC_REDIRECT_URL")
+	}
+	if strings.TrimSpace(cfg.FrontendURL) == "" {
+		missing = append(missing, "FRONTEND_URL")
+	}
+
+	if len(missing) == 0 {
+		log.Printf("OIDC config detected for issuer %s with redirect %s", cfg.Issuer, cfg.RedirectURL)
+		return
+	}
+
+	log.Printf("OIDC is partially configured; missing: %s", strings.Join(missing, ", "))
+	if strings.TrimSpace(cfg.ClientSecret) == "" {
+		log.Printf("OIDC_CLIENT_SECRET is not set; Google usually requires it for web application clients")
 	}
 }
 

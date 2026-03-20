@@ -32,7 +32,9 @@ type Config struct {
 	ClientID     string
 	ClientSecret string
 	RedirectURL  string
+	FrontendURL  string
 	Scopes       []string
+	DevAllowAll  bool
 }
 
 func (c Config) enabled() bool {
@@ -60,6 +62,8 @@ type Handler struct {
 	httpClient *http.Client
 	disabled   bool
 }
+
+const defaultPostLoginPath = "/events"
 
 // NewHandler constructs an auth handler with OIDC configuration.
 func NewHandler(db *pgxpool.Pool, sessions *SessionManager, cfg Config) (*Handler, error) {
@@ -92,6 +96,8 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/login", h.beginLogin)
 	r.Get("/callback", h.handleCallback)
 	r.Get("/session", h.sessionInfo)
+	r.Post("/impersonate", h.impersonate)
+	r.Post("/stop-impersonation", h.stopImpersonation)
 	r.Post("/logout", h.logout)
 	return r
 }
@@ -168,7 +174,16 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	normalized := h.collectRoles(account.Roles, claims.AllRoles())
+	participantRoles, err := h.loadParticipantRolesByEmail(r.Context(), account.Email)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant roles")
+		return
+	}
+
+	roleCandidates := append([]string{}, claims.AllRoles()...)
+	roleCandidates = append(roleCandidates, participantRoles...)
+
+	normalized := h.collectRoles(account.Roles, roleCandidates)
 	if len(normalized) == 0 {
 		normalized = append(normalized, string(rbac.RoleParticipant))
 	}
@@ -204,38 +219,163 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Roles:     finalRoles,
 		Token:     rawToken,
 	}
+	if redirectURL := h.postLoginRedirectURL(); redirectURL != "" {
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
 type sessionResponse struct {
-	AccountID int64    `json:"account_id"`
-	Email     string   `json:"email"`
-	FullName  string   `json:"full_name"`
-	Roles     []string `json:"roles"`
-	Token     string   `json:"token,omitempty"`
+	AccountID    int64               `json:"account_id"`
+	Email        string              `json:"email"`
+	FullName     string              `json:"full_name"`
+	Roles        []string            `json:"roles"`
+	Impersonator *ImpersonatorClaims `json:"impersonator,omitempty"`
+	Token        string              `json:"token,omitempty"`
 }
 
 func (h *Handler) sessionInfo(w http.ResponseWriter, r *http.Request) {
 	claims := FromContext(r.Context())
 	if claims == nil {
+		if h.cfg.DevAllowAll {
+			httpx.WriteJSON(w, http.StatusOK, sessionResponse{
+				AccountID: 0,
+				Email:     "dev@localhost",
+				FullName:  "Development Admin",
+				Roles:     []string{string(rbac.RoleAdmin)},
+			})
+			return
+		}
 		httpx.Error(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
 
 	resp := sessionResponse{
-		AccountID: claims.AccountID,
-		Email:     claims.Email,
-		FullName:  claims.FullName,
-		Roles:     claims.Roles,
+		AccountID:    claims.AccountID,
+		Email:        claims.Email,
+		FullName:     claims.FullName,
+		Roles:        claims.Roles,
+		Impersonator: claims.Impersonator,
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {
+	claims := h.activeClaims(r)
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !hasRole(claims.Roles, string(rbac.RoleAdmin)) {
+		httpx.Error(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	if claims.Impersonator != nil {
+		httpx.Error(w, http.StatusConflict, "already impersonating another user")
+		return
+	}
+
+	var payload struct {
+		ParticipantID int64 `json:"participant_id"`
+	}
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	if payload.ParticipantID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "participant_id is required")
+		return
+	}
+
+	participant, err := h.loadParticipantIdentity(r.Context(), payload.ParticipantID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "participant not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant")
+		return
+	}
+
+	roles := h.collectRoles(nil, participant.Roles)
+	if len(roles) == 0 {
+		roles = []string{string(rbac.RoleParticipant)}
+	}
+
+	accountID, err := h.loadAccountIDByEmail(r.Context(), participant.Email)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant account")
+		return
+	}
+
+	nextClaims := &Claims{
+		AccountID:    accountID,
+		Email:        participant.Email,
+		FullName:     participant.FullName,
+		Roles:        roles,
+		Impersonator: cloneImpersonatorClaims(claims),
+	}
+
+	if _, err := h.sessions.Issue(w, nextClaims); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create impersonation session")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, sessionResponse{
+		AccountID:    nextClaims.AccountID,
+		Email:        nextClaims.Email,
+		FullName:     nextClaims.FullName,
+		Roles:        nextClaims.Roles,
+		Impersonator: nextClaims.Impersonator,
+	})
+}
+
+func (h *Handler) stopImpersonation(w http.ResponseWriter, r *http.Request) {
+	claims := FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if claims.Impersonator == nil {
+		httpx.Error(w, http.StatusBadRequest, "no impersonation session is active")
+		return
+	}
+
+	restored := &Claims{
+		AccountID: claims.Impersonator.AccountID,
+		Email:     claims.Impersonator.Email,
+		FullName:  claims.Impersonator.FullName,
+		Roles:     append([]string{}, claims.Impersonator.Roles...),
+	}
+
+	if _, err := h.sessions.Issue(w, restored); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to restore session")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, sessionResponse{
+		AccountID: restored.AccountID,
+		Email:     restored.Email,
+		FullName:  restored.FullName,
+		Roles:     restored.Roles,
+	})
+}
+
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Clear(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+}
+
+func (h *Handler) postLoginRedirectURL() string {
+	base := strings.TrimSpace(h.cfg.FrontendURL)
+	if base == "" {
+		return ""
+	}
+
+	return strings.TrimRight(base, "/") + defaultPostLoginPath
 }
 
 func (h *Handler) exchangeCode(ctx context.Context, code string) (*tokenResponse, error) {
@@ -370,6 +510,55 @@ func (h *Handler) loadAccountRoles(ctx context.Context, accountID int64) ([]stri
 	return roles, nil
 }
 
+func (h *Handler) loadParticipantRolesByEmail(ctx context.Context, email string) ([]string, error) {
+	var roles []string
+	err := h.db.QueryRow(ctx, `SELECT roles FROM participant_profiles WHERE email = $1`, strings.ToLower(strings.TrimSpace(email))).Scan(&roles)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return roles, nil
+}
+
+type participantIdentity struct {
+	FullName string
+	Email    string
+	Roles    []string
+}
+
+func (h *Handler) loadParticipantIdentity(ctx context.Context, participantID int64) (*participantIdentity, error) {
+	var participant participantIdentity
+	err := h.db.QueryRow(
+		ctx,
+		`SELECT full_name, email, roles FROM participant_profiles WHERE id = $1`,
+		participantID,
+	).Scan(&participant.FullName, &participant.Email, &participant.Roles)
+	if err != nil {
+		return nil, err
+	}
+
+	participant.Email = strings.ToLower(strings.TrimSpace(participant.Email))
+	return &participant, nil
+}
+
+func (h *Handler) loadAccountIDByEmail(ctx context.Context, email string) (int64, error) {
+	var accountID int64
+	err := h.db.QueryRow(
+		ctx,
+		`SELECT id FROM accounts WHERE lower(email) = $1 ORDER BY id ASC LIMIT 1`,
+		strings.ToLower(strings.TrimSpace(email)),
+	).Scan(&accountID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return accountID, nil
+}
+
 func (h *Handler) assignRoles(ctx context.Context, accountID int64, roles []string) error {
 	batch := &pgx.Batch{}
 	for _, role := range roles {
@@ -408,17 +597,54 @@ func (h *Handler) collectRoles(existing []string, tokenRoles []string) []string 
 	return out
 }
 
+func (h *Handler) activeClaims(r *http.Request) *Claims {
+	claims := FromContext(r.Context())
+	if claims != nil {
+		return claims
+	}
+	if !h.cfg.DevAllowAll {
+		return nil
+	}
+	return &Claims{
+		AccountID: 0,
+		Email:     "dev@localhost",
+		FullName:  "Development Admin",
+		Roles:     []string{string(rbac.RoleAdmin)},
+	}
+}
+
+func hasRole(roles []string, expected string) bool {
+	for _, role := range roles {
+		if strings.EqualFold(strings.TrimSpace(role), expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneImpersonatorClaims(claims *Claims) *ImpersonatorClaims {
+	if claims == nil {
+		return nil
+	}
+	return &ImpersonatorClaims{
+		AccountID: claims.AccountID,
+		Email:     claims.Email,
+		FullName:  claims.FullName,
+		Roles:     append([]string{}, claims.Roles...),
+	}
+}
+
 func normalizeRole(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case "admin":
 		return string(rbac.RoleAdmin)
 	case "staff":
 		return string(rbac.RoleStaff)
-	case "jumpmaster", "jump_master":
+	case "jumpmaster", "jump_master", "jump master":
 		return string(rbac.RoleJumpMaster)
-	case "jumpleader", "jump_leader":
+	case "jumpleader", "jump_leader", "jump leader":
 		return string(rbac.RoleJumpLeader)
-	case "groundcrew", "ground_crew":
+	case "groundcrew", "ground_crew", "ground crew":
 		return string(rbac.RoleGroundCrew)
 	case "driver":
 		return string(rbac.RoleDriver)

@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
 import {
   CreateParticipantPayload,
   ParticipantProfile,
@@ -30,7 +31,14 @@ const ParticipantDetailPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [impersonating, setImpersonating] = useState(false);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
+  const { impersonateParticipant, user } = useAuth();
+
+  const canImpersonate =
+    (user?.roles?.includes('admin') ?? false) &&
+    !user?.impersonator &&
+    profile?.email !== user?.email;
 
   useEffect(() => {
     let cancelled = false;
@@ -112,6 +120,27 @@ const ParticipantDetailPage = () => {
           <p className="muted">{profile.email}</p>
         </div>
         <div className="card-actions">
+          {canImpersonate && (
+            <button
+              className="primary"
+              type="button"
+              disabled={impersonating}
+              onClick={async () => {
+                if (!profile) return;
+                try {
+                  setImpersonating(true);
+                  setMessage(null);
+                  await impersonateParticipant(profile.id);
+                  window.location.replace('/profile');
+                } catch (err) {
+                  setMessage(err instanceof Error ? err.message : 'Failed to impersonate participant');
+                  setImpersonating(false);
+                }
+              }}
+            >
+              {impersonating ? 'Impersonating…' : 'Impersonate'}
+            </button>
+          )}
           <button
             className="ghost"
             type="button"

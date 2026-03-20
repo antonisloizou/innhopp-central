@@ -32,6 +32,9 @@ export const createParticipantProfile = (payload: CreateParticipantPayload) =>
 export const getParticipantProfile = (id: number) =>
   apiRequest<ParticipantProfile>(`/participants/profiles/${id}`);
 
+export const getMyParticipantProfile = () =>
+  apiRequest<ParticipantProfile>('/participants/profiles/me');
+
 export const updateParticipantProfile = (id: number, payload: CreateParticipantPayload) =>
   apiRequest<ParticipantProfile>(`/participants/profiles/${id}`, {
     method: 'PUT',

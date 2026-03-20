@@ -1,4 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import RequireAuth from './auth/RequireAuth';
+import ParticipantRouteGuard from './auth/ParticipantRouteGuard';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import EventCalendarPage from './pages/EventCalendarPage';
@@ -11,6 +13,7 @@ import ManifestManagementPage from './pages/ManifestManagementPage';
 import ParticipantOnboardingPage from './pages/ParticipantOnboardingPage';
 import ParticipantCreatePage from './pages/ParticipantCreatePage';
 import ParticipantDetailPage from './pages/ParticipantDetailPage';
+import MyProfilePage from './pages/MyProfilePage';
 import LogisticsDashboardPage from './pages/LogisticsDashboardPage';
 import LogisticsCreatePage from './pages/LogisticsCreatePage';
 import LogisticsDetailPage from './pages/LogisticsDetailPage';
@@ -37,40 +40,43 @@ const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/events" replace />} />
-        <Route path="events" element={<EventCalendarPage />} />
-        <Route path="events/new" element={<EventCreatePage />} />
-        <Route path="events/:eventId" element={<EventSchedulePage />} />
-        <Route path="events/:eventId/details" element={<EventDetailPage />} />
-        <Route path="events/:eventId/accommodations/:accommodationId" element={<AccommodationDetailPage />} />
-        <Route path="events/:eventId/innhopps/new" element={<InnhoppDetailPage />} />
-        <Route path="events/:eventId/innhopps/:innhoppId" element={<InnhoppDetailPage />} />
-        <Route path="innhopps/csv" element={<InnhoppCsvPage />} />
-        <Route path="airfields/new" element={<AirfieldCreatePage />} />
-        <Route path="airfields/:airfieldId" element={<AirfieldDetailPage />} />
-        <Route path="seasons/new" element={<SeasonCreatePage />} />
-        <Route path="manifests" element={<ManifestManagementPage />} />
-        <Route path="manifests/:manifestId" element={<ManifestDetailPage />} />
-        <Route path="participants" element={<ParticipantOnboardingPage />} />
-        <Route path="participants/new" element={<ParticipantCreatePage />} />
-        <Route path="participants/:participantId" element={<ParticipantDetailPage />} />
-        <Route path="logistics" element={<LogisticsSummaryPage />} />
-        <Route path="logistics/transport" element={<LogisticsDashboardPage />} />
-        <Route path="logistics/ground-crew" element={<LogisticsGroundCrewDashboardPage />} />
-        <Route path="logistics/ground-crew/new" element={<LogisticsGroundCrewCreatePage />} />
-        <Route path="logistics/ground-crew/:groundCrewId" element={<LogisticsGroundCrewDetailPage />} />
-        <Route path="logistics/accommodations" element={<LogisticsAccommodationsPage />} />
-        <Route path="logistics/accommodations/new" element={<LogisticsAccommodationCreatePage />} />
-        <Route path="logistics/meals" element={<LogisticsMealsPage />} />
-        <Route path="logistics/meals/new" element={<LogisticsMealCreatePage />} />
-        <Route path="logistics/meals/:mealId" element={<LogisticsMealDetailPage />} />
-        <Route path="logistics/others" element={<LogisticsOthersPage />} />
-        <Route path="logistics/others/new" element={<LogisticsOtherCreatePage />} />
-        <Route path="logistics/others/:otherId" element={<LogisticsOtherDetailPage />} />
-        <Route path="logistics/new" element={<LogisticsCreatePage />} />
-        <Route path="logistics/:transportId" element={<LogisticsDetailPage />} />
-        <Route path="logistics/vehicles/:vehicleId" element={<VehicleDetailPage />} />
+      <Route element={<RequireAuth />}>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Navigate to="/events" replace />} />
+          <Route path="events" element={<EventCalendarPage />} />
+          <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId" element={<EventSchedulePage />} />
+          <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId/innhopps/new" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId/innhopps/:innhoppId" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
+          <Route path="innhopps/csv" element={<ParticipantRouteGuard><InnhoppCsvPage /></ParticipantRouteGuard>} />
+          <Route path="airfields/new" element={<ParticipantRouteGuard><AirfieldCreatePage /></ParticipantRouteGuard>} />
+          <Route path="airfields/:airfieldId" element={<ParticipantRouteGuard><AirfieldDetailPage /></ParticipantRouteGuard>} />
+          <Route path="seasons/new" element={<ParticipantRouteGuard><SeasonCreatePage /></ParticipantRouteGuard>} />
+          <Route path="manifests" element={<ParticipantRouteGuard><ManifestManagementPage /></ParticipantRouteGuard>} />
+          <Route path="manifests/:manifestId" element={<ParticipantRouteGuard><ManifestDetailPage /></ParticipantRouteGuard>} />
+          <Route path="participants" element={<ParticipantRouteGuard><ParticipantOnboardingPage /></ParticipantRouteGuard>} />
+          <Route path="participants/new" element={<ParticipantRouteGuard><ParticipantCreatePage /></ParticipantRouteGuard>} />
+          <Route path="participants/:participantId" element={<ParticipantRouteGuard><ParticipantDetailPage /></ParticipantRouteGuard>} />
+          <Route path="profile" element={<MyProfilePage />} />
+          <Route path="logistics" element={<ParticipantRouteGuard><LogisticsSummaryPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/transport" element={<ParticipantRouteGuard><LogisticsDashboardPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/ground-crew" element={<ParticipantRouteGuard><LogisticsGroundCrewDashboardPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/ground-crew/new" element={<ParticipantRouteGuard><LogisticsGroundCrewCreatePage /></ParticipantRouteGuard>} />
+          <Route path="logistics/ground-crew/:groundCrewId" element={<ParticipantRouteGuard><LogisticsGroundCrewDetailPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/accommodations" element={<ParticipantRouteGuard><LogisticsAccommodationsPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/accommodations/new" element={<ParticipantRouteGuard><LogisticsAccommodationCreatePage /></ParticipantRouteGuard>} />
+          <Route path="logistics/meals" element={<ParticipantRouteGuard><LogisticsMealsPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/meals/new" element={<ParticipantRouteGuard><LogisticsMealCreatePage /></ParticipantRouteGuard>} />
+          <Route path="logistics/meals/:mealId" element={<ParticipantRouteGuard><LogisticsMealDetailPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/others" element={<ParticipantRouteGuard><LogisticsOthersPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/others/new" element={<ParticipantRouteGuard><LogisticsOtherCreatePage /></ParticipantRouteGuard>} />
+          <Route path="logistics/others/:otherId" element={<ParticipantRouteGuard><LogisticsOtherDetailPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/new" element={<ParticipantRouteGuard><LogisticsCreatePage /></ParticipantRouteGuard>} />
+          <Route path="logistics/:transportId" element={<ParticipantRouteGuard><LogisticsDetailPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/vehicles/:vehicleId" element={<ParticipantRouteGuard><VehicleDetailPage /></ParticipantRouteGuard>} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

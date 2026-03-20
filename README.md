@@ -47,7 +47,7 @@ RBAC ensures each user only sees the modules and actions needed for their duties
 
 ## Repository layout
 - `backend/` – Go/Chi REST API with OIDC login, session management, RBAC, and PostgreSQL schema bootstrapping (seasons, events, innhopps, manifests, airfields, participants, crew assignments, logistics). See `backend/README.md` for full endpoint docs.
-- `frontend/` – Vite React SPA that consumes the backend APIs; includes Google Identity button support for the login page and a navigation shell for events/participants/logistics.
+- `frontend/` – Vite React SPA that consumes the backend APIs; includes a backend-driven Google OIDC login flow and a navigation shell for events/participants/logistics.
 - `index.html` – Static Google Identity demo for GitHub Pages; `events.html` and `events.css` are legacy static prototypes.
 
 ## Local development
@@ -63,6 +63,12 @@ docker run --name innhopp-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=
 cd backend
 # optional: export DATABASE_URL="postgres://postgres:postgres@localhost:5432/innhopp?sslmode=disable"
 # for local dev without OIDC, export DEV_ALLOW_ALL=true
+# for localhost Google login, set:
+# export OIDC_ISSUER="https://accounts.google.com"
+# export OIDC_CLIENT_ID="YOUR_CLIENT_ID.apps.googleusercontent.com"
+# export OIDC_CLIENT_SECRET="YOUR_CLIENT_SECRET"
+# export OIDC_REDIRECT_URL="http://localhost:8080/api/auth/callback"
+# export FRONTEND_URL="http://localhost:5173"
 # set SESSION_SECRET to a strong value; SESSION_COOKIE_SECURE=true when using HTTPS
 go mod tidy
 go run ./...
@@ -73,7 +79,6 @@ go run ./...
 ```bash
 cd frontend
 # optional: echo "VITE_API_BASE_URL=http://localhost:8080/api" > .env
-# set VITE_GOOGLE_CLIENT_ID for the login button
 npm install
 npm run dev
 # app: http://localhost:5173 (Vite proxies /api to :8080)
@@ -94,13 +99,14 @@ Backend environment variables:
 | `OIDC_CLIENT_ID` | OIDC client ID | – |
 | `OIDC_CLIENT_SECRET` | OIDC client secret (if required) | – |
 | `OIDC_REDIRECT_URL` | Redirect URL registered with the OIDC provider | – |
+| `FRONTEND_URL` | Frontend base URL used after successful OIDC callback | – |
 
 Frontend environment variables:
 
 | Variable | Description | Default |
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | API base URL; leave empty to use `/api` (proxied in dev) | `/api` |
-| `VITE_GOOGLE_CLIENT_ID` | Google Identity client ID for the login page button | placeholder value |
+| `VITE_GOOGLE_MAPS_API_KEY` | Google Maps API key for route duration features | placeholder value |
 
 ## API and UI references
 - Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, crew assignments, logistics transports, and auth are documented in `backend/README.md`.

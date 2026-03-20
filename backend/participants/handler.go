@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/rbac"
 )
@@ -28,6 +29,7 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 // Routes registers participant routes.
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
+	r.Get("/profiles/me", h.getOwnProfile)
 	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles", h.listProfiles)
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles", h.createProfile)
 	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles/{profileID}", h.getProfile)
@@ -172,6 +174,35 @@ func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
 	var profile Profile
 	if err := row.Scan(&profile.ID, &profile.FullName, &profile.Email, &profile.Phone, &profile.ExperienceLevel, &profile.EmergencyContact, &profile.Roles, &profile.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusNotFound, "participant not found")
+		return
+	}
+	profile.Roles = normalizeRoles(profile.Roles)
+
+	httpx.WriteJSON(w, http.StatusOK, profile)
+}
+
+func (h *Handler) getOwnProfile(w http.ResponseWriter, r *http.Request) {
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(claims.Email))
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email claim missing")
+		return
+	}
+
+	row := h.db.QueryRow(r.Context(),
+		`SELECT id, full_name, email, phone, experience_level, emergency_contact, roles, created_at
+         FROM participant_profiles WHERE email = $1`,
+		email,
+	)
+
+	var profile Profile
+	if err := row.Scan(&profile.ID, &profile.FullName, &profile.Email, &profile.Phone, &profile.ExperienceLevel, &profile.EmergencyContact, &profile.Roles, &profile.CreatedAt); err != nil {
+		httpx.Error(w, http.StatusNotFound, "participant profile not found")
 		return
 	}
 	profile.Roles = normalizeRoles(profile.Roles)

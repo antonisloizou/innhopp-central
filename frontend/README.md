@@ -12,18 +12,27 @@ npm run dev
 
 The Vite dev server will start on [http://localhost:5173](http://localhost:5173).
 
-## Google Identity configuration
+## Google OIDC login configuration
 
-The login page integrates the [Google Identity Services JavaScript SDK](https://developers.google.com/identity/gsi/web) just like the static demo described in the project README. To use it:
+The login page now starts the backend OIDC flow at `/api/auth/login`, so the Google OAuth setup lives on the backend service rather than in `frontend/.env`. For localhost:
 
 1. Create a Google OAuth 2.0 Client ID for a web application.
-2. Copy the client ID into a `.env` file in this directory:
+2. In Google Cloud Console add:
+   - Authorized JavaScript origin: `http://localhost:5173`
+   - Authorized redirect URI: `http://localhost:8080/api/auth/callback`
+3. Start the backend with:
 
    ```env
-   VITE_GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+   OIDC_ISSUER=https://accounts.google.com
+   OIDC_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+   OIDC_CLIENT_SECRET=YOUR_GOOGLE_CLIENT_SECRET
+   OIDC_REDIRECT_URL=http://localhost:8080/api/auth/callback
+   FRONTEND_URL=http://localhost:5173
+   SESSION_COOKIE_SECURE=false
+   DEV_ALLOW_ALL=false
    ```
 
-3. Restart the dev server if it is running.
+4. Restart the backend if it is already running.
 
 ## Google Maps route duration configuration
 
@@ -39,13 +48,13 @@ The event schedule page can show estimated driving duration for transport and gr
 
 4. Restart the dev server if it is running.
 
-When the `/login` route loads, the Google sign-in button renders automatically. After successful authentication the decoded profile preview is shown and the app navigates to the event calendar.
+When the `/login` route loads, the app checks `/api/auth/session`. If there is no session, clicking the sign-in button redirects to Google. After the backend callback succeeds, the browser is redirected back to the SPA and the cookie-backed session unlocks the protected routes.
 
 ## Available routes
 
 | Route | Description |
 | --- | --- |
-| `/login` | Google Identity login hand-off with profile preview |
+| `/login` | Google OIDC hand-off through the backend |
 | `/events` | Event calendar cards for upcoming experiences |
 | `/manifests` | Manifest load sheets with crew assignments |
 | `/participants` | Participant onboarding task summaries |

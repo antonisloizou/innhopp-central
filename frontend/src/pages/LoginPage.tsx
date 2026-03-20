@@ -1,156 +1,70 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { googleClientId, hasConfiguredGoogleClient } from '../config/google';
-import { decodeGoogleCredential, GoogleProfile } from '../utils/googleJwt';
+import { useEffect, useState } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import logo from '../assets/logo.webp';
-
-const scriptSrc = 'https://accounts.google.com/gsi/client';
+import { useAuth } from '../auth/AuthProvider';
 
 const LoginPage = () => {
-  const [profile, setProfile] = useState<GoogleProfile | null>(null);
+  const { user, isLoading, startLogin } = useAuth();
+  const location = useLocation();
   const [error, setError] = useState<string | null>(null);
-  const [debugError, setDebugError] = useState<string | null>(null);
-  const [isDebugAuthenticated, setIsDebugAuthenticated] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const buttonRef = useRef<HTMLDivElement>(null);
-  const navigate = useNavigate();
-
-  const readyToNavigate = useMemo(
-    () => Boolean(profile?.email) || isDebugAuthenticated,
-    [profile, isDebugAuthenticated]
-  );
+  const from = location.state?.from?.pathname;
 
   useEffect(() => {
-    if (!buttonRef.current) {
-      return;
-    }
+    setError(null);
+  }, [user]);
 
-    const initializeGoogle = () => {
-      if (!window.google?.accounts?.id) {
-        setError('Google Identity Services SDK is unavailable.');
+  if (!isLoading && user) {
+    return <Navigate to={typeof from === 'string' ? from : '/events'} replace />;
+  }
+
+  const handleLogin = async () => {
+    try {
+      setError(null);
+      await startLogin();
+    } catch (loginError) {
+      if (loginError instanceof Error) {
+        setError(loginError.message);
         return;
       }
-
-      // Clear any existing button to avoid duplicates when React runs effects twice in dev.
-      buttonRef.current!.innerHTML = '';
-
-      window.google.accounts.id.initialize({
-        client_id: googleClientId,
-        callback: (response) => {
-          const decodedProfile = decodeGoogleCredential(response.credential);
-          if (!decodedProfile) {
-            setError('Unable to decode Google credential.');
-            return;
-          }
-          setProfile(decodedProfile);
-          setError(null);
-          setDebugError(null);
-        }
-      });
-
-      window.google.accounts.id.renderButton(buttonRef.current as HTMLElement, {
-        type: 'standard',
-        theme: 'outline',
-        size: 'large',
-        text: 'signin_with'
-      });
-
-      window.google.accounts.id.prompt();
-    };
-
-    const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${scriptSrc}"]`);
-    if (existingScript?.getAttribute('data-loaded')) {
-      initializeGoogle();
-      return;
+      setError('Unable to start Google sign-in.');
     }
-
-    const script = existingScript ?? document.createElement('script');
-    script.src = scriptSrc;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      script.setAttribute('data-loaded', 'true');
-      initializeGoogle();
-    };
-
-    if (!existingScript) {
-      document.head.appendChild(script);
-    }
-
-    return () => {
-      // No cleanup required because the Google Identity script manages its own lifecycle,
-      // but keeping the return allows React to short-circuit when the component unmounts.
-    };
-  }, []);
-
-  useEffect(() => {
-    if (readyToNavigate) {
-      const timeout = window.setTimeout(() => navigate('/events'), 800);
-      return () => window.clearTimeout(timeout);
-    }
-    return undefined;
-  }, [readyToNavigate, navigate]);
-
-  const handleDebugLogin = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (username === 'admin' && password === 'admin') {
-      setIsDebugAuthenticated(true);
-      setDebugError(null);
-      setUsername('');
-      setPassword('');
-      return;
-    }
-    setIsDebugAuthenticated(false);
-    setDebugError('Invalid debug credentials. Use admin/admin.');
   };
 
   return (
     <div className="login-layout">
       <section className="login-panel">
         <img src={logo} alt="Innhopp Central logo" className="login-logo" />
-        <div ref={buttonRef} className="google-button" aria-live="polite" />
-        <div className="debug-login" role="group" aria-labelledby="debug-login-heading">
-          <h2 id="debug-login-heading">Testing credentials</h2>
-          <form onSubmit={handleDebugLogin} className="debug-login-form">
-            <label className="field">
-              <span>Username</span>
-              <input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
-                placeholder="admin"
-                required
+        <button
+          type="button"
+          className="google-signin-button"
+          onClick={() => void handleLogin()}
+          disabled={isLoading}
+          aria-label={isLoading ? 'Checking session' : 'Sign in with Google'}
+        >
+          <span className="google-signin-button__icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M17.64 9.2045C17.64 8.56632 17.5827 7.95268 17.4764 7.36359H9V10.845H13.8436C13.635 11.97 12.9936 12.9232 12.03 13.5614V15.8195H14.9382C16.6405 14.2527 17.64 11.9455 17.64 9.2045Z"
+                fill="#4285F4"
               />
-            </label>
-            <label className="field">
-              <span>Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                placeholder="admin"
-                required
+              <path
+                d="M9 18C11.43 18 13.4673 17.1941 14.9382 15.8195L12.03 13.5614C11.2241 14.1014 10.1932 14.4205 9 14.4205C6.65591 14.4205 4.67182 12.8373 3.96409 10.71H0.957275V13.0418C2.42046 15.9486 5.42864 18 9 18Z"
+                fill="#34A853"
               />
-            </label>
-            <button type="submit" className="primary">Log in</button>
-          </form>
-          {debugError && <p className="error-text">{debugError}</p>}
-          {isDebugAuthenticated && !debugError && (
-            <p className="success-text">Debug login successful. Redirecting…</p>
-          )}
-        </div>
-        {profile && (
-          <div className="profile-preview">
-            <img src={profile.picture} alt={profile.name} />
-            <div>
-              <p className="profile-name">{profile.name}</p>
-              <p className="profile-email">{profile.email}</p>
-            </div>
-          </div>
-        )}
+              <path
+                d="M3.96409 10.71C3.78409 10.17 3.68182 9.59318 3.68182 9C3.68182 8.40682 3.78409 7.83 3.96409 7.29V4.95818H0.957273C0.355909 6.15545 0 7.51091 0 9C0 10.4891 0.355909 11.8445 0.957273 13.0418L3.96409 10.71Z"
+                fill="#FBBC05"
+              />
+              <path
+                d="M9 3.57955C10.3023 3.57955 11.4718 4.02773 12.3914 4.90773L15.0032 2.29591C13.4632 0.856364 11.4259 0 9 0C5.42864 0 2.42046 2.05136 0.957275 4.95818L3.96409 7.29C4.67182 5.16273 6.65591 3.57955 9 3.57955Z"
+                fill="#EA4335"
+              />
+            </svg>
+          </span>
+          <span className="google-signin-button__label">
+            {isLoading ? 'Checking session…' : 'Sign in with Google'}
+          </span>
+        </button>
         {error && <p className="error-text">{error}</p>}
       </section>
     </div>

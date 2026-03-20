@@ -110,6 +110,9 @@ export const listSeasons = () => apiRequest<Season[]>('/events/seasons');
 export const createSeason = (payload: CreateSeasonPayload) =>
   apiRequest<Season>('/events/seasons', { method: 'POST', body: JSON.stringify(payload) });
 
+export const deleteSeason = (id: number) =>
+  apiRequest<void>(`/events/seasons/${id}`, { method: 'DELETE' });
+
 export const listEvents = () => apiRequest<Event[]>('/events/events');
 
 export const createEvent = (payload: CreateEventPayload) =>

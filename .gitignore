@@ -5,3 +5,4 @@ frontend/.env
 .DS_Store
 frontend/dist
 /.gocache
+backend/.env
