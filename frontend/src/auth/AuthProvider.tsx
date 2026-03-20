@@ -1,4 +1,4 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
 import { apiRequest } from '../api/client';
 
 type ImpersonatorSession = {
@@ -36,7 +36,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshSession = async () => {
+  const refreshSession = useCallback(async () => {
     try {
       const session = await apiRequest<AuthSession>('/auth/session');
       setUser(session);
@@ -46,7 +46,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
       setUser(null);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -60,37 +60,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void loadSession();
   }, []);
 
-  const startLogin = async () => {
+  const startLogin = useCallback(async () => {
     const response = await apiRequest<LoginResponse>('/auth/login');
     window.location.assign(response.authorization_url);
-  };
+  }, []);
 
-  const impersonateParticipant = async (participantId: number) => {
+  const impersonateParticipant = useCallback(async (participantId: number) => {
     const session = await apiRequest<AuthSession>('/auth/impersonate', {
       method: 'POST',
       body: JSON.stringify({ participant_id: participantId })
     });
     setUser(session);
-  };
+  }, []);
 
-  const impersonateNewUser = async () => {
+  const impersonateNewUser = useCallback(async () => {
     const session = await apiRequest<AuthSession>('/auth/impersonate-new-user', {
       method: 'POST'
     });
     setUser(session);
-  };
+  }, []);
 
-  const stopImpersonating = async () => {
+  const stopImpersonating = useCallback(async () => {
     const session = await apiRequest<AuthSession>('/auth/stop-impersonation', {
       method: 'POST'
     });
     setUser(session);
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await apiRequest('/auth/logout', { method: 'POST' });
     setUser(null);
-  };
+  }, []);
 
   return (
     <AuthContext.Provider
