@@ -1970,17 +1970,19 @@ const EventSchedulePage = () => {
                   );
                 }
                 const content = (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <strong>{entry.title}</strong>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
+                      <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.title}</strong>
                       <div
                         style={{
                           marginLeft: 'auto',
-                          display: 'grid',
-                          gridTemplateColumns: 'minmax(56px, 80px) minmax(130px, 190px)',
+                          display: 'flex',
+                          flexWrap: 'wrap',
                           alignItems: 'center',
-                          justifyItems: 'center',
-                          columnGap: '0.5rem'
+                          justifyContent: 'flex-end',
+                          gap: '0.5rem',
+                          minWidth: 0,
+                          maxWidth: '100%'
                         }}
                       >
                         {statusBadge || <span style={{ visibility: 'hidden', ...compactBadgeStyle }}>!</span>}
@@ -1997,20 +1999,24 @@ const EventSchedulePage = () => {
                       <div
                         className="muted"
                         style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'auto minmax(120px, 170px) 1.5rem auto minmax(0, 1fr)',
+                          display: 'flex',
+                          flexWrap: 'wrap',
                           alignItems: 'center',
-                          columnGap: '0.35rem'
+                          gap: '0.75rem',
+                          minWidth: 0
                         }}
                       >
-                        <span>⏱</span>
-                        <span>{entry.routeDurationLabel}</span>
-                        <span />
-                        <span>🚐︎</span>
-                        <span>{entry.routeVehiclesLabel}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                          <span>⏱</span>
+                          <span>{entry.routeDurationLabel}</span>
+                        </span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, maxWidth: '100%' }}>
+                          <span>🚐︎</span>
+                          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.routeVehiclesLabel}</span>
+                        </span>
                       </div>
                     ) : (
-                      entry.subtitle && <div className="muted">{entry.subtitle}</div>
+                      entry.subtitle && <div className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.subtitle}</div>
                     )}
                   </div>
                 );
