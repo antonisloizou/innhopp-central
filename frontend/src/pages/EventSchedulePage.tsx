@@ -1581,6 +1581,47 @@ const EventSchedulePage = () => {
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [timePicker]);
 
+  const overlayOpen = Boolean(timePicker || previewEntry);
+
+  useEffect(() => {
+    if (!overlayOpen || typeof document === 'undefined') return;
+
+    const { body, documentElement } = document;
+    const scrollY = window.scrollY;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyPosition = body.style.position;
+    const previousBodyTop = body.style.top;
+    const previousBodyLeft = body.style.left;
+    const previousBodyRight = body.style.right;
+    const previousBodyWidth = body.style.width;
+    const previousBodyPaddingRight = body.style.paddingRight;
+    const previousHtmlOverflow = documentElement.style.overflow;
+    const scrollbarWidth = window.innerWidth - documentElement.clientWidth;
+
+    documentElement.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    body.style.position = 'fixed';
+    body.style.top = `-${scrollY}px`;
+    body.style.left = '0';
+    body.style.right = '0';
+    body.style.width = '100%';
+    if (scrollbarWidth > 0) {
+      body.style.paddingRight = `${scrollbarWidth}px`;
+    }
+
+    return () => {
+      documentElement.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+      body.style.position = previousBodyPosition;
+      body.style.top = previousBodyTop;
+      body.style.left = previousBodyLeft;
+      body.style.right = previousBodyRight;
+      body.style.width = previousBodyWidth;
+      body.style.paddingRight = previousBodyPaddingRight;
+      window.scrollTo({ top: scrollY });
+    };
+  }, [overlayOpen]);
+
   if (loading) return <p className="muted">Loading schedule…</p>;
   if (error) return <p className="error-text">{error}</p>;
   if (!eventData) return <p className="error-text">Event not found.</p>;
@@ -1597,12 +1638,6 @@ const EventSchedulePage = () => {
   const remaining = Math.max(totalSlots - nonStaffCount, 0);
   const isFull = remaining === 0;
   const pastEvent = eventData.status === 'past';
-  const actionButtonStyle = {
-    fontSize: '1.05rem',
-    fontWeight: 700,
-    lineHeight: '1.2',
-    fontFamily: 'inherit'
-  };
 
   return (
     <section className="stack">
@@ -1629,7 +1664,6 @@ const EventSchedulePage = () => {
                 <button
                   className="event-schedule-menu-item"
                   type="button"
-                  style={actionButtonStyle}
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);
@@ -1641,7 +1675,6 @@ const EventSchedulePage = () => {
                 <button
                   className="event-schedule-menu-item"
                   type="button"
-                  style={actionButtonStyle}
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);
@@ -1653,7 +1686,6 @@ const EventSchedulePage = () => {
                 <button
                   className="event-schedule-menu-item"
                   type="button"
-                  style={actionButtonStyle}
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);
@@ -1666,7 +1698,6 @@ const EventSchedulePage = () => {
                 <button
                   className="event-schedule-menu-item danger"
                   type="button"
-                  style={actionButtonStyle}
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);
@@ -1679,7 +1710,6 @@ const EventSchedulePage = () => {
                 <button
                   className="event-schedule-menu-item"
                   type="button"
-                  style={actionButtonStyle}
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);

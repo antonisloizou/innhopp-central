@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { useAuth } from '../auth/AuthProvider';
 import { roleOptions } from '../utils/roles';
 
 type ParticipantCard = {
@@ -21,6 +22,7 @@ const sortParticipantsByName = (participants: ParticipantCard[]) =>
   [...participants].sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
 
 const ParticipantOnboardingPage = () => {
+  const { impersonateNewUser, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -34,6 +36,11 @@ const ParticipantOnboardingPage = () => {
   const [nameQuery, setNameQuery] = useState<string>(() => searchParams.get('q') || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [impersonatingNewUser, setImpersonatingNewUser] = useState(false);
+
+  const canImpersonateNewUser =
+    (user?.roles?.includes('admin') ?? false) &&
+    !user?.impersonator;
 
   const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -196,13 +203,44 @@ const ParticipantOnboardingPage = () => {
         <div>
           <h2>Participants</h2>
         </div>
-        <Link
-          className="primary button-link"
-          to="/participants/new"
-          style={{ position: 'absolute', right: 0, top: 0 }}
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            display: 'flex',
+            gap: '0.5rem',
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end'
+          }}
         >
-          Add participant
-        </Link>
+          {canImpersonateNewUser && (
+            <button
+              className="primary"
+              type="button"
+              disabled={impersonatingNewUser}
+              onClick={async () => {
+                try {
+                  setImpersonatingNewUser(true);
+                  setError(null);
+                  await impersonateNewUser();
+                  window.location.replace('/profile');
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Failed to impersonate a new user');
+                  setImpersonatingNewUser(false);
+                }
+              }}
+            >
+              {impersonatingNewUser ? 'Impersonating…' : 'Impersonate New User'}
+            </button>
+          )}
+          <Link
+            className="primary button-link"
+            to="/participants/new"
+          >
+            Add participant
+          </Link>
+        </div>
       </header>
 
       <article className="card">

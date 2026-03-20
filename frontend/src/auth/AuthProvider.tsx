@@ -22,6 +22,7 @@ type AuthContextValue = {
   refreshSession: () => Promise<void>;
   startLogin: () => Promise<void>;
   impersonateParticipant: (participantId: number) => Promise<void>;
+  impersonateNewUser: () => Promise<void>;
   stopImpersonating: () => Promise<void>;
   logout: () => Promise<void>;
 };
@@ -72,6 +73,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(session);
   };
 
+  const impersonateNewUser = async () => {
+    const session = await apiRequest<AuthSession>('/auth/impersonate-new-user', {
+      method: 'POST'
+    });
+    setUser(session);
+  };
+
   const stopImpersonating = async () => {
     const session = await apiRequest<AuthSession>('/auth/stop-impersonation', {
       method: 'POST'
@@ -92,6 +100,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         refreshSession,
         startLogin,
         impersonateParticipant,
+        impersonateNewUser,
         stopImpersonating,
         logout
       }}

@@ -97,6 +97,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/callback", h.handleCallback)
 	r.Get("/session", h.sessionInfo)
 	r.Post("/impersonate", h.impersonate)
+	r.Post("/impersonate-new-user", h.impersonateNewUser)
 	r.Post("/stop-impersonation", h.stopImpersonation)
 	r.Post("/logout", h.logout)
 	return r
@@ -316,6 +317,49 @@ func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {
 		Email:        participant.Email,
 		FullName:     participant.FullName,
 		Roles:        roles,
+		Impersonator: cloneImpersonatorClaims(claims),
+	}
+
+	if _, err := h.sessions.Issue(w, nextClaims); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create impersonation session")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, sessionResponse{
+		AccountID:    nextClaims.AccountID,
+		Email:        nextClaims.Email,
+		FullName:     nextClaims.FullName,
+		Roles:        nextClaims.Roles,
+		Impersonator: nextClaims.Impersonator,
+	})
+}
+
+func (h *Handler) impersonateNewUser(w http.ResponseWriter, r *http.Request) {
+	claims := h.activeClaims(r)
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !hasRole(claims.Roles, string(rbac.RoleAdmin)) {
+		httpx.Error(w, http.StatusForbidden, "admin role required")
+		return
+	}
+	if claims.Impersonator != nil {
+		httpx.Error(w, http.StatusConflict, "already impersonating another user")
+		return
+	}
+
+	email, err := h.generateUnmatchedGmail(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to generate impersonation identity")
+		return
+	}
+
+	nextClaims := &Claims{
+		AccountID:    0,
+		Email:        email,
+		FullName:     "New Gmail User",
+		Roles:        []string{string(rbac.RoleParticipant)},
 		Impersonator: cloneImpersonatorClaims(claims),
 	}
 
@@ -557,6 +601,28 @@ func (h *Handler) loadAccountIDByEmail(ctx context.Context, email string) (int64
 		return 0, err
 	}
 	return accountID, nil
+}
+
+func (h *Handler) generateUnmatchedGmail(ctx context.Context) (string, error) {
+	for attempt := 0; attempt < 5; attempt++ {
+		candidate := fmt.Sprintf("impersonated-new-user-%d@gmail.com", time.Now().UnixNano())
+		var exists bool
+		err := h.db.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM participant_profiles WHERE lower(email) = $1
+				UNION ALL
+				SELECT 1 FROM accounts WHERE lower(email) = $1
+			)
+		`, candidate).Scan(&exists)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+
+	return "", errors.New("could not generate unmatched gmail address")
 }
 
 func (h *Handler) assignRoles(ctx context.Context, accountID int64, roles []string) error {

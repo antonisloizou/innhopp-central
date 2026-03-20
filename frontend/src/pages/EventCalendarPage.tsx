@@ -343,8 +343,8 @@ const EventCalendarPage = () => {
       <div className="stack">
         {myEvents.length > 0 && (
           <article className="card">
-            <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{ flex: 1, fontWeight: 800, fontSize: '1.25rem' }}>My Events</div>
+            <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 0%', minWidth: 0, fontWeight: 800, fontSize: '1.25rem' }}>My Events</div>
               <span className="badge neutral">
                 {myEvents.length} {myEvents.length === 1 ? 'event' : 'events'}
               </span>
@@ -354,12 +354,12 @@ const EventCalendarPage = () => {
         )}
 
         <article className="card">
-          <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1 }}>
+          <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 0%', minWidth: 0, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 800, fontSize: '1.25rem' }}>Event Calendar</div>
               <div
                 ref={seasonMenuRef}
-                style={{ position: 'relative', minWidth: '220px' }}
+                style={{ position: 'relative', minWidth: 0, flex: '1 1 220px', maxWidth: '100%' }}
               >
                 <button
                   type="button"
@@ -389,8 +389,11 @@ const EventCalendarPage = () => {
                       position: 'absolute',
                       top: 'calc(100% + 0.35rem)',
                       left: 0,
+                      right: 0,
                       zIndex: 20,
-                      minWidth: '280px',
+                      minWidth: 0,
+                      width: '100%',
+                      maxWidth: 'min(280px, 100vw - 3rem)',
                       padding: '0.35rem',
                       boxShadow: 'var(--panel-card-shadow)',
                       background: 'var(--modal-surface)',

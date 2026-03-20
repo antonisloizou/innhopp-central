@@ -56,6 +56,20 @@
   --scroll-thumb: rgba(15, 23, 42, 0.25);
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -105,6 +119,14 @@ button {
 button.primary {
   background: #2563eb;
   color: #fff;
+}
+
+button.primary,
+.button-link.primary {
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.2;
+  font-weight: 600;
 }
 
 button.primary.saved {
@@ -176,6 +198,11 @@ button.ghost {
   gap: 0.75rem;
 }
 
+.form-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .logistics-filter-grid {
   grid-template-columns: 1fr;
   align-items: end;
@@ -202,6 +229,9 @@ button.ghost {
 .form-field input,
 .form-field select,
 .form-field textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.55rem 0.75rem;
   border-radius: 0.5rem;
   border: 1px solid var(--panel-input-border);
@@ -277,6 +307,14 @@ button.ghost {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.form-actions > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .multi-select-dropdown {
@@ -456,6 +494,9 @@ button.ghost {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
   background: transparent;
 }
 
@@ -524,6 +565,9 @@ button.ghost {
   grid-template-columns: 16rem 1fr;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   background: linear-gradient(
     180deg,
     rgba(var(--surface-rgb), 0) 0%,
@@ -614,9 +658,18 @@ button.ghost {
   background: transparent;
   color: var(--text-color);
   overflow-y: auto;
+  overflow-x: clip;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
   backdrop-filter: none;
   position: relative;
   z-index: 1;
+}
+
+.app-content > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .menu-toggle {
@@ -701,6 +754,16 @@ button.ghost {
 }
 
 @media (max-width: 640px) {
+  html,
+  body,
+  #root,
+  .app-shell,
+  .app-body,
+  .app-content {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .app-header {
     flex-direction: row;
     align-items: center;
@@ -749,6 +812,19 @@ button.ghost {
     padding: 1rem;
   }
 
+  .card-header {
+    flex-wrap: wrap;
+  }
+
+  .card-header > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .grid.two-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .card-details {
     grid-template-columns: 1fr;
   }
@@ -761,6 +837,29 @@ button.ghost {
   .full-width-alt {
     width: 100% !important;
     min-width: 0;
+    max-width: 100%;
+  }
+
+  .upload-pane > .muted {
+    margin-left: 0 !important;
+  }
+
+  .innhopp-location-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .innhopp-metric-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .innhopp-location-preview {
+    grid-row: auto !important;
+    grid-column: 1 !important;
+  }
+
+  .innhopp-landing-grid,
+  .innhopp-landing-pair {
+    grid-template-columns: 1fr !important;
   }
 
   .table {
@@ -801,6 +900,11 @@ button.ghost {
   }
 
   .event-card-badges .badge {
+    white-space: normal;
+    max-width: 100%;
+  }
+
+  .badge {
     white-space: normal;
     max-width: 100%;
   }
@@ -869,6 +973,17 @@ button.ghost {
     grid-column: 1 / -1;
   }
 
+  .login-layout {
+    padding: 1rem;
+  }
+
+  .login-panel,
+  .google-button,
+  .google-signin-button {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 
 .page-header {
@@ -1085,6 +1200,10 @@ button.ghost {
   border-radius: 0.5rem;
   background: transparent;
   color: var(--text-strong);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-family: inherit;
 }
 
 .event-schedule-menu-item:hover {
@@ -1232,6 +1351,14 @@ button.ghost {
   border-collapse: collapse;
 }
 
+img,
+svg,
+canvas,
+video,
+iframe {
+  max-width: 100%;
+}
+
 .table th,
 .table td {
   padding: 0.75rem 0.5rem;
@@ -1308,6 +1435,15 @@ button.ghost {
   width: 24ch !important;
   min-width: 24ch;
   display: block;
+}
+
+.innhopp-location-grid,
+.innhopp-location-fields,
+.innhopp-metric-grid,
+.innhopp-location-preview,
+.innhopp-landing-grid,
+.innhopp-landing-pair {
+  min-width: 0;
 }
 
 .schedule-time-picker .flatpickr-input,

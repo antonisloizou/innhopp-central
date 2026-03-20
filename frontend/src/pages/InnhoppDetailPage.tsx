@@ -860,7 +860,7 @@ const InnhoppDetailPage = () => {
             <div
               className="form-grid"
               style={{
-                gridTemplateColumns: 'max-content 16px 1fr',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
                 gridColumn: '1 / -1',
                 gap: '1rem',
                 alignItems: 'end'
@@ -877,10 +877,9 @@ const InnhoppDetailPage = () => {
                   value={form.sequence}
                   onFocus={(e) => e.target.select()}
                   onChange={(e) => setForm((prev) => ({ ...prev, sequence: Number(e.target.value) }))}
-                  style={{ minWidth: '80px' }}
+                  style={{ minWidth: 0 }}
                 />
               </label>
-              <div aria-hidden="true" />
               <label className={`form-field ${missingRequired.name ? 'field-missing' : ''}`}>
                 <span>Name</span>
                 <input
@@ -901,7 +900,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid"
+              className="form-grid innhopp-location-grid"
               style={{
                 gridTemplateColumns: form.coordinates?.trim() ? 'repeat(2,minmax(0,1fr))' : '1fr',
                 gridColumn: '1 / -1',
@@ -910,7 +909,7 @@ const InnhoppDetailPage = () => {
               }}
             >
               <div
-                className="form-grid"
+                className="form-grid innhopp-location-fields"
                 style={{
                   gridTemplateColumns: '1fr',
                   rowGap: '0.9rem',
@@ -919,24 +918,30 @@ const InnhoppDetailPage = () => {
               >
                 <label className={`form-field ${missingRequired.coordinates ? 'field-missing' : ''}`}>
                   <span>Coordinates (DMS)</span>
-                  <div className="input-with-button" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: 'fit-content' }}>
+                  <div
+                    className="input-with-button"
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '100%', flexWrap: 'wrap' }}
+                  >
                     <input
                       type="text"
                       value={form.coordinates || ''}
                       onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
                       pattern={`^[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[NS]\\s[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[EW]$`}
                       title={`Use DMS format like 11°14'30.0\"N 73°42'59.7\"W`}
-                      style={{ width: '24ch' }}
+                      style={{ width: '100%', minWidth: 0, maxWidth: '24ch', flex: '1 1 24ch' }}
                     />
                     {form.coordinates?.trim() ? (
                       <button
                         type="button"
                         className="ghost"
                         style={{
-                          minWidth: '12ch',
-                          textAlign: 'right',
-                          justifyContent: 'flex-end',
-                          whiteSpace: 'nowrap'
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          textAlign: 'left',
+                          justifyContent: 'flex-start',
+                          whiteSpace: 'normal',
+                          paddingLeft: 0,
+                          paddingRight: 0
                         }}
                         onClick={() => {
                           const coords = form.coordinates?.trim();
@@ -953,17 +958,17 @@ const InnhoppDetailPage = () => {
                   </div>
                 </label>
                 <div
-                  className="form-grid"
+                  className="form-grid innhopp-metric-grid"
                   style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
                 >
                 <label className={`form-field ${missingRequired.elevation ? 'field-missing' : ''}`}>
                   <span>Elevation (m)</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <input
                       type="number"
                       min={0}
                       value={form.elevation ?? ''}
-                      style={{ width: '24ch' }}
+                      style={{ width: '100%', minWidth: 0, maxWidth: '24ch', flex: '1 1 24ch' }}
                       onFocus={(e) => {
                         const target = e.target as HTMLInputElement;
                         requestAnimationFrame(() => target.select());
@@ -974,7 +979,7 @@ const InnhoppDetailPage = () => {
                       }}
                       onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
                     />
-                    <span className="muted" style={{ whiteSpace: 'nowrap', minWidth: '12ch', textAlign: 'left' }}>
+                    <span className="muted" style={{ whiteSpace: 'normal', minWidth: 0, textAlign: 'left' }}>
                       {form.elevation !== undefined && form.elevation !== null && !Number.isNaN(form.elevation)
                         ? `${metersToFeet(form.elevation)} ft`
                         : '— ft'}
@@ -983,12 +988,12 @@ const InnhoppDetailPage = () => {
                 </label>
                 </div>
                 <div
-                  className="form-grid"
+                  className="form-grid innhopp-metric-grid"
                   style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
                 >
                   <label className={`form-field ${missingRequired.scheduled_at ? 'field-missing' : ''}`}>
                     <span>Scheduled at</span>
-                    <div style={{ width: '24ch' }}>
+                    <div style={{ width: '100%', maxWidth: '24ch' }}>
                       <Flatpickr
                         value={toEventLocalPickerDate(form.scheduled_at || undefined)}
                         options={{
@@ -1016,7 +1021,7 @@ const InnhoppDetailPage = () => {
               </div>
               {form.coordinates?.trim() ? (
                 <div
-                  className="form-field"
+                  className="form-field innhopp-location-preview"
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
@@ -1093,7 +1098,7 @@ const InnhoppDetailPage = () => {
                     gap: '0.6rem',
                     alignItems: 'center',
                     gridColumn: '1 / -1',
-                    width: 'fit-content',
+                    width: '100%',
                     maxWidth: '100%'
                   }}
                 >
@@ -1150,9 +1155,10 @@ const InnhoppDetailPage = () => {
                               flexDirection: 'column',
                               position: 'relative',
                               cursor: 'pointer',
-                              width: '180px',
+                              width: 'min(180px, 100%)',
                               height: '180px',
-                              flex: '0 0 180px'
+                              flex: '1 1 160px',
+                              maxWidth: '180px'
                             }}
                             onClick={() => setLightboxIndex(absoluteIndex)}
                           >
@@ -1489,7 +1495,7 @@ const InnhoppDetailPage = () => {
                         coordinates: e.target.value
                       }))
                     }
-                    style={{ minWidth: '22ch' }}
+                    style={{ minWidth: 0, width: '100%' }}
                     required
                   />
                 </label>
@@ -1641,7 +1647,7 @@ const InnhoppDetailPage = () => {
         </article>
 
         <article className="card">
-          <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
+          <div className="form-grid innhopp-landing-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
             <div className="form-field" style={{ gridColumn: '1 / -1' }}>
               <span>Primary landing area</span>
             </div>
@@ -1657,7 +1663,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid"
+              className="form-grid innhopp-landing-pair"
               style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
             >
               <label className={`form-field ${missingRequired.primary_size ? 'field-missing' : ''}`}>
@@ -1701,7 +1707,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid"
+              className="form-grid innhopp-landing-pair"
               style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
             >
               <label className="form-field">
