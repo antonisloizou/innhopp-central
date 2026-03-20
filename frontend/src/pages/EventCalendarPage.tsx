@@ -21,7 +21,7 @@ const formatDate = (value?: string | null) =>
     : 'TBD';
 
 const EventCalendarPage = () => {
-  const { user } = useAuth();
+  const { user, refreshSession } = useAuth();
   const navigate = useNavigate();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -45,17 +45,31 @@ const EventCalendarPage = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const isAuthError = (error: unknown) =>
+      typeof error === 'object' && error !== null && 'status' in error &&
+      ((error as { status?: number }).status === 401 || (error as { status?: number }).status === 403);
+
+    const loadCalendarData = async () => {
+      const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
+      if (cancelled) return;
+      setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
+      setEvents(normalizeEvents(eventResponse as Event[]));
+    };
+
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [seasonResponse, eventResponse] = await Promise.all([
-          listSeasons(),
-          listEvents()
-        ]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
-        setEvents(normalizeEvents(eventResponse as Event[]));
+        await refreshSession();
+        try {
+          await loadCalendarData();
+        } catch (calendarError) {
+          if (!isAuthError(calendarError)) {
+            throw calendarError;
+          }
+          await refreshSession();
+          await loadCalendarData();
+        }
 
         try {
           const myProfileResponse = await getMyParticipantProfile();
@@ -101,7 +115,7 @@ const EventCalendarPage = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshSession]);
 
   useEffect(() => {
     if (!seasonMenuOpen) return;

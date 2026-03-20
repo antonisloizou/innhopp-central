@@ -751,6 +751,21 @@ button.ghost {
     justify-content: center;
     gap: 0.35rem;
   }
+
+  .schedule-entry-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .schedule-entry-badges {
+    margin-left: 0;
+    align-self: flex-start;
+    justify-content: flex-start;
+    width: auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1267,6 +1282,21 @@ button.ghost {
   line-height: 1;
 }
 
+.schedule-status-badge {
+  width: 1.5rem;
+  height: 1.5rem;
+  min-width: 1.5rem;
+  padding: 0;
+  margin-left: 0;
+  flex: 0 0 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.schedule-status-badge-placeholder {
+  visibility: hidden;
+}
+
 .badge.neutral {
   background: #d8dadd;
   color: #111827;
@@ -1409,6 +1439,40 @@ iframe {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+}
+
+.schedule-entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.schedule-entry-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.schedule-entry-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex: 1 1 auto;
+}
+
+.schedule-entry-badges {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex: 0 0 auto;
+  min-width: fit-content;
+}
+
+.schedule-entry-badges .badge {
+  margin-left: 0;
 }
 
 .schedule-list {

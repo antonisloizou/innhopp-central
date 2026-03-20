@@ -1909,93 +1909,88 @@ const EventSchedulePage = () => {
               const renderEntry = (entry: Entry) => {
                 const badgeStyle = typeBadgeStyles[entry.type];
                 const missingCoords = !!entry.missingCoordinates;
-                const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
+                const compactBadgeStyle = { textAlign: 'center' as const };
                 let statusBadge: JSX.Element | null = null;
                 if (entry.type === 'Accommodation') {
                   statusBadge =
                     entry.booked && !missingCoords ? (
-                      <span className="badge success" style={compactBadgeStyle}>
+                      <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                         ✓
                       </span>
                     ) : (
-                      <span className="badge danger" style={compactBadgeStyle}>
+                      <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                         !
                       </span>
                     );
                 } else if (entry.type === 'Innhopp') {
                   statusBadge = entry.ready ? (
-                    <span className="badge success" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                       !
                     </span>
                   );
                 } else if (entry.type === 'Meal') {
                   statusBadge = entry.mealComplete ? (
-                    <span className="badge success" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                       !
                     </span>
                   );
                 } else if (entry.type === 'Other') {
                   statusBadge = entry.otherComplete ? (
-                    <span className="badge success" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                       !
                     </span>
                   );
                 } else if (entry.type === 'Transport') {
                   statusBadge = entry.transportComplete ? (
-                    <span className="badge success" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                       !
                     </span>
                   );
                 } else if (entry.type === 'Ground Crew') {
                   statusBadge = entry.transportComplete ? (
-                    <span className="badge success" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
                       !
                     </span>
                   );
                 } else if (missingCoords) {
                   statusBadge = (
-                    <span className="badge danger" style={compactBadgeStyle} title="Coordinates missing" aria-label="Coordinates missing">
+                    <span
+                      className="badge danger schedule-status-badge"
+                      style={compactBadgeStyle}
+                      title="Coordinates missing"
+                      aria-label="Coordinates missing"
+                    >
                       !
                     </span>
                   );
                 }
                 const content = (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', minWidth: 0 }}>
-                      <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.title}</strong>
-                      <div
-                        style={{
-                          marginLeft: 'auto',
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          alignItems: 'center',
-                          justifyContent: 'flex-end',
-                          gap: '0.5rem',
-                          minWidth: 0,
-                          maxWidth: '100%'
-                        }}
-                      >
-                        {statusBadge || <span style={{ visibility: 'hidden', ...compactBadgeStyle }}>!</span>}
+                  <div className="schedule-entry-body">
+                    <div className="schedule-entry-header">
+                      <strong className="schedule-entry-title">{entry.title}</strong>
+                      <div className="schedule-entry-badges">
+                        {!participantOnly &&
+                          (statusBadge || <span className="badge schedule-status-badge schedule-status-badge-placeholder">!</span>)}
                         <span
                           className="badge schedule-type-badge"
                           style={badgeStyle}

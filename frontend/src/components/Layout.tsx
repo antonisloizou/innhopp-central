@@ -11,7 +11,6 @@ const Layout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
-  const forceDocumentNavigation = !!user?.impersonator;
   const navItems = participantOnly
     ? [{ to: '/events', label: 'Events' }]
     : [
@@ -99,7 +98,7 @@ const Layout = () => {
                 <NavLink
                   to={item.to}
                   end={item.to === '/events'}
-                  reloadDocument={forceDocumentNavigation}
+                  reloadDocument
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
                   onClick={handleNavClick}
                 >
@@ -111,7 +110,7 @@ const Layout = () => {
           <div className="nav-bottom">
             <NavLink
               to="/profile"
-              reloadDocument={forceDocumentNavigation}
+              reloadDocument
               className={({ isActive }) => (isActive ? 'nav-user nav-user-link active' : 'nav-user nav-user-link')}
               onClick={handleNavClick}
             >
