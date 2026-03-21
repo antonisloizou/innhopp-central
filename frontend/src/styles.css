@@ -1756,6 +1756,29 @@ iframe {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
+.nav-user-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.nav-user-warning {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 9999px;
+  border: 2px solid #b91c1c;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  transform: translateY(-0.35rem);
+}
+
 .nav-user-link:hover,
 .nav-user-link:focus-visible,
 .nav-user-link.active {

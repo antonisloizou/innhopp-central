@@ -7,6 +7,6 @@ export const roleOptions = [
   'Jump Leader',
   'Photo',
   'Pilot',
-  'COP',
+  'POC',
   'Driver'
 ] as const;

@@ -56,7 +56,7 @@ const ManifestDetailPage = () => {
     emergency_contact: '',
     roles: ['Participant', 'Skydiver', 'Staff'] as string[]
   });
-  const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Driver', 'Pilot', 'COP'] as const;
+  const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Driver', 'Pilot', 'POC'] as const;
   const { locked, toggleLocked, editGuardProps, lockNotice } = useDetailPageLock();
 
   useEffect(() => {

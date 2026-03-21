@@ -253,7 +253,11 @@ const EventCalendarPage = () => {
   };
 
   const handleDeleteSeason = async (season: Season) => {
-    const confirmed = window.confirm(`Delete "${season.name}"? This will also delete its events.`);
+    const seasonEvents = events.filter((event) => event.season_id === season.id);
+    const eventList = seasonEvents.length
+      ? `\n\nThis will also delete these events:\n${seasonEvents.map((event) => `- ${event.name}`).join('\n')}`
+      : '\n\nNo events are currently attached to this season.';
+    const confirmed = window.confirm(`Delete "${season.name}"?${eventList}`);
     if (!confirmed) return;
 
     try {
@@ -432,7 +436,6 @@ const EventCalendarPage = () => {
                       }}
                     >
                       <span>All seasons</span>
-                      {!selectedSeason && <span className="badge neutral">Selected</span>}
                     </button>
                     {[...seasons]
                       .sort((a, b) => b.name.localeCompare(a.name))
@@ -471,7 +474,6 @@ const EventCalendarPage = () => {
                             >
                               {season.name}
                             </span>
-                            {selectedSeason === String(season.id) && <span className="badge neutral">Selected</span>}
                           </button>
                           {canManage && (
                             <button

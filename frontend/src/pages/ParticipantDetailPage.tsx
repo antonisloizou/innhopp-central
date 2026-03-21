@@ -8,9 +8,11 @@ import {
   updateParticipantProfile,
   deleteParticipantProfile
 } from '../api/participants';
+import ParticipantProfileForm, {
+  createParticipantFormState,
+  toParticipantPayload
+} from '../components/ParticipantProfileForm';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
-
-const roleOptions = ['Participant', 'Skydiver', 'Staff', 'Ground Crew', 'Jump Master', 'Jump Leader', 'Photo', 'Pilot', 'COP', 'Driver'] as const;
 
 const ParticipantDetailPage = () => {
   const { participantId } = useParams();
@@ -18,22 +20,16 @@ const ParticipantDetailPage = () => {
   const location = useLocation();
   const backToParticipants = location.search ? `/participants${location.search}` : '/participants';
   const [profile, setProfile] = useState<ParticipantProfile | null>(null);
-  const [form, setForm] = useState<CreateParticipantPayload>({
-    full_name: '',
-    email: '',
-    phone: '',
-    experience_level: '',
-    emergency_contact: '',
-    roles: ['Participant']
-  });
+  const [form, setForm] = useState<CreateParticipantPayload>(createParticipantFormState());
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const { impersonateParticipant, user } = useAuth();
+  const canManageAccountRoles = user?.roles?.includes('admin') ?? false;
 
   const canImpersonate =
     (user?.roles?.includes('admin') ?? false) &&
@@ -50,14 +46,8 @@ const ParticipantDetailPage = () => {
         const data = await getParticipantProfile(Number(participantId));
         if (cancelled) return;
         setProfile(data);
-        setForm({
-          full_name: data.full_name,
-          email: data.email,
-          phone: data.phone || '',
-          experience_level: data.experience_level || '',
-          emergency_contact: data.emergency_contact || '',
-          roles: Array.isArray(data.roles) && data.roles.length > 0 ? data.roles : ['Participant']
-        });
+        setForm(createParticipantFormState(data));
+        setSaved(false);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load participant');
@@ -79,20 +69,18 @@ const ParticipantDetailPage = () => {
     if (!participantId) return;
     const roles = form.roles && form.roles.length > 0 ? form.roles : ['Participant'];
     setSaving(true);
-    setMessage(null);
+    setSaved(false);
+    setError(null);
     try {
       const updated = await updateParticipantProfile(Number(participantId), {
-        full_name: form.full_name.trim(),
-        email: form.email.trim(),
-        phone: form.phone?.trim() || undefined,
-        experience_level: form.experience_level?.trim() || undefined,
-        emergency_contact: form.emergency_contact?.trim() || undefined,
+        ...toParticipantPayload(form),
         roles
       });
       setProfile(updated);
-      setMessage('Participant updated');
+      setForm(createParticipantFormState(updated));
+      setSaved(true);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Failed to update participant');
+      setError(err instanceof Error ? err.message : 'Failed to update participant');
     } finally {
       setSaving(false);
     }
@@ -129,11 +117,11 @@ const ParticipantDetailPage = () => {
                 if (!profile) return;
                 try {
                   setImpersonating(true);
-                  setMessage(null);
+                  setError(null);
                   await impersonateParticipant(profile.id);
                   window.location.replace('/profile');
                 } catch (err) {
-                  setMessage(err instanceof Error ? err.message : 'Failed to impersonate participant');
+                  setError(err instanceof Error ? err.message : 'Failed to impersonate participant');
                   setImpersonating(false);
                 }
               }}
@@ -180,7 +168,7 @@ const ParticipantDetailPage = () => {
                   navigate(-1);
                   return;
                 }
-                setMessage(err instanceof Error ? err.message : 'Failed to delete participant');
+                setError(err instanceof Error ? err.message : 'Failed to delete participant');
                 setDeleting(false);
               }
             }}
@@ -190,94 +178,21 @@ const ParticipantDetailPage = () => {
         </div>
       </header>
 
-      <article className="card">
-        <form className="form-grid" onSubmit={handleSubmit}>
-          <label className="form-field">
-            <span>Full name</span>
-            <input
-              type="text"
-              value={form.full_name}
-              onChange={(e) => setForm((prev) => ({ ...prev, full_name: e.target.value }))}
-              required
-            />
-          </label>
-          <label className="form-field">
-            <span>Email</span>
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-              required
-            />
-          </label>
-          <label className="form-field">
-            <span>Phone</span>
-            <input
-              type="text"
-              value={form.phone}
-              onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
-              placeholder="Optional"
-            />
-          </label>
-          <label className="form-field">
-            <span>Experience level</span>
-            <input
-              type="text"
-              value={form.experience_level}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, experience_level: e.target.value }))
-              }
-              placeholder="Optional"
-            />
-          </label>
-          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-            <span>Roles</span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-              {roleOptions.map((role) => {
-                const checked = form.roles?.includes(role);
-                return (
-                  <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(e) => {
-                        setForm((prev) => {
-                          const current = new Set(prev.roles || []);
-                          if (e.target.checked) {
-                            current.add(role);
-                          } else {
-                            current.delete(role);
-                          }
-                          const next = Array.from(current);
-                          return { ...prev, roles: next.length > 0 ? next : ['Participant'] };
-                        });
-                      }}
-                    />
-                    {role}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-          <label className="form-field">
-            <span>Emergency contact</span>
-            <input
-              type="text"
-              value={form.emergency_contact}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, emergency_contact: e.target.value }))
-              }
-              placeholder="Optional"
-            />
-          </label>
-          <div className="form-actions">
-            <button type="submit" className="primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save participant'}
-            </button>
-            {message && <span className="muted">{message}</span>}
-          </div>
-        </form>
-      </article>
+      <ParticipantProfileForm
+        form={form}
+        onChange={(next) => {
+          setForm(next);
+          setSaved(false);
+          setError(null);
+        }}
+        onSubmit={handleSubmit}
+        submitting={saving}
+        saved={saved}
+        error={error}
+        roleMode="editable"
+        showAdminRoleControl={canManageAccountRoles}
+        canEditAdminRole={canManageAccountRoles}
+      />
       {lockNotice}
     </section>
   );

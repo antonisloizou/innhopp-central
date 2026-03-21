@@ -175,14 +175,25 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	participantRoles, err := h.loadParticipantRolesByEmail(r.Context(), account.Email)
+	if err := h.linkParticipantProfileByEmail(r.Context(), account.ID, account.Email); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to link participant profile")
+		return
+	}
+
+	participantRoles, err := h.loadParticipantRoles(r.Context(), account.ID, account.Email)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load participant roles")
+		return
+	}
+	desiredAccountRoles, err := h.loadDesiredParticipantAccountRoles(r.Context(), account.ID, account.Email)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant account roles")
 		return
 	}
 
 	roleCandidates := append([]string{}, claims.AllRoles()...)
 	roleCandidates = append(roleCandidates, participantRoles...)
+	roleCandidates = append(roleCandidates, desiredAccountRoles...)
 
 	normalized := h.collectRoles(account.Roles, roleCandidates)
 	if len(normalized) == 0 {
@@ -554,9 +565,16 @@ func (h *Handler) loadAccountRoles(ctx context.Context, accountID int64) ([]stri
 	return roles, nil
 }
 
-func (h *Handler) loadParticipantRolesByEmail(ctx context.Context, email string) ([]string, error) {
+func (h *Handler) loadParticipantRoles(ctx context.Context, accountID int64, email string) ([]string, error) {
 	var roles []string
-	err := h.db.QueryRow(ctx, `SELECT roles FROM participant_profiles WHERE email = $1`, strings.ToLower(strings.TrimSpace(email))).Scan(&roles)
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	err := h.db.QueryRow(ctx, `
+		SELECT roles
+		FROM participant_profiles
+		WHERE ($1 > 0 AND account_id = $1) OR lower(email) = $2
+		ORDER BY CASE WHEN $1 > 0 AND account_id = $1 THEN 0 ELSE 1 END, id ASC
+		LIMIT 1
+	`, accountID, normalizedEmail).Scan(&roles)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -564,6 +582,38 @@ func (h *Handler) loadParticipantRolesByEmail(ctx context.Context, email string)
 		return nil, err
 	}
 	return roles, nil
+}
+
+func (h *Handler) loadDesiredParticipantAccountRoles(ctx context.Context, accountID int64, email string) ([]string, error) {
+	var roles []string
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	err := h.db.QueryRow(ctx, `
+		SELECT account_roles
+		FROM participant_profiles
+		WHERE ($1 > 0 AND account_id = $1) OR lower(email) = $2
+		ORDER BY CASE WHEN $1 > 0 AND account_id = $1 THEN 0 ELSE 1 END, id ASC
+		LIMIT 1
+	`, accountID, normalizedEmail).Scan(&roles)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return roles, nil
+}
+
+func (h *Handler) linkParticipantProfileByEmail(ctx context.Context, accountID int64, email string) error {
+	if accountID <= 0 {
+		return nil
+	}
+
+	_, err := h.db.Exec(ctx, `
+		UPDATE participant_profiles
+		SET account_id = $1
+		WHERE account_id IS NULL AND lower(email) = $2
+	`, accountID, strings.ToLower(strings.TrimSpace(email)))
+	return err
 }
 
 type participantIdentity struct {

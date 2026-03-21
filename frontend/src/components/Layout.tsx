@@ -1,13 +1,30 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { getMyParticipantProfile } from '../api/participants';
 import logo from '../assets/logo.webp';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
+
+const INNHOPP_WEBSITE_URL = 'https://www.innhopp.com';
+
+const hasText = (value?: string | number | null) => String(value ?? '').trim().length > 0;
+
+const isProfileCompleteForRegistration = (profile: Awaited<ReturnType<typeof getMyParticipantProfile>>) =>
+  hasText(profile.full_name) &&
+  hasText(profile.email) &&
+  hasText(profile.whatsapp) &&
+  hasText(profile.license) &&
+  hasText(profile.main_canopy) &&
+  hasText(profile.wingload) &&
+  typeof profile.years_in_sport === 'number' &&
+  typeof profile.jump_count === 'number' &&
+  typeof profile.recent_jump_count === 'number';
 
 const Layout = () => {
   const { logout, stopImpersonating, user } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [profileIncomplete, setProfileIncomplete] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
@@ -51,6 +68,37 @@ const Layout = () => {
     return () => document.body.classList.remove('nav-open');
   }, [navOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProfileCompletion = async () => {
+      if (!user) {
+        setProfileIncomplete(false);
+        return;
+      }
+      try {
+        const profile = await getMyParticipantProfile();
+        if (!cancelled) {
+          setProfileIncomplete(!isProfileCompleteForRegistration(profile));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        const status = (error as Error & { status?: number })?.status;
+        setProfileIncomplete(status === 404);
+      }
+    };
+
+    void loadProfileCompletion();
+    const handleProfileUpdated = () => {
+      void loadProfileCompletion();
+    };
+    window.addEventListener('participant-profile-updated', handleProfileUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('participant-profile-updated', handleProfileUpdated);
+    };
+  }, [user?.email, user?.account_id]);
+
   const handleNavClick = () => setNavOpen(false);
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   const handleLogout = async () => {
@@ -72,9 +120,9 @@ const Layout = () => {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="brand">
+        <a className="brand" href={INNHOPP_WEBSITE_URL}>
           <img src={logo} alt="Innhopp Central logo" className="brand-logo" />
-        </div>
+        </a>
         <div className="header-actions">
           <button
             type="button"
@@ -115,7 +163,18 @@ const Layout = () => {
               className={({ isActive }) => (isActive ? 'nav-user nav-user-link active' : 'nav-user nav-user-link')}
               onClick={handleNavClick}
             >
-              {user?.full_name || user?.email}
+              <span className="nav-user-label">
+                <span>{user?.full_name || user?.email}</span>
+                {profileIncomplete ? (
+                  <span
+                    className="nav-user-warning"
+                    title="Complete your profile to be able to register to events"
+                    aria-label="Complete your profile to be able to register to events"
+                  >
+                    !
+                  </span>
+                ) : null}
+              </span>
             </NavLink>
             <button type="button" className="nav-link logout-link" onClick={() => void handleLogout()}>
               Sign out
