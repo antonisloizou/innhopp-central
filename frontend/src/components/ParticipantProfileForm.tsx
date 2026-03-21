@@ -433,6 +433,7 @@ const ParticipantProfileForm = ({
               onChange={(event) => updateField('citizenship', event.target.value)}
             />
           </label>
+          <div style={{ gridColumn: '1 / -1', height: 0 }} />
           <label className={`form-field ${missingRequired.tshirt_size ? 'field-missing' : ''}`}>
             <span>T-shirt size</span>
             <select
