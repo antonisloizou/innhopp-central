@@ -110,7 +110,7 @@ const InnhoppCsvPage = () => {
         {error ? <p className="error-text">{error}</p> : null}
         {!loading && !error ? (
           <>
-            <label className="form-field" style={{ maxWidth: '24rem' }}>
+            <label className="form-field innhopp-csv-event-field">
               <span>Event</span>
               <select value={selectedEventId} onChange={(e) => setSelectedEventId(e.target.value)}>
                 <option value="all">All events</option>
@@ -128,7 +128,7 @@ const InnhoppCsvPage = () => {
               readOnly
               value={csv}
               rows={Math.max(12, Math.min(filteredRows.length + 2, 32))}
-              style={{ width: '100%', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+              className="innhopp-csv-textarea"
             />
           </>
         ) : null}

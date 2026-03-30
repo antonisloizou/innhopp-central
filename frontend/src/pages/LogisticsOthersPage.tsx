@@ -79,8 +79,8 @@ const LogisticsOthersPage = () => {
         <div>
           <h2>Other logistics</h2>
         </div>
-        <div className="card-actions" style={{ gap: '0.5rem' }}>
-          <Link className="ghost" to="/logistics" style={{ fontWeight: 700, fontSize: '1.05rem' }}>
+        <div className="card-actions logistics-list-actions">
+          <Link className="ghost logistics-list-back-link" to="/logistics">
             Back to logistics
           </Link>
           <Link className="primary button-link" to="/logistics/others/new">
@@ -90,14 +90,7 @@ const LogisticsOthersPage = () => {
       </header>
 
       <article className="card">
-        <div
-          className="form-grid"
-          style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            alignItems: 'end',
-            gap: '0.75rem'
-          }}
-        >
+        <div className="form-grid logistics-list-filters">
           <label className="form-field">
             <span>Season</span>
             <select
@@ -106,7 +99,7 @@ const LogisticsOthersPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
-              style={{ width: '100%', minWidth: '140px', maxWidth: '180px' }}
+              className="logistics-list-season-select"
             >
               <option value="">All seasons</option>
               {seasons.map((s) => (
@@ -121,7 +114,7 @@ const LogisticsOthersPage = () => {
             <select
               value={selectedEvent}
               onChange={(e) => setSelectedEvent(e.target.value)}
-              style={{ width: '100%', minWidth: '160px' }}
+              className="logistics-list-event-select"
             >
               <option value="">All events</option>
               {filteredEvents.map((ev) => (
@@ -150,27 +143,16 @@ const LogisticsOthersPage = () => {
         ) : filteredOthers.length === 0 ? (
           <p className="muted">No entries match the selected filters.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list logistics-list-scroll">
             {filteredOthers.map((entry) => (
-              <li key={entry.id} style={{ width: '100%' }}>
+              <li key={entry.id} className="logistics-list-item">
                 <Link
                   to={`/logistics/others/${entry.id}`}
-                  className="card-link"
-                  style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' }}
+                  className="card-link logistics-list-link"
                 >
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto',
-                      alignItems: 'center',
-                      gap: '0.75rem'
-                    }}
-                  >
+                  <div className="logistics-list-grid-row">
                     <strong>{entry.name}</strong>
-                    <span
-                      className="badge"
-                      style={{ backgroundColor: '#2b8a3e', color: '#fff', justifySelf: 'center' }}
-                    >
+                    <span className="badge logistics-list-event-badge logistics-list-badge-self-center">
                       {entry.event_id ? events.find((e) => e.id === entry.event_id)?.name || `Event #${entry.event_id}` : 'Unassigned'}
                     </span>
                   </div>

@@ -269,6 +269,17 @@ func normalizeStringList(input []string) []string {
 	return out
 }
 
+func normalizeHSSQualities(input []string) []string {
+	out := make([]string, 0, len(input))
+	for _, value := range normalizeStringList(input) {
+		if strings.EqualFold(strings.TrimSpace(value), "Experiment with drugs") {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
+}
+
 func normalizeAccountRoles(input []string) []string {
 	normalized := normalizeStringList(input)
 	out := make([]string, 0, len(normalized)+1)
@@ -374,7 +385,7 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 	profile.AccountRoles = normalizeAccountRoles(profile.AccountRoles)
 	profile.DietaryRestrictions = normalizeStringList(profile.DietaryRestrictions)
 	profile.MedicalExpertise = normalizeStringList(profile.MedicalExpertise)
-	profile.HSSQualities = normalizeStringList(profile.HSSQualities)
+	profile.HSSQualities = normalizeHSSQualities(profile.HSSQualities)
 
 	return &profile, nil
 }
@@ -481,7 +492,7 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	payload.OtherAirSports = normalizeStringList(payload.OtherAirSports)
 	payload.DietaryRestrictions = normalizeStringList(payload.DietaryRestrictions)
 	payload.MedicalExpertise = normalizeStringList(payload.MedicalExpertise)
-	payload.HSSQualities = normalizeStringList(payload.HSSQualities)
+	payload.HSSQualities = normalizeHSSQualities(payload.HSSQualities)
 	payload.AccountRoles = normalizeAccountRoles(payload.AccountRoles)
 
 	return fullName, email, syncParticipantRolesWithAccountRoles(payload.Roles, payload.AccountRoles)

@@ -65,6 +65,8 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
+	r.Get("/public/events/{slug}", h.getPublicEvent)
+	r.Post("/public/events/{slug}/register", h.createPublicRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/events/{eventID}", h.listEventRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/events/{eventID}", h.createRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}", h.getRegistration)
@@ -161,6 +163,42 @@ type activityPayload struct {
 	Type    string         `json:"type"`
 	Summary string         `json:"summary"`
 	Payload map[string]any `json:"payload"`
+}
+
+type PublicRegistrationEvent struct {
+	ID                            int64      `json:"id"`
+	Name                          string     `json:"name"`
+	Location                      string     `json:"location,omitempty"`
+	Slots                         int        `json:"slots"`
+	StartsAt                      time.Time  `json:"starts_at"`
+	EndsAt                        *time.Time `json:"ends_at,omitempty"`
+	PublicRegistrationSlug        string     `json:"public_registration_slug"`
+	RegistrationOpenAt            *time.Time `json:"registration_open_at,omitempty"`
+	BalanceDeadline               *time.Time `json:"balance_deadline,omitempty"`
+	DepositAmount                 string     `json:"deposit_amount,omitempty"`
+	BalanceAmount                 string     `json:"balance_amount,omitempty"`
+	Currency                      string     `json:"currency"`
+	MinimumRegistrations          int        `json:"minimum_registrations"`
+	CommercialStatus              string     `json:"commercial_status"`
+	RegistrationAvailable         bool       `json:"registration_available"`
+	RegistrationUnavailableReason string     `json:"registration_unavailable_reason,omitempty"`
+}
+
+type publicRegistrationPayload struct {
+	FullName         string `json:"full_name"`
+	Email            string `json:"email"`
+	Phone            string `json:"phone"`
+	ExperienceLevel  string `json:"experience_level"`
+	EmergencyContact string `json:"emergency_contact"`
+	Whatsapp         string `json:"whatsapp"`
+	Instagram        string `json:"instagram"`
+	Citizenship      string `json:"citizenship"`
+	DateOfBirth      string `json:"date_of_birth"`
+	Jumper           bool   `json:"jumper"`
+	YearsInSport     *int   `json:"years_in_sport"`
+	JumpCount        *int   `json:"jump_count"`
+	RecentJumpCount  *int   `json:"recent_jump_count"`
+	License          string `json:"license"`
 }
 
 const registrationSelectColumns = `
@@ -302,7 +340,19 @@ func loadPayments(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, registrationID int64) ([]RegistrationPayment, error) {
 	rows, err := q.Query(ctx, `
-		SELECT id, registration_id, kind, amount::TEXT, currency, status, due_at, paid_at, provider, provider_ref, recorded_by_account_id, notes, created_at
+		SELECT id,
+		       registration_id,
+		       kind,
+		       amount::TEXT,
+		       currency,
+		       status,
+		       due_at,
+		       paid_at,
+		       COALESCE(provider, ''),
+		       COALESCE(provider_ref, ''),
+		       recorded_by_account_id,
+		       COALESCE(notes, ''),
+		       created_at
 		FROM registration_payments
 		WHERE registration_id = $1
 		ORDER BY created_at ASC, id ASC
@@ -460,6 +510,321 @@ func activeRegistrationExists(ctx context.Context, q interface {
 		return false, err
 	}
 	return existingID > 0, nil
+}
+
+func normalizeOptionalPublicString(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func normalizeOptionalPublicInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	if *value < 0 {
+		zero := 0
+		return &zero
+	}
+	return value
+}
+
+func loadPublicRegistrationEvent(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, slug string) (*PublicRegistrationEvent, error) {
+	var event PublicRegistrationEvent
+	if err := q.QueryRow(ctx, `
+		SELECT id,
+		       name,
+		       COALESCE(location, ''),
+		       slots,
+		       starts_at,
+		       ends_at,
+		       COALESCE(public_registration_slug, ''),
+		       registration_open_at,
+		       balance_deadline,
+		       COALESCE(deposit_amount::TEXT, ''),
+		       COALESCE(balance_amount::TEXT, ''),
+		       COALESCE(currency, 'EUR'),
+		       COALESCE(minimum_deposit_count, 0),
+		       COALESCE(commercial_status, 'draft')
+		FROM events
+		WHERE public_registration_enabled = TRUE
+		  AND lower(public_registration_slug) = lower($1)
+		LIMIT 1
+	`, strings.TrimSpace(slug)).Scan(
+		&event.ID,
+		&event.Name,
+		&event.Location,
+		&event.Slots,
+		&event.StartsAt,
+		&event.EndsAt,
+		&event.PublicRegistrationSlug,
+		&event.RegistrationOpenAt,
+		&event.BalanceDeadline,
+		&event.DepositAmount,
+		&event.BalanceAmount,
+		&event.Currency,
+		&event.MinimumRegistrations,
+		&event.CommercialStatus,
+	); err != nil {
+		return nil, err
+	}
+	event.Currency = strings.ToUpper(strings.TrimSpace(event.Currency))
+	if event.Currency == "" {
+		event.Currency = "EUR"
+	}
+	event.RegistrationAvailable = true
+	now := time.Now().UTC()
+	if event.RegistrationOpenAt != nil && now.Before(*event.RegistrationOpenAt) {
+		event.RegistrationAvailable = false
+		event.RegistrationUnavailableReason = "registration is not open yet"
+	}
+	if now.After(event.StartsAt) {
+		event.RegistrationAvailable = false
+		event.RegistrationUnavailableReason = "registration is closed because the event has already started"
+	}
+	return &event, nil
+}
+
+func publicDepositDueAt(now time.Time, event *PublicRegistrationEvent) *time.Time {
+	if event == nil {
+		return nil
+	}
+	dueAt := now.Add(7 * 24 * time.Hour)
+	if event.BalanceDeadline != nil && event.BalanceDeadline.Before(dueAt) {
+		dueAt = *event.BalanceDeadline
+	}
+	if event.StartsAt.Before(dueAt) {
+		dueAt = event.StartsAt
+	}
+	return &dueAt
+}
+
+func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx, payload *publicRegistrationPayload) (int64, error) {
+	fullName := strings.TrimSpace(payload.FullName)
+	email := strings.ToLower(strings.TrimSpace(payload.Email))
+	if fullName == "" || email == "" {
+		return 0, errors.New("full_name and email are required")
+	}
+
+	var participantID int64
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM participant_profiles
+		WHERE lower(email) = lower($1)
+		ORDER BY id ASC
+		LIMIT 1
+	`, email).Scan(&participantID)
+	if err == nil {
+		return participantID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+
+	payload.Phone = normalizeOptionalPublicString(payload.Phone)
+	payload.ExperienceLevel = normalizeOptionalPublicString(payload.ExperienceLevel)
+	payload.EmergencyContact = normalizeOptionalPublicString(payload.EmergencyContact)
+	payload.Whatsapp = normalizeOptionalPublicString(payload.Whatsapp)
+	payload.Instagram = normalizeOptionalPublicString(payload.Instagram)
+	payload.Citizenship = normalizeOptionalPublicString(payload.Citizenship)
+	payload.DateOfBirth = normalizeOptionalPublicString(payload.DateOfBirth)
+	payload.License = normalizeOptionalPublicString(payload.License)
+	payload.YearsInSport = normalizeOptionalPublicInt(payload.YearsInSport)
+	payload.JumpCount = normalizeOptionalPublicInt(payload.JumpCount)
+	payload.RecentJumpCount = normalizeOptionalPublicInt(payload.RecentJumpCount)
+
+	err = tx.QueryRow(ctx, `
+		INSERT INTO participant_profiles (
+			full_name,
+			email,
+			account_id,
+			phone,
+			experience_level,
+			emergency_contact,
+			whatsapp,
+			instagram,
+			citizenship,
+			date_of_birth,
+			jumper,
+			years_in_sport,
+			jump_count,
+			recent_jump_count,
+			license,
+			roles
+		)
+		VALUES (
+			$1,
+			$2,
+			(SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1),
+			$3,
+			$4,
+			$5,
+			$6,
+			$7,
+			$8,
+			$9,
+			$10,
+			$11,
+			$12,
+			$13,
+			$14,
+			ARRAY['Participant']::TEXT[]
+		)
+		RETURNING id
+	`, fullName, email, payload.Phone, payload.ExperienceLevel, payload.EmergencyContact, payload.Whatsapp, payload.Instagram, payload.Citizenship, payload.DateOfBirth, payload.Jumper, payload.YearsInSport, payload.JumpCount, payload.RecentJumpCount, payload.License).Scan(&participantID)
+	if err != nil {
+		return 0, err
+	}
+	return participantID, nil
+}
+
+func (h *Handler) getPublicEvent(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	if slug == "" {
+		httpx.Error(w, http.StatusBadRequest, "registration slug is required")
+		return
+	}
+	event, err := loadPublicRegistrationEvent(r.Context(), h.db, slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "public registration event not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load public registration event")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, event)
+}
+
+func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	if slug == "" {
+		httpx.Error(w, http.StatusBadRequest, "registration slug is required")
+		return
+	}
+
+	var payload publicRegistrationPayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	if strings.TrimSpace(payload.FullName) == "" || strings.TrimSpace(payload.Email) == "" {
+		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
+		return
+	}
+
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create registration")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	event, err := loadPublicRegistrationEvent(ctx, tx, slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "public registration event not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load public registration event")
+		return
+	}
+	if !event.RegistrationAvailable {
+		httpx.Error(w, http.StatusForbidden, event.RegistrationUnavailableReason)
+		return
+	}
+
+	participantID, err := h.findOrCreatePublicParticipantTx(ctx, tx, &payload)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "a participant with that email already exists")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to prepare participant profile: %v", err))
+		return
+	}
+	if exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to validate registration")
+		return
+	} else if exists {
+		httpx.Error(w, http.StatusConflict, "you already have an active registration for this event")
+		return
+	}
+
+	registeredAt := time.Now().UTC()
+	depositDueAt := publicDepositDueAt(registeredAt, event)
+	balanceDueAt := event.BalanceDeadline
+	status := "deposit_pending"
+	if strings.TrimSpace(event.DepositAmount) == "" || event.DepositAmount == "0" || event.DepositAmount == "0.00" {
+		if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
+			status = "balance_pending"
+		} else {
+			status = "confirmed"
+		}
+	}
+
+	var registrationID int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO event_registrations (
+			event_id, participant_id, status, source, registered_at, deposit_due_at, balance_due_at, tags, internal_notes
+		) VALUES (
+			$1, $2, $3, 'public_link', $4, $5, $6, ARRAY[]::TEXT[], ''
+		)
+		RETURNING id
+	`, event.ID, participantID, status, registeredAt, depositDueAt, balanceDueAt).Scan(&registrationID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "you already have an active registration for this event")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration: %v", err))
+		return
+	}
+
+	if strings.TrimSpace(event.DepositAmount) != "" && event.DepositAmount != "0" && event.DepositAmount != "0.00" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+			VALUES ($1, 'deposit', $2::numeric, $3, 'pending', $4, 'Created from public registration')
+		`, registrationID, event.DepositAmount, event.Currency, depositDueAt); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create deposit payment: %v", err))
+			return
+		}
+	}
+	if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+			VALUES ($1, 'balance', $2::numeric, $3, 'pending', $4, 'Created from public registration')
+		`, registrationID, event.BalanceAmount, event.Currency, balanceDueAt); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create balance payment: %v", err))
+			return
+		}
+	}
+
+	if err := createActivityTx(ctx, tx, registrationID, "status_change", "Public registration submitted", map[string]any{
+		"status":     status,
+		"source":     "public_link",
+		"event_slug": event.PublicRegistrationSlug,
+	}, nil); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration activity: %v", err))
+		return
+	}
+	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to finalize registration: %v", err))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to commit registration: %v", err))
+		return
+	}
+
+	registration, err := h.loadRegistration(ctx, registrationID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to load registration: %v", err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
 func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request) {

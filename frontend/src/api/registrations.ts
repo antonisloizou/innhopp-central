@@ -112,6 +112,42 @@ export interface RegistrationActivityPayload {
   payload?: Record<string, unknown>;
 }
 
+export interface PublicRegistrationEvent {
+  id: number;
+  name: string;
+  location?: string | null;
+  slots: number;
+  starts_at: string;
+  ends_at?: string | null;
+  public_registration_slug: string;
+  registration_open_at?: string | null;
+  balance_deadline?: string | null;
+  deposit_amount?: string | null;
+  balance_amount?: string | null;
+  currency: string;
+  minimum_registrations: number;
+  commercial_status: string;
+  registration_available: boolean;
+  registration_unavailable_reason?: string | null;
+}
+
+export interface PublicRegistrationPayload {
+  full_name: string;
+  email: string;
+  phone?: string;
+  experience_level?: string;
+  emergency_contact?: string;
+  whatsapp?: string;
+  instagram?: string;
+  citizenship?: string;
+  date_of_birth?: string;
+  jumper?: boolean;
+  years_in_sport?: number;
+  jump_count?: number;
+  recent_jump_count?: number;
+  license?: string;
+}
+
 export const listEventRegistrations = (eventId: number) =>
   apiRequest<Registration[]>(`/registrations/events/${eventId}`);
 
@@ -150,6 +186,15 @@ export const updateRegistrationPayment = (paymentId: number, payload: Registrati
 
 export const createRegistrationActivity = (registrationId: number, payload: RegistrationActivityPayload) =>
   apiRequest<Registration>(`/registrations/${registrationId}/activity`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+export const getPublicRegistrationEvent = (slug: string) =>
+  apiRequest<PublicRegistrationEvent>(`/registrations/public/events/${encodeURIComponent(slug)}`);
+
+export const createPublicRegistration = (slug: string, payload: PublicRegistrationPayload) =>
+  apiRequest<Registration>(`/registrations/public/events/${encodeURIComponent(slug)}/register`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });

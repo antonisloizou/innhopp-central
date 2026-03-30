@@ -332,7 +332,7 @@ const EventCreatePage = () => {
                 placeholder="event-name-2026"
               />
             </label>
-            <label className="form-field" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minHeight: '100%' }}>
+            <label className="form-field event-create-registration-toggle">
               <input
                 type="checkbox"
                 checked={form.public_registration_enabled}

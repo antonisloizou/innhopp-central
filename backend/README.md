@@ -100,6 +100,8 @@ On startup the server creates these tables if they do not already exist:
 | POST | `/api/participants/profiles` | Create a participant profile |
 | GET | `/api/registrations/events/{eventID}` | List registrations for an event |
 | POST | `/api/registrations/events/{eventID}` | Create a registration for an event |
+| GET | `/api/registrations/public/events/{slug}` | Load public registration page data for an event slug |
+| POST | `/api/registrations/public/events/{slug}/register` | Submit a public registration and create default payment rows |
 | GET | `/api/registrations/{registrationID}` | Retrieve one registration with payments and activity |
 | PUT | `/api/registrations/{registrationID}` | Update registration metadata |
 | POST | `/api/registrations/{registrationID}/status` | Transition a registration status |
@@ -117,6 +119,8 @@ On startup the server creates these tables if they do not already exist:
 - Endpoints respond with JSON and enforce strict payload validation (unknown fields are rejected).
 - Foreign key constraints ensure referenced seasons, events, manifests, and participants must already exist.
 - The registration backbone enforces one active registration per participant per event; cancelled or expired registrations can be recreated.
+- Public registration links only work for events with `public_registration_enabled=true`; the backend also respects `registration_open_at` and rejects registrations after the event start time.
+- Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/balance payment rows from the event commercial settings.
 
 ## Testing
 

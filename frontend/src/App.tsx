@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import RequireAuth from './auth/RequireAuth';
 import ParticipantRouteGuard from './auth/ParticipantRouteGuard';
+import StaffRouteGuard from './auth/StaffRouteGuard';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import EventCalendarPage from './pages/EventCalendarPage';
@@ -35,11 +36,13 @@ import InnhoppDetailPage from './pages/InnhoppDetailPage';
 import ManifestDetailPage from './pages/ManifestDetailPage';
 import AccommodationDetailPage from './pages/AccommodationDetailPage';
 import InnhoppCsvPage from './pages/InnhoppCsvPage';
+import PublicEventRegistrationPage from './pages/PublicEventRegistrationPage';
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register/:slug" element={<PublicEventRegistrationPage />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/events" replace />} />
@@ -50,7 +53,7 @@ const App = () => (
           <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/new" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/:innhoppId" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
-          <Route path="innhopps/csv" element={<ParticipantRouteGuard><InnhoppCsvPage /></ParticipantRouteGuard>} />
+          <Route path="innhopps/csv" element={<StaffRouteGuard><InnhoppCsvPage /></StaffRouteGuard>} />
           <Route path="airfields/new" element={<ParticipantRouteGuard><AirfieldCreatePage /></ParticipantRouteGuard>} />
           <Route path="airfields/:airfieldId" element={<ParticipantRouteGuard><AirfieldDetailPage /></ParticipantRouteGuard>} />
           <Route path="seasons/new" element={<ParticipantRouteGuard><SeasonCreatePage /></ParticipantRouteGuard>} />

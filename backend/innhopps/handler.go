@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -191,6 +192,21 @@ func encodeLandOwners(owners []LandOwner) ([]byte, error) {
 	return json.Marshal(owners)
 }
 
+func logUpdateFailure(innhoppID int64, p payload, err error, stage string) {
+	log.Printf(
+		"innhopps.updateInnhopp id=%d stage=%s err=%v sequence=%v name=%q takeoff_airfield_id=%v scheduled_at=%q image_files_included=%t land_owners=%d",
+		innhoppID,
+		stage,
+		err,
+		p.Sequence,
+		strings.TrimSpace(p.Name),
+		p.TakeoffAirfieldID,
+		strings.TrimSpace(p.ScheduledAt),
+		p.ImageFiles != nil,
+		len(p.LandOwners),
+	)
+}
+
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{innhoppID}", h.getInnhopp)
@@ -359,6 +375,7 @@ func (h *Handler) getInnhopp(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, "innhopp not found")
 			return
 		}
+		log.Printf("innhopps.getInnhopp id=%d failed: %v", innhoppID, scanErr)
 		httpx.Error(w, http.StatusInternalServerError, "failed to load innhopp")
 		return
 	}
@@ -444,6 +461,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 	owners := normalizeLandOwnersPayload(p.LandOwners)
 	ownersJSON, err := encodeLandOwners(owners)
 	if err != nil {
+		logUpdateFailure(innhoppID, p, err, "encode_land_owners")
 		httpx.Error(w, http.StatusInternalServerError, "failed to encode land owners")
 		return
 	}
@@ -454,6 +472,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		imageFiles := normalizeImageFiles(*p.ImageFiles)
 		encoded, err := encodeImageFiles(imageFiles)
 		if err != nil {
+			logUpdateFailure(innhoppID, p, err, "encode_images")
 			httpx.Error(w, http.StatusInternalServerError, "failed to encode images")
 			return
 		}
@@ -500,6 +519,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, "innhopp not found")
 			return
 		}
+		logUpdateFailure(innhoppID, p, scanErr, "scan_updated_row")
 		httpx.Error(w, http.StatusInternalServerError, "failed to update innhopp")
 		return
 	}
@@ -512,6 +532,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 			innhopp.EventID,
 			*innhopp.TakeoffAirfieldID,
 		); err != nil {
+			logUpdateFailure(innhoppID, p, err, "link_takeoff_airfield")
 			httpx.Error(w, http.StatusInternalServerError, "failed to link airfield to event")
 			return
 		}

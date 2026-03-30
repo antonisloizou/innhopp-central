@@ -38,7 +38,6 @@ export const hssQualityOptions = [
   'Party hard',
   'Oppose authorities',
   'Listen to music while reading',
-  'Experiment with drugs',
   'Lots of spice on food',
   'Take risks'
 ] as const;
@@ -116,11 +115,7 @@ const CollapsibleCard = ({
   onToggle: () => void;
 }) => (
   <article className="card">
-    <header
-      className="card-header"
-      style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
-      onClick={onToggle}
-    >
+    <header className="card-header participant-profile-card-header" onClick={onToggle}>
       <button
         className="ghost"
         type="button"
@@ -131,9 +126,9 @@ const CollapsibleCard = ({
       >
         {open ? '▾' : '▸'}
       </button>
-      <h3 style={{ margin: 0, flex: 1, textAlign: 'left' }}>{title}</h3>
+      <h3 className="participant-profile-card-title">{title}</h3>
     </header>
-    {open ? <div style={{ marginTop: '1rem' }}>{children}</div> : null}
+    {open ? <div className="participant-profile-card-body">{children}</div> : null}
   </article>
 );
 
@@ -146,7 +141,7 @@ const CardSaveAction = ({
   saved: boolean;
   error?: string | null;
 }) => (
-  <div className="form-actions" style={{ marginTop: '1rem' }}>
+  <div className="form-actions participant-profile-save-action">
     <button type="submit" className={`primary ${saved ? 'saved' : ''}`} disabled={submitting || saved}>
       {submitting ? 'Saving…' : saved ? 'Saved' : 'Save'}
     </button>
@@ -178,37 +173,21 @@ const MultiSelectField = ({
   const customValues = selectedValues.filter((value) => !options.includes(value));
 
   return (
-    <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+    <div className="form-field participant-profile-full-span">
       {hideLabel ? null : <span>{label}</span>}
-      <div
-        style={
-          optionDisplay === 'list'
-            ? { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.5rem' }
-            : { display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }
-        }
-      >
+      <div className={optionDisplay === 'list' ? 'multi-select-list' : 'multi-select-badges'}>
         {options.map((option) => (
           <label
             key={option}
-            className="badge neutral"
-            style={
-              optionDisplay === 'list'
-                ? {
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    background: 'transparent',
-                    color: 'inherit'
-                  }
-                : { display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }
-            }
+            className={optionDisplay === 'list' ? 'multi-select-list-option' : 'badge neutral'}
+            data-option-display={optionDisplay}
           >
             <input
               type="checkbox"
               checked={selectedValues.includes(option)}
               onChange={(event) => onToggle(option, event.target.checked)}
             />
-            {option}
+            {optionDisplay === 'list' ? <span className="registration-checkbox-label">{option}</span> : option}
           </label>
         ))}
         {allowCustom
@@ -216,29 +195,27 @@ const MultiSelectField = ({
               <button
                 key={value}
                 type="button"
-                className="badge neutral"
-                style={{ display: 'inline-flex', alignItems: 'flex-start', gap: '0.25rem' }}
+                className="badge neutral participant-profile-custom-badge"
                 onClick={() => onToggle(value, false)}
               >
                 <span>{value}</span>
-                <sup style={{ fontSize: '0.7em', lineHeight: 1 }}>x</sup>
+                <sup className="participant-profile-custom-badge-remove">x</sup>
               </button>
             ))
           : null}
       </div>
       {allowCustom ? (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.35rem' }}>
+        <div className="participant-profile-custom-row">
           <input
             type="text"
             value={customValue}
             onChange={(event) => setCustomValue(event.target.value)}
             placeholder={customLabel}
-            style={{ flex: '1 1 260px' }}
+            className="participant-profile-custom-input"
           />
           <button
             type="button"
-            className="ghost"
-            style={{ flex: '0 0 auto' }}
+            className="ghost participant-profile-custom-button"
             onClick={() => {
               const trimmed = customValue.trim();
               if (!trimmed) return;
@@ -378,10 +355,7 @@ const ParticipantProfileForm = ({
   return (
     <form className="stack" onSubmit={onSubmit}>
       <CollapsibleCard title="Basic info" open={expandedCards.basic} onToggle={() => toggleCard('basic')}>
-        <div
-          className="form-grid"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
-        >
+        <div className="form-grid participant-profile-grid">
           <label className={`form-field ${missingRequired.full_name ? 'field-missing' : ''}`}>
             <span>Name</span>
             <input
@@ -408,7 +382,7 @@ const ParticipantProfileForm = ({
               onChange={(event) => updateField('date_of_birth', event.target.value)}
             />
           </label>
-          <label className={`form-field ${missingRequired.whatsapp ? 'field-missing' : ''}`} style={{ gridColumn: '1' }}>
+          <label className={`form-field ${missingRequired.whatsapp ? 'field-missing' : ''} participant-profile-grid-col-1`}>
             <span>Whatsapp</span>
             <input
               type="text"
@@ -433,7 +407,7 @@ const ParticipantProfileForm = ({
               onChange={(event) => updateField('citizenship', event.target.value)}
             />
           </label>
-          <div style={{ gridColumn: '1 / -1', height: 0 }} />
+          <div className="participant-profile-full-span participant-profile-spacer" />
           <label className={`form-field ${missingRequired.tshirt_size ? 'field-missing' : ''}`}>
             <span>T-shirt size</span>
             <select
@@ -463,16 +437,12 @@ const ParticipantProfileForm = ({
             </select>
           </label>
           {roleMode !== 'hidden' ? (
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field participant-profile-full-span">
               <span>Roles</span>
               {roleMode === 'editable' ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div className="multi-select-badges">
                   {roleOptions.map((role) => (
-                    <label
-                      key={role}
-                      className="badge neutral"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                    >
+                    <label key={role} className="badge neutral" data-option-display="badge">
                       <input
                         type="checkbox"
                         checked={normalizeList(form.roles).includes(role)}
@@ -490,13 +460,9 @@ const ParticipantProfileForm = ({
                   ))}
                 </div>
               ) : canSelfRemoveElevatedRoles ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div className="multi-select-badges">
                   {(normalizeList(form.roles).length ? normalizeList(form.roles) : ['Participant']).map((role) => (
-                    <label
-                      key={role}
-                      className="badge neutral"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                    >
+                    <label key={role} className="badge neutral" data-option-display="badge">
                       <input
                         type="checkbox"
                         checked
@@ -516,13 +482,9 @@ const ParticipantProfileForm = ({
                   ))}
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div className="multi-select-badges">
                   {(normalizeList(form.roles).length ? normalizeList(form.roles) : ['Participant']).map((role) => (
-                    <label
-                      key={role}
-                      className="badge neutral"
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                    >
+                    <label key={role} className="badge neutral" data-option-display="badge">
                       <input type="checkbox" checked disabled readOnly />
                       {role}
                     </label>
@@ -532,13 +494,10 @@ const ParticipantProfileForm = ({
             </div>
           ) : null}
           {showAdminRoleControl ? (
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field participant-profile-full-span">
               <span>Account access</span>
               {canEditAdminRole ? (
-                <label
-                  className="badge neutral"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', width: 'fit-content' }}
-                >
+                <label className="badge neutral participant-profile-fit-badge" data-option-display="badge">
                   <input
                     type="checkbox"
                     checked={normalizeList(form.account_roles).includes('admin')}
@@ -554,10 +513,7 @@ const ParticipantProfileForm = ({
                   Admin access
                 </label>
               ) : canSelfRemoveElevatedRoles && normalizeList(form.account_roles).includes('admin') ? (
-                <label
-                  className="badge neutral"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', width: 'fit-content' }}
-                >
+                <label className="badge neutral participant-profile-fit-badge" data-option-display="badge">
                   <input
                     type="checkbox"
                     checked
@@ -569,10 +525,7 @@ const ParticipantProfileForm = ({
                   Admin access
                 </label>
               ) : normalizeList(form.account_roles).includes('admin') ? (
-                <label
-                  className="badge neutral"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', width: 'fit-content' }}
-                >
+                <label className="badge neutral participant-profile-fit-badge" data-option-display="badge">
                   <input type="checkbox" checked disabled readOnly />
                   Admin access
                 </label>
@@ -586,10 +539,7 @@ const ParticipantProfileForm = ({
       </CollapsibleCard>
 
       <CollapsibleCard title="Skydiving" open={expandedCards.skydiving} onToggle={() => toggleCard('skydiving')}>
-        <div
-          className="form-grid"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}
-        >
+        <div className="form-grid participant-profile-grid">
           <label className={`form-field ${missingRequired.license ? 'field-missing' : ''}`}>
             <span>License</span>
             <select
@@ -622,7 +572,7 @@ const ParticipantProfileForm = ({
                   onChange={(event) => updateField('wingload', event.target.value)}
                 />
               </label>
-              <div style={{ gridColumn: '1 / -1', height: 0 }} />
+              <div className="participant-profile-full-span participant-profile-spacer" />
               <label className={`form-field ${missingRequired.years_in_sport ? 'field-missing' : ''}`}>
                 <span>Years in the sport</span>
                 <input
@@ -657,7 +607,7 @@ const ParticipantProfileForm = ({
                 onToggle={(value, checked) => updateField('ratings', toggleValue(form.ratings, value, checked))}
                 allowCustom={false}
               />
-              <div style={{ gridColumn: '1 / -1' }}>
+              <div className="participant-profile-full-span">
                 <MultiSelectField
                   label="Disciplines"
                   values={form.disciplines}
@@ -666,7 +616,7 @@ const ParticipantProfileForm = ({
                   customLabel="Add another discipline"
                 />
               </div>
-              <label className="form-field" style={{ gridColumn: '1 / -1', maxWidth: '320px' }}>
+              <label className="form-field participant-profile-full-span participant-profile-max-320">
                 <span>Canopy course</span>
                 <select
                   value={form.canopy_course || ''}
@@ -680,7 +630,7 @@ const ParticipantProfileForm = ({
                   ))}
                 </select>
               </label>
-              <div style={{ gridColumn: '1 / -1' }}>
+              <div className="participant-profile-full-span">
                 <MultiSelectField
                   label="Other air sports"
                   values={form.other_air_sports}
@@ -699,7 +649,7 @@ const ParticipantProfileForm = ({
 
       <CollapsibleCard title="Medical and Safety" open={expandedCards.medical} onToggle={() => toggleCard('medical')}>
         <div className="form-grid">
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field participant-profile-full-span">
             <span>Any Medical or other physical conditions</span>
             <input
               type="text"
@@ -731,7 +681,7 @@ const ParticipantProfileForm = ({
 
       <CollapsibleCard title="Preferences" open={expandedCards.preferences} onToggle={() => toggleCard('preferences')}>
         <div className="form-grid">
-          <label className="form-field" style={{ gridColumn: '1 / -1', maxWidth: '420px' }}>
+          <label className="form-field participant-profile-full-span participant-profile-max-420">
             <span>Landing area preference</span>
             <select
               value={form.landing_area_preference || ''}

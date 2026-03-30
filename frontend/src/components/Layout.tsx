@@ -194,11 +194,11 @@ const Layout = () => {
         {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} />}
         <main className="app-content">
           {user?.impersonator && (
-            <section className="card" style={{ marginBottom: '1rem' }}>
-              <div className="page-header" style={{ gap: '1rem' }}>
+            <section className="card layout-impersonation-card">
+              <div className="page-header layout-impersonation-header">
                 <div>
                   <strong>Impersonating {user.full_name || user.email}</strong>
-                  <p className="muted" style={{ margin: '0.35rem 0 0' }}>
+                  <p className="muted layout-impersonation-copy">
                     Original admin: {user.impersonator.full_name || user.impersonator.email}
                   </p>
                 </div>

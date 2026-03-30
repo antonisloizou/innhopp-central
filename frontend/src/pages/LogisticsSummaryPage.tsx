@@ -136,14 +136,7 @@ const LogisticsSummaryPage = () => {
       </header>
 
       <article className="card">
-        <div
-          className="form-grid"
-          style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            alignItems: 'end',
-            gap: '0.75rem'
-          }}
-        >
+        <div className="form-grid logistics-list-filters">
           <label className="form-field">
             <span>Season</span>
             <select
@@ -152,7 +145,7 @@ const LogisticsSummaryPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
-              style={{ width: '100%', minWidth: '140px', maxWidth: '180px' }}
+              className="logistics-list-season-select"
             >
               <option value="">All seasons</option>
               {seasons.map((s) => (
@@ -167,7 +160,7 @@ const LogisticsSummaryPage = () => {
             <select
               value={selectedEvent}
               onChange={(e) => setSelectedEvent(e.target.value)}
-              style={{ width: '100%', minWidth: '160px' }}
+              className="logistics-list-event-select"
             >
               <option value="">All events</option>
               {filteredEvents.map((ev) => (
@@ -182,13 +175,7 @@ const LogisticsSummaryPage = () => {
 
       {error && <p className="error-text">{error}</p>}
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '1rem'
-        }}
-      >
+      <div className="logistics-summary-grid">
         <article
           className="card clickable"
           onClick={() => navigate('/logistics/transport')}

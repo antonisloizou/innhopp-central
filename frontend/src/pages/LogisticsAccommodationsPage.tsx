@@ -84,8 +84,8 @@ const LogisticsAccommodationsPage = () => {
         <div>
           <h2>Accommodations</h2>
         </div>
-        <div className="card-actions" style={{ gap: '0.5rem' }}>
-          <Link className="ghost" to="/logistics" style={{ fontWeight: 700, fontSize: '1.05rem' }}>
+        <div className="card-actions logistics-list-actions">
+          <Link className="ghost logistics-list-back-link" to="/logistics">
             Back to logistics
           </Link>
           <Link className="primary button-link" to="/logistics/accommodations/new">
@@ -96,14 +96,7 @@ const LogisticsAccommodationsPage = () => {
 
       <div className="stack">
         <article className="card">
-          <div
-          className="form-grid"
-          style={{
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              alignItems: 'end',
-              gap: '0.75rem'
-            }}
-          >
+          <div className="form-grid logistics-list-filters">
             <label className="form-field">
               <span>Season</span>
               <select
@@ -112,7 +105,7 @@ const LogisticsAccommodationsPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
-              style={{ width: '100%', minWidth: '140px', maxWidth: '180px' }}
+              className="logistics-list-season-select"
             >
                 <option value="">All seasons</option>
                 {seasons.map((s) => (
@@ -127,7 +120,7 @@ const LogisticsAccommodationsPage = () => {
               <select
                 value={selectedEvent}
                 onChange={(e) => setSelectedEvent(e.target.value)}
-                style={{ width: '100%', minWidth: '160px' }}
+                className="logistics-list-event-select"
               >
                 <option value="">All events</option>
                 {filteredEvents.map((ev) => (
@@ -156,18 +149,17 @@ const LogisticsAccommodationsPage = () => {
           ) : filteredAccommodations.length === 0 ? (
             <p className="muted">No accommodations match the selected filters.</p>
           ) : (
-            <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+            <ul className="status-list logistics-list-scroll">
               {filteredAccommodations.map((acc) => (
                 <li key={acc.id}>
                   <Link
                     to={`/events/${acc.event_id}/accommodations/${acc.id}`}
-                    className="card-link"
-                    style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}
+                    className="card-link logistics-list-link"
                   >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
+                    <div className="logistics-list-row logistics-list-row-between logistics-list-row-start">
                       <strong>{acc.name}</strong>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
-                        <span className="badge" style={{ backgroundColor: '#2b8a3e', color: '#fff' }}>
+                      <div className="logistics-list-badge-row">
+                        <span className="badge logistics-list-event-badge">
                           {events.find((e) => e.id === acc.event_id)?.name || `Event #${acc.event_id}`}
                         </span>
                         <span className={`badge ${acc.booked ? 'success' : 'danger'}`}>
@@ -175,7 +167,7 @@ const LogisticsAccommodationsPage = () => {
                         </span>
                       </div>
                     </div>
-                    <div className="muted" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                    <div className="muted logistics-list-meta logistics-list-meta-aligned">
                       {events.find((e) => e.id === acc.event_id)?.name || `Event #${acc.event_id}`} • Capacity: {acc.capacity}
                       {acc.check_in_at ? ` • Check-in: ${formatDateTime(acc.check_in_at, true)}` : ''}
                       {acc.check_out_at ? ` • Check-out: ${formatDateTime(acc.check_out_at, true)}` : ''}

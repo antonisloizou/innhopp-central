@@ -247,23 +247,10 @@ const EventSchedulePage = () => {
   const timePickerRef = useRef<Flatpickr | null>(null);
   const [pendingPickerDate, setPendingPickerDate] = useState<Date | null>(null);
   const pickerPortalRef = useRef<HTMLDivElement | null>(null);
+  const pickerPanelRef = useRef<HTMLDivElement | null>(null);
   const [previewEntry, setPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
   const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
   const [previewClosing, setPreviewClosing] = useState(false);
-  const previewCardStyle = useMemo(() => {
-    if (!renderedPreviewEntry) return undefined;
-    return {
-      position: 'relative' as const,
-      width: 'min(720px, 92vw)',
-      maxHeight: '85vh',
-      overflowY: 'auto' as const,
-      boxShadow: '0 18px 48px rgba(0,0,0,0.4), 0 0 0 1px var(--modal-border)',
-      cursor: 'pointer',
-      backgroundColor: 'var(--modal-surface)',
-      border: '1px solid var(--modal-border)',
-      color: 'var(--text-strong)'
-    };
-  }, [renderedPreviewEntry]);
 
   useEffect(() => {
     if (previewEntry) {
@@ -284,6 +271,43 @@ const EventSchedulePage = () => {
   const closePreview = useCallback(() => {
     setPreviewEntry(null);
   }, []);
+
+  useEffect(() => {
+    if (!timePicker || !pickerPanelRef.current) return;
+
+    const panel = pickerPanelRef.current;
+    const updatePosition = () => {
+      const rect = timePicker.anchorRect || snapshotAnchorRect(timePicker.anchor);
+      const pad = 12;
+      const estWidth = 340;
+      const estHeight = 360;
+      const viewW = typeof window !== 'undefined' ? window.innerWidth : estWidth;
+      const viewH = typeof window !== 'undefined' ? window.innerHeight : estHeight;
+      const viewportLeft = pad;
+      const viewportRight = viewW - pad;
+      const viewportTop = pad;
+      const viewportBottom = viewH - pad;
+
+      const baseLeft = rect ? rect.right + 12 : viewportLeft;
+      const spaceAbove = rect ? rect.top - viewportTop : estHeight;
+      const spaceBelow = rect ? viewportBottom - rect.bottom : estHeight;
+      const preferAbove = spaceAbove >= estHeight || spaceAbove > spaceBelow;
+      const baseTop = rect
+        ? preferAbove
+          ? rect.top - estHeight - 12
+          : rect.bottom + 12
+        : viewportTop + 24;
+      const left = Math.min(Math.max(baseLeft, viewportLeft), viewportRight - estWidth);
+      const top = Math.min(Math.max(baseTop, viewportTop), viewportBottom - estHeight);
+
+      panel.style.setProperty('--event-schedule-picker-left', `${left}px`);
+      panel.style.setProperty('--event-schedule-picker-top', `${top}px`);
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    return () => window.removeEventListener('resize', updatePosition);
+  }, [timePicker]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
     const sourceRow = (rowNode.querySelector('.schedule-entry') as HTMLElement | null) || rowNode;
@@ -759,43 +783,13 @@ const EventSchedulePage = () => {
     }
   }, [dayBuckets, eventData?.status, highlightId]);
 
-  const typeBadgeStyles: Record<EntryType, { backgroundColor: string; color: string; textShadow?: string }> = {
-    Innhopp: {
-      backgroundColor: '#2b8a3e',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    },
-    Transport: {
-      backgroundColor: '#e6b84a',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    },
-    'Ground Crew': {
-      backgroundColor: '#f6dea0',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    },
-    Accommodation: {
-      backgroundColor: '#0d6efd',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    },
-    Meal: {
-      backgroundColor: '#d97706',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    },
-    Other: {
-      backgroundColor: '#7e22ce',
-      color: '#fff',
-      textShadow:
-        '-1px -1px 0 rgba(0,0,0,0.45), 1px -1px 0 rgba(0,0,0,0.45), -1px 1px 0 rgba(0,0,0,0.45), 1px 1px 0 rgba(0,0,0,0.45)'
-    }
+  const typeBadgeClassNames: Record<EntryType, string> = {
+    Innhopp: 'schedule-type-badge schedule-type-badge--innhopp',
+    Transport: 'schedule-type-badge schedule-type-badge--transport',
+    'Ground Crew': 'schedule-type-badge schedule-type-badge--ground-crew',
+    Accommodation: 'schedule-type-badge schedule-type-badge--accommodation',
+    Meal: 'schedule-type-badge schedule-type-badge--meal',
+    Other: 'schedule-type-badge schedule-type-badge--other'
   };
   const computeProposedMinutes = (
     targetIndex: number,
@@ -1734,7 +1728,7 @@ const EventSchedulePage = () => {
           )}
           <div className="event-schedule-headline-text">
             <div className="event-schedule-title-row">
-              <h2 style={{ margin: 0 }}>{eventData.name}</h2>
+              <h2 className="event-schedule-title">{eventData.name}</h2>
             </div>
             <p className="event-location">{eventData.location || 'Location TBD'}</p>
             <div className="event-schedule-badges">
@@ -1749,18 +1743,8 @@ const EventSchedulePage = () => {
         </div>
       </header>
       {message && <p className="error-text">{message}</p>}
-      <article className="card" style={{ marginBottom: '0.75rem' }}>
-        <dl
-          className="card-details event-schedule-stats"
-          style={{
-            margin: 0,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
-            columnGap: '2rem',
-            rowGap: '1rem',
-            textAlign: 'center'
-          }}
-        >
+      <article className="card event-schedule-summary-card">
+        <dl className="card-details event-schedule-stats event-schedule-stats-grid">
           <div>
             <dt>Starts</dt>
             <dd>
@@ -1797,14 +1781,6 @@ const EventSchedulePage = () => {
           <div className="event-schedule-filter-list">
             {visibleTypeFilterOrder.map((type) => {
               const selected = typeFilters[type];
-              const base = typeBadgeStyles[type];
-              const inverted = selected
-                ? base
-                : {
-                    backgroundColor: '#fff',
-                    color: base.backgroundColor,
-                    border: `2px solid ${base.backgroundColor}`
-                  };
               return (
                 <button
                   key={type}
@@ -1815,12 +1791,7 @@ const EventSchedulePage = () => {
                       [type]: !prev[type]
                     }))
                   }
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    padding: 0,
-                    cursor: 'pointer'
-                  }}
+                  className="event-schedule-filter-button"
                   aria-pressed={selected}
                   onDragLeave={(e) => {
                     if (!dragging) return;
@@ -1830,7 +1801,9 @@ const EventSchedulePage = () => {
                     setDragHoverIndex(null);
                   }}
                 >
-                  <span className="badge" style={inverted}>
+                  <span
+                    className={`badge ${typeBadgeClassNames[type]} ${selected ? '' : 'schedule-type-badge--inactive'}`.trim()}
+                  >
                     {type.toUpperCase()}
                   </span>
                 </button>
@@ -1847,16 +1820,12 @@ const EventSchedulePage = () => {
             key={day.key}
             id={`event-day-${day.key}`}
             data-schedule-day-key={day.key}
-            className="card"
-            style={
-              dragOverDay === day.key && dragging
-                ? { border: '2px solid #3b82f6', boxShadow: '0 0 0 2px rgba(59,130,246,0.15)' }
-                : undefined
-            }
+            className={`card event-schedule-day-card${
+              dragOverDay === day.key && dragging ? ' event-schedule-day-card--drag-over' : ''
+            }`}
           >
             <header
-                className="card-header"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}
+              className="card-header event-schedule-day-header"
               onClick={() =>
                 setExpandedDays((prev) => ({
                   ...prev,
@@ -1877,7 +1846,7 @@ const EventSchedulePage = () => {
               >
                 {expandedDays[day.key] === false ? '▸' : '▾'}
               </button>
-              <h3 style={{ margin: 0, flex: 1, textAlign: 'left' }}>
+              <h3 className="event-schedule-day-title">
                 {day.label}
               </h3>
             </header>
@@ -1907,68 +1876,66 @@ const EventSchedulePage = () => {
               };
 
               const renderEntry = (entry: Entry) => {
-                const badgeStyle = typeBadgeStyles[entry.type];
                 const missingCoords = !!entry.missingCoordinates;
-                const compactBadgeStyle = { textAlign: 'center' as const };
                 let statusBadge: JSX.Element | null = null;
                 if (entry.type === 'Accommodation') {
                   statusBadge =
                     entry.booked && !missingCoords ? (
-                      <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                      <span className="badge success schedule-status-badge">
                         ✓
                       </span>
                     ) : (
-                      <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                      <span className="badge danger schedule-status-badge">
                         !
                       </span>
                     );
                 } else if (entry.type === 'Innhopp') {
                   statusBadge = entry.ready ? (
-                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge">
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge">
                       !
                     </span>
                   );
                 } else if (entry.type === 'Meal') {
                   statusBadge = entry.mealComplete ? (
-                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge">
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge">
                       !
                     </span>
                   );
                 } else if (entry.type === 'Other') {
                   statusBadge = entry.otherComplete ? (
-                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge">
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge">
                       !
                     </span>
                   );
                 } else if (entry.type === 'Transport') {
                   statusBadge = entry.transportComplete ? (
-                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge">
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge">
                       !
                     </span>
                   );
                 } else if (entry.type === 'Ground Crew') {
                   statusBadge = entry.transportComplete ? (
-                    <span className="badge success schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge success schedule-status-badge">
                       ✓
                     </span>
                   ) : (
-                    <span className="badge danger schedule-status-badge" style={compactBadgeStyle}>
+                    <span className="badge danger schedule-status-badge">
                       !
                     </span>
                   );
@@ -1976,7 +1943,6 @@ const EventSchedulePage = () => {
                   statusBadge = (
                     <span
                       className="badge danger schedule-status-badge"
-                      style={compactBadgeStyle}
                       title="Coordinates missing"
                       aria-label="Coordinates missing"
                     >
@@ -1992,8 +1958,7 @@ const EventSchedulePage = () => {
                         {!participantOnly &&
                           (statusBadge || <span className="badge schedule-status-badge schedule-status-badge-placeholder">!</span>)}
                         <span
-                          className="badge schedule-type-badge"
-                          style={badgeStyle}
+                          className={`badge ${typeBadgeClassNames[entry.type]}`}
                           aria-label={entry.type}
                         >
                           {entry.type}
@@ -2001,27 +1966,18 @@ const EventSchedulePage = () => {
                       </div>
                     </div>
                     {entry.routeDurationLabel && entry.routeVehiclesLabel ? (
-                      <div
-                        className="muted"
-                        style={{
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          alignItems: 'center',
-                          gap: '0.75rem',
-                          minWidth: 0
-                        }}
-                      >
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <div className="muted event-schedule-route-meta">
+                        <span className="event-schedule-meta-chip">
                           <span>⏱</span>
                           <span>{entry.routeDurationLabel}</span>
                         </span>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, maxWidth: '100%' }}>
+                        <span className="event-schedule-meta-chip event-schedule-meta-chip-grow">
                           <span>🚐︎</span>
-                          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.routeVehiclesLabel}</span>
+                          <span className="event-schedule-meta-text">{entry.routeVehiclesLabel}</span>
                         </span>
                       </div>
                     ) : (
-                      entry.subtitle && <div className="muted" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{entry.subtitle}</div>
+                      entry.subtitle && <div className="muted event-schedule-wrap-text">{entry.subtitle}</div>
                     )}
                   </div>
                 );
@@ -2030,26 +1986,12 @@ const EventSchedulePage = () => {
                   e.stopPropagation();
                   setPreviewEntry({ entry, day });
                 };
-                const isHighlighted = entry.id === highlightId;
-                const highlightedFrame = isHighlighted
-                  ? {
-                      boxShadow: 'inset 0 0 0 2px #3b82f6',
-                      borderRadius: '8px'
-                    }
-                  : undefined;
                 return entry.to ? (
                   <Link
                     key={entry.id}
                     to={entry.to}
-                    className="card-link"
+                  className="card-link event-schedule-entry-link"
                     id={`entry-${entry.id}`}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      flex: 1,
-                      padding: '0.5rem 0.8rem',
-                      margin: '-0.25rem -1.6rem'
-                    }}
                     onClick={(e) => {
                       if (suppressRowClickRef.current) {
                         suppressRowClickRef.current = false;
@@ -2073,13 +2015,7 @@ const EventSchedulePage = () => {
                   <div
                     key={entry.id}
                     id={`entry-${entry.id}`}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      flex: 1,
-                      padding: '0.5rem 0.8rem',
-                      margin: '-0.25rem -1.6rem'
-                    }}
+                    className="event-schedule-entry-link"
                     onClick={(e) => {
                       if (suppressRowClickRef.current) {
                         suppressRowClickRef.current = false;
@@ -2096,53 +2032,32 @@ const EventSchedulePage = () => {
               };
 
               return orderedEntries.length === 0 ? (
-                <p
-                  className="muted"
-                  style={{ padding: '0.5rem 0' }}
-                >
+                <p className="muted event-schedule-empty-day">
                   Nothing scheduled.
                 </p>
               ) : (
-                <ul className="status-list schedule-list" style={{ margin: 0 }}>
+                <ul className="status-list schedule-list event-schedule-list">
                   {orderedEntries.map((item, idx) => {
                     const isHighlighted = item.id === highlightId;
                     const isTimeEditing = timePicker?.entry.id === item.id;
                     const isDragTarget = dragOverDay === day.key && dragHoverIndex === idx;
                     const isDropAfterLast =
                       dragOverDay === day.key && dragHoverIndex === orderedEntries.length && idx === orderedEntries.length - 1;
-                    const highlightedFrame = isHighlighted || isTimeEditing
-                      ? {
-                          boxShadow: 'inset 0 0 0 2px #3b82f6',
-                          borderRadius: '8px'
-                        }
-                      : undefined;
                     return (
                     <li
                       key={item.id}
                       data-schedule-row-index={idx}
-                      style={{
-                        display: 'block',
-                        padding: '0.5rem 0',
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
-                        borderTop: isDragTarget ? '2px solid #3b82f6' : undefined,
-                        marginTop: isDragTarget ? '-2px' : undefined,
-                        paddingBottom: isDropAfterLast ? 'calc(0.5rem + 2px)' : '0.5rem',
-                        width: '100%',
-                        overflow: 'hidden',
-                        position: 'relative'
-                      }}
+                      className={`event-schedule-row${
+                        isDragTarget ? ' event-schedule-row--drag-target' : ''
+                      }${isDropAfterLast ? ' event-schedule-row--drop-after' : ''}`}
                     >
                       <div
-                        className="schedule-entry"
-                        style={{
-                          ...highlightedFrame,
-                          gridTemplateColumns: '5.5rem minmax(0, 1fr) 2.5rem',
-                          opacity: dragging?.id === item.id ? 0.45 : 1
-                        }}
+                        className={`schedule-entry event-schedule-entry-shell${
+                          isHighlighted || isTimeEditing ? ' event-schedule-entry-shell--highlighted' : ''
+                        }${dragging?.id === item.id ? ' event-schedule-entry-shell--dragging' : ''}`}
                       >
                         <div
-                          style={{ fontWeight: 600 }}
-                          className="muted schedule-time"
+                          className="muted schedule-time event-schedule-time-button"
                           data-ghost-time="time"
                           role={participantOnly ? undefined : 'button'}
                           tabIndex={participantOnly ? undefined : 0}
@@ -2174,7 +2089,7 @@ const EventSchedulePage = () => {
                           {item.hourKey}
                         </div>
                         <div className="schedule-entry-content">{renderEntry(item)}</div>
-                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <div className="event-schedule-drag-cell">
                           <button
                             type="button"
                             aria-label={`Drag ${item.title}`}
@@ -2183,17 +2098,9 @@ const EventSchedulePage = () => {
                               if (participantOnly) return;
                               handleDragHandlePointerDown(item, e);
                             }}
-                            style={{
-                              alignSelf: 'center',
-                              border: 0,
-                              background: 'transparent',
-                              color: 'var(--text-muted)',
-                              cursor: savingDrag ? 'not-allowed' : dragging?.id === item.id ? 'grabbing' : 'grab',
-                              padding: '0.35rem 0.45rem',
-                              fontSize: '1rem',
-                              lineHeight: 1,
-                              touchAction: 'none'
-                            }}
+                            className={`event-schedule-drag-handle${
+                              savingDrag ? ' event-schedule-drag-handle--disabled' : ''
+                            }${dragging?.id === item.id ? ' event-schedule-drag-handle--dragging' : ''}`}
                             disabled={savingDrag || participantOnly}
                           >
                             ⋮⋮
@@ -2201,15 +2108,7 @@ const EventSchedulePage = () => {
                         </div>
                       </div>
                       {isDropAfterLast ? (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            borderBottom: '2px solid #3b82f6'
-                          }}
-                        />
+                        <div className="event-schedule-drop-indicator" />
                       ) : null}
                     </li>
                   );
@@ -2224,62 +2123,16 @@ const EventSchedulePage = () => {
         ? createPortal(
             <div
               ref={pickerPortalRef}
-              style={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 9998,
-                background: 'var(--overlay-scrim-subtle)'
-              }}
+              className="event-schedule-time-picker-backdrop"
               onClick={() => {
                 setTimePicker(null);
                 setPendingPickerDate(null);
               }}
             >
-              {(() => {
-                const rect = timePicker.anchorRect || snapshotAnchorRect(timePicker.anchor);
-                const pad = 12;
-                const estWidth = 340;
-                const estHeight = 360;
-                const viewW = typeof window !== 'undefined' ? window.innerWidth : estWidth;
-                const viewH = typeof window !== 'undefined' ? window.innerHeight : estHeight;
-                const viewportLeft = pad;
-                const viewportRight = viewW - pad;
-                const viewportTop = pad;
-                const viewportBottom = viewH - pad;
-
-                const baseLeft = rect ? rect.right + 12 : viewportLeft;
-                const spaceAbove = rect ? rect.top - viewportTop : estHeight;
-                const spaceBelow = rect ? viewportBottom - rect.bottom : estHeight;
-                const preferAbove = spaceAbove >= estHeight || spaceAbove > spaceBelow;
-                const baseTop = rect
-                  ? preferAbove
-                    ? rect.top - estHeight - 12
-                    : rect.bottom + 12
-                  : viewportTop + 24;
-                const left = Math.min(Math.max(baseLeft, viewportLeft), viewportRight - estWidth);
-                const top = Math.min(Math.max(baseTop, viewportTop), viewportBottom - estHeight);
-                return (
                   <div
-                    style={{
-                      position: 'fixed',
-                      top,
-                      left,
-                      background: 'var(--modal-surface)',
-                      border: '1px solid var(--modal-border)',
-                      borderRadius: '10px',
-                      boxShadow: '0 10px 25px rgba(0,0,0,0.12)',
-                      padding: '0.85rem',
-                      display: 'inline-flex',
-                      flexDirection: 'column',
-                      gap: '0.6rem',
-                      minWidth: '280px',
-                      maxWidth: '90vw'
-                    }}
+                    ref={pickerPanelRef}
                     onClick={(e) => e.stopPropagation()}
-                    className="schedule-time-picker"
+                    className="schedule-time-picker event-schedule-time-picker-panel"
                   >
                     <button
                       type="button"
@@ -2307,30 +2160,26 @@ const EventSchedulePage = () => {
                       onChange={(dates) => setPendingPickerDate(dates[0] ?? null)}
                       onValueUpdate={(dates) => setPendingPickerDate(dates[0] ?? null)}
                     />
-                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <div className="event-schedule-time-picker-actions">
                       <button
                         type="button"
-                        className="ghost"
+                        className="ghost event-schedule-time-picker-button"
                         onClick={() => handleTimeChange()}
-                        style={{ padding: '0.35rem 0.9rem' }}
                       >
                         Save
                       </button>
                       <button
                         type="button"
-                        className="ghost"
+                        className="ghost event-schedule-time-picker-button"
                         onClick={() => {
                           setTimePicker(null);
                           setPendingPickerDate(null);
                         }}
-                        style={{ padding: '0.35rem 0.9rem' }}
                       >
                         Cancel
                       </button>
                     </div>
                   </div>
-                );
-              })()}
             </div>,
             document.body
           )
@@ -2342,20 +2191,7 @@ const EventSchedulePage = () => {
             onClick={closePreview}
             role="button"
             tabIndex={-1}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'var(--overlay-scrim)',
-              backdropFilter: 'blur(6px)',
-              zIndex: 9999,
-              pointerEvents: previewClosing ? 'none' : 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '2rem 1rem',
-              opacity: previewClosing ? 0 : 1,
-              transition: `opacity ${OVERLAY_EXIT_MS}ms ease`
-            }}
+            className={`event-schedule-preview-backdrop${previewClosing ? ' event-schedule-preview-backdrop--closing' : ''}`}
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 closePreview();
@@ -2366,7 +2202,9 @@ const EventSchedulePage = () => {
             }}
           >
             <div
-              className="card overlay-panel-with-close"
+              className={`card overlay-panel-with-close event-schedule-preview-panel${
+                previewClosing ? ' event-schedule-preview-panel--closing' : ''
+              }`}
               onClick={(e) => {
                 e.stopPropagation();
                 if (previewOverlayEntry.entry.to) {
@@ -2374,12 +2212,6 @@ const EventSchedulePage = () => {
                   navigate(previewOverlayEntry.entry.to);
                 }
                 closePreview();
-              }}
-              style={{
-                ...(previewCardStyle ?? {}),
-                opacity: previewClosing ? 0 : 1,
-                transform: previewClosing ? 'translateY(8px) scale(0.985)' : 'translateY(0) scale(1)',
-                transition: `opacity ${OVERLAY_EXIT_MS}ms ease, transform ${OVERLAY_EXIT_MS}ms ease`
               }}
             >
             <button
@@ -2393,22 +2225,19 @@ const EventSchedulePage = () => {
             >
               ×
             </button>
-            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ margin: 0 }}>{previewOverlayEntry.entry.title}</h3>
-              <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+            <div className="card-header event-schedule-preview-header">
+              <h3 className="event-schedule-preview-title">{previewOverlayEntry.entry.title}</h3>
+              <div className="event-schedule-preview-badges">
                 {(() => {
-                  const badgeStyle = typeBadgeStyles[previewOverlayEntry.entry.type];
-                  const compactBadgeStyle = { minWidth: '2.4ch', textAlign: 'center' as const, display: 'inline-block' as const };
                   if (previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') {
                     return (
                       <>
                         <span
-                          className={`badge ${previewOverlayEntry.entry.transportComplete ? 'success' : 'danger'}`}
-                          style={compactBadgeStyle}
+                          className={`badge ${previewOverlayEntry.entry.transportComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
                         >
                           {previewOverlayEntry.entry.transportComplete ? '✓' : '!'}
                         </span>
-                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
                           {previewOverlayEntry.entry.type}
                         </span>
                       </>
@@ -2420,12 +2249,11 @@ const EventSchedulePage = () => {
                         <span
                           className={`badge ${
                             previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? 'success' : 'danger'
-                          }`}
-                          style={compactBadgeStyle}
+                          } event-schedule-preview-status-badge`}
                         >
                           {previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? '✓' : '!'}
                         </span>
-                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
                           {previewOverlayEntry.entry.type}
                         </span>
                       </>
@@ -2435,12 +2263,11 @@ const EventSchedulePage = () => {
                     return (
                       <>
                         <span
-                          className={`badge ${previewOverlayEntry.entry.ready ? 'success' : 'danger'}`}
-                          style={compactBadgeStyle}
+                          className={`badge ${previewOverlayEntry.entry.ready ? 'success' : 'danger'} event-schedule-preview-status-badge`}
                         >
                           {previewOverlayEntry.entry.ready ? '✓' : '!'}
                         </span>
-                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
                           {previewOverlayEntry.entry.type}
                         </span>
                       </>
@@ -2450,12 +2277,11 @@ const EventSchedulePage = () => {
                     return (
                       <>
                         <span
-                          className={`badge ${previewOverlayEntry.entry.otherComplete ? 'success' : 'danger'}`}
-                          style={compactBadgeStyle}
+                          className={`badge ${previewOverlayEntry.entry.otherComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
                         >
                           {previewOverlayEntry.entry.otherComplete ? '✓' : '!'}
                         </span>
-                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
                           {previewOverlayEntry.entry.type}
                         </span>
                       </>
@@ -2465,12 +2291,11 @@ const EventSchedulePage = () => {
                     return (
                       <>
                         <span
-                          className={`badge ${previewOverlayEntry.entry.mealComplete ? 'success' : 'danger'}`}
-                          style={compactBadgeStyle}
+                          className={`badge ${previewOverlayEntry.entry.mealComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
                         >
                           {previewOverlayEntry.entry.mealComplete ? '✓' : '!'}
                         </span>
-                        <span className="badge schedule-type-badge" style={badgeStyle}>
+                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
                           {previewOverlayEntry.entry.type}
                         </span>
                       </>
@@ -2480,17 +2305,14 @@ const EventSchedulePage = () => {
                 })()}
               </div>
             </div>
-            <div
-              className="card-body"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.1rem' }}
-            >
-              {(() => {
-                const renderField = (key: string, label: string, value: React.ReactNode) => (
-                  <div key={key}>
-                    <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>{label}</div>
-                    <div>{value ?? '—'}</div>
-                  </div>
-                );
+              <div className="card-body event-schedule-preview-grid">
+                {(() => {
+                  const renderField = (key: string, label: string, value: React.ReactNode) => (
+                    <div key={key}>
+                      <div className="muted event-schedule-preview-label">{label}</div>
+                      <div>{value ?? '—'}</div>
+                    </div>
+                  );
 
                 if (previewOverlayEntry.entry.type === 'Innhopp') {
                   const fields: React.ReactNode[] = [];
@@ -2570,20 +2392,12 @@ const EventSchedulePage = () => {
                     fields.push(
                       <div
                         key="open-maps"
-                        style={{
-                          gridColumn: '1 / -1',
-                          display: 'grid',
-                          justifyContent: 'center',
-                          alignItems: 'center',
-                          gap: '0.25rem',
-                          textAlign: 'center'
-                        }}
+                        className="event-schedule-preview-action-grid form-field-full-span"
                       >
                         <div>
                           <button
                             type="button"
-                            className="link-button"
-                            style={{ fontSize: '1rem' }}
+                            className="link-button event-schedule-preview-link"
                             onClick={(e) => {
                               e.stopPropagation();
                               window.open(
@@ -2608,31 +2422,24 @@ const EventSchedulePage = () => {
                     {previewOverlayEntry.entry.type === 'Accommodation' ? (
                       <>
                         <div key="booked">
-                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>BOOKED</div>
+                          <div className="muted event-schedule-preview-label">BOOKED</div>
                           <div>{previewOverlayEntry.entry.booked ? 'Yes' : 'No'}</div>
                         </div>
                         {previewOverlayEntry.entry.scheduledAt ? (
                           <div key="scheduled">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                            <div className="muted event-schedule-preview-label">SCHEDULED AT</div>
                             <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
                           </div>
                         ) : null}
                         <div key="notes">
-                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                          <div className="muted event-schedule-preview-label">NOTES</div>
                           <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
                         </div>
-                        <div
-                          style={{
-                            gridColumn: '1 / -1',
-                            display: 'flex',
-                            justifyContent: 'center'
-                          }}
-                        >
+                        <div className="form-field-full-span event-schedule-preview-action-row">
                           {previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
                             <button
                               type="button"
-                              className="link-button"
-                              style={{ fontSize: '1rem' }}
+                              className="link-button event-schedule-preview-link"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 window.open(
@@ -2654,36 +2461,36 @@ const EventSchedulePage = () => {
                       <>
                         {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') ? (
                           <div key="duration">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>DURATION</div>
+                            <div className="muted event-schedule-preview-label">DURATION</div>
                             <div>{previewOverlayEntry.entry.routeDurationLabel || 'Unavailable'}</div>
                           </div>
                         ) : previewOverlayEntry.entry.subtitle ? (
                           <div key="subtitle">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SUBTITLE</div>
+                            <div className="muted event-schedule-preview-label">SUBTITLE</div>
                             <div>{previewOverlayEntry.entry.subtitle}</div>
                           </div>
                         ) : null}
                         {previewOverlayEntry.entry.type === 'Meal' && (
                           <div key="meal-location">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>LOCATION</div>
+                            <div className="muted event-schedule-preview-label">LOCATION</div>
                             <div>{(previewOverlayEntry.entry as any).location || '—'}</div>
                           </div>
                         )}
                         {previewOverlayEntry.entry.scheduledAt ? (
                           <div key="scheduled">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                            <div className="muted event-schedule-preview-label">SCHEDULED AT</div>
                             <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
                           </div>
                         ) : null}
                         <div key="notes">
-                          <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                          <div className="muted event-schedule-preview-label">NOTES</div>
                           <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
                         </div>
                         {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') &&
                         (previewOverlayEntry.entry as any).vehicles ? (
                           <div key="vehicles">
-                            <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
-                            <div style={{ marginTop: '0.15rem' }}>
+                            <div className="muted event-schedule-preview-label">VEHICLES</div>
+                            <div className="event-schedule-preview-subsection">
                               {((previewOverlayEntry.entry as any).vehicles as any[]).length === 0 ? (
                                 <div className="muted">—</div>
                               ) : (
@@ -2704,16 +2511,11 @@ const EventSchedulePage = () => {
                         (previewOverlayEntry.entry as any).transportRouteDestination ? (
                           <div
                             key="route"
-                            style={{
-                              gridColumn: '1 / -1',
-                              display: 'flex',
-                              justifyContent: 'center'
-                            }}
+                            className="form-field-full-span event-schedule-preview-action-row"
                           >
                             <button
                               type="button"
-                              className="link-button"
-                              style={{ fontSize: '1rem' }}
+                              className="link-button event-schedule-preview-link"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const origin = (previewOverlayEntry.entry as any).transportRouteOrigin || '';
@@ -2733,16 +2535,11 @@ const EventSchedulePage = () => {
                         {previewOverlayEntry.entry.type === 'Other' && previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
                           <div
                             key="other-maps"
-                            style={{
-                              gridColumn: '1 / -1',
-                              display: 'flex',
-                              justifyContent: 'center'
-                            }}
+                            className="form-field-full-span event-schedule-preview-action-row"
                           >
                             <button
                               type="button"
-                              className="link-button"
-                              style={{ fontSize: '1rem' }}
+                              className="link-button event-schedule-preview-link"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 window.open(

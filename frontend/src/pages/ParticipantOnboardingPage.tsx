@@ -199,21 +199,11 @@ const ParticipantOnboardingPage = () => {
 
   return (
     <section className="stack">
-      <header className="page-header" style={{ position: 'relative', paddingRight: '10rem' }}>
+      <header className="page-header participant-onboarding-header">
         <div>
           <h2>Participants</h2>
         </div>
-        <div
-          style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            display: 'flex',
-            gap: '0.5rem',
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end'
-          }}
-        >
+        <div className="participant-onboarding-actions">
           {canImpersonateNewUser && (
             <button
               className="primary"
@@ -244,13 +234,7 @@ const ParticipantOnboardingPage = () => {
       </header>
 
       <article className="card">
-        <div
-          className="form-grid"
-          style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            alignItems: 'end'
-          }}
-        >
+        <div className="form-grid participant-onboarding-filters">
           <label className="form-field">
             <span>Season</span>
             <select
@@ -259,7 +243,7 @@ const ParticipantOnboardingPage = () => {
                 setSelectedSeason(e.target.value);
                 setSelectedEvent('');
               }}
-              style={{ width: '100%', minWidth: '140px' }}
+              className="participant-onboarding-season-select"
             >
               <option value="">All seasons</option>
               {sortSeasonsDesc(seasons).map((season) => (
@@ -274,7 +258,7 @@ const ParticipantOnboardingPage = () => {
             <select
               value={selectedEvent}
               onChange={(e) => setSelectedEvent(e.target.value)}
-              style={{ width: '100%', minWidth: '160px' }}
+              className="participant-onboarding-event-select"
             >
               <option value="">All events</option>
               {filteredEvents.map((event) => (
@@ -293,26 +277,15 @@ const ParticipantOnboardingPage = () => {
               onChange={(e) => setNameQuery(e.target.value)}
             />
           </label>
-          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <div className="form-field participant-onboarding-roles-field">
             <span>Roles</span>
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '0.5rem',
-                width: '100%'
-              }}
-            >
+            <div className="participant-onboarding-roles-list">
               {roleOptions
                 .filter((role) => role !== 'Participant')
                 .map((role) => {
                 const checked = selectedRoles.includes(role);
                 return (
-                  <label
-                    key={role}
-                    className="badge neutral"
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                  >
+                  <label key={role} className="badge neutral participant-onboarding-role-badge">
                     <input
                       type="checkbox"
                       checked={checked}
@@ -335,9 +308,8 @@ const ParticipantOnboardingPage = () => {
               {selectedRoles.length > 0 && (
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost participant-onboarding-clear-button"
                   onClick={() => setSelectedRoles([])}
-                  style={{ padding: '0.2rem 0.6rem' }}
                 >
                   Clear
                 </button>
@@ -371,8 +343,7 @@ const ParticipantOnboardingPage = () => {
               <li key={p.id}>
                 <Link
                   to={{ pathname: `/participants/${p.id}`, search: queryString }}
-                  className="card-link"
-                  style={{ flex: 1 }}
+                  className="card-link participant-onboarding-card-link"
                 >
                   <strong>{highlightName(p.full_name)}</strong>
                   <div className="muted">{p.email || 'No email on file'}</div>

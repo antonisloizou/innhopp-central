@@ -301,8 +301,6 @@ const EventDetailPage = () => {
   const [copying, setCopying] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
-  const highlightFrame = { boxShadow: 'inset 0 0 0 2px #3b82f6', borderRadius: '8px' };
-  const listItemPadding = { padding: '0.4rem 0.5rem', borderRadius: '8px' };
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
   const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
@@ -1503,9 +1501,9 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         <div>
           <div className="event-header-top">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 style={{ margin: 0 }}>{eventData.name}</h2>
+              <h2 className="event-detail-title">{eventData.name}</h2>
             </DetailPageLockTitle>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="event-detail-header-badges">
               <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
               {!pastEvent &&
                 (() => {
@@ -1615,11 +1613,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('details')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -1630,22 +1627,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.details ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Event details</h3>
+            <h3 className="event-detail-section-title">Event details</h3>
           </div>
         </header>
         {openSections.details && (
           <form className="form-grid" onSubmit={handleSave}>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns:
-                  'minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.5fr)',
-                gap: '0.75rem',
-                gridColumn: '1 / -1',
-                alignItems: 'end'
-              }}
-            >
-              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+            <div className="event-detail-details-grid form-field-full-span">
+              <label className="form-field event-detail-details-col-1-3">
                 <span>Name</span>
                 <input
                   type="text"
@@ -1654,11 +1642,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   required
                 />
               </label>
-              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
-              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 5' }}>
+              <div aria-hidden="true" className="event-detail-details-col-3-4" />
+              <label className="form-field event-detail-details-col-4-5">
                 <span>Season</span>
                 <select
-                  style={{ width: '100%', minWidth: '120px' }}
+                  className="event-detail-season-select"
                   value={eventForm.season_id}
                   onChange={(e) => setEventForm((prev) => ({ ...prev, season_id: e.target.value }))}
                   required
@@ -1671,9 +1659,9 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   ))}
                 </select>
               </label>
-              <div aria-hidden="true" style={{ gridColumn: '5 / 7' }} />
+              <div aria-hidden="true" className="event-detail-details-col-5-7" />
 
-              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+              <label className="form-field event-detail-details-col-1-3">
                 <span>Location</span>
                 <input
                   type="text"
@@ -1682,8 +1670,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   placeholder="The overall location the event takes place"
                 />
               </label>
-              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
-              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 5' }}>
+              <div aria-hidden="true" className="event-detail-details-col-3-4" />
+              <label className="form-field event-detail-details-col-4-5">
                 <span>Status</span>
                 <select
                   value={eventForm.status}
@@ -1697,8 +1685,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </select>
               </label>
               <label
-                className="form-field"
-                style={{ margin: 0, gridColumn: '5 / 6', maxWidth: '220px', justifySelf: 'start', width: '100%' }}
+                className="form-field event-detail-details-slots"
               >
                 <span>Slots</span>
                 <input
@@ -1707,12 +1694,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   value={eventForm.slots}
                   onChange={(e) => setEventForm((prev) => ({ ...prev, slots: e.target.value }))}
                   placeholder="Total slots"
-                  style={{ width: '100%', maxWidth: '220px' }}
+                  className="event-detail-slots-input"
               />
             </label>
-              <div aria-hidden="true" style={{ gridColumn: '6 / 7' }} />
+              <div aria-hidden="true" className="event-detail-details-col-6-7" />
 
-              <label className="form-field" style={{ margin: 0, gridColumn: '1 / 3' }}>
+              <label className="form-field event-detail-details-col-1-3">
                 <span>Starts on</span>
                 <Flatpickr
                   value={toEventLocalPickerDate(eventForm.starts_at)}
@@ -1728,8 +1715,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   }}
                 />
               </label>
-              <div aria-hidden="true" style={{ gridColumn: '3 / 4' }} />
-              <label className="form-field" style={{ margin: 0, gridColumn: '4 / 6' }}>
+              <div aria-hidden="true" className="event-detail-details-col-3-4" />
+              <label className="form-field event-detail-details-col-4-6">
                 <span>Ends on</span>
                 <Flatpickr
                   value={toEventLocalPickerDate(eventForm.ends_at)}
@@ -1745,7 +1732,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   }}
                 />
               </label>
-              <div aria-hidden="true" style={{ gridColumn: '6 / 7' }} />
+              <div aria-hidden="true" className="event-detail-details-col-6-7" />
             </div>
             <div className="form-actions">
               <button type="submit" className={saveButtonClass} disabled={saving || saved}>
@@ -1759,11 +1746,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('registration')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -1774,7 +1760,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.registration ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Registration settings</h3>
+            <h3 className="event-detail-section-title">Registration settings</h3>
           </div>
         </header>
         {openSections.registration && (
@@ -1969,11 +1955,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('innhopps')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -1984,14 +1969,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.innhopps ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Innhopps</h3>
+            <h3 className="event-detail-section-title">Innhopps</h3>
           </div>
           <span className="badge neutral">{innhopps.length} INNHOPPS</span>
         </header>
         {openSections.innhopps && (innhopps.length === 0 ? (
           <p className="muted">No innhopps yet.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list event-detail-scroll-list">
             {innhopps
               .filter((row) => row.id)
               .map((row) => {
@@ -2003,12 +1988,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   <li
                     key={row.id}
                     id={`innhopp-${row.id}`}
-                    style={{ ...listItemPadding, ...(highlightId === `innhopp-${row.id}` ? highlightFrame : {}) }}
+                    className={`event-detail-list-item${highlightId === `innhopp-${row.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                   >
                     <Link
                       to={`/events/${eventData.id}/innhopps/${row.id}`}
-                      className="card-link"
-                      style={{ flex: 1 }}
+                      className="card-link event-detail-list-link"
                       onClick={() => {
                         if (eventId) {
                           try {
@@ -2020,7 +2004,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         saveDetailState();
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                      <div className="event-detail-list-summary-row">
                         <strong>
                           #{row.sequence} — {row.name}
                         </strong>
@@ -2044,7 +2028,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         ))}
         {openSections.innhopps && (
           <>
-        <div style={{ height: '1rem' }} />
+        <div className="event-detail-spacer" />
         <form className="form-grid" onSubmit={handleSave}>
           {innhopps
             .filter((row) => !row.id)
@@ -2059,7 +2043,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                       min={1}
                       value={row.sequence}
                       onChange={(e) => handleChange(draftIndex, 'sequence', e.target.value)}
-                      style={{ width: '8ch' }}
+                      className="event-detail-sequence-input"
                     />
                   </label>
                   <label className="form-field">
@@ -2113,15 +2097,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   </label>
                   {takeoffFormVisible[draftIndex] && (
                     <div
-                      className="form-grid"
-                      style={{
-                        gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))',
-                        border: '1px dashed #c6d1dd',
-                        padding: '1rem',
-                        borderRadius: '10px',
-                        marginTop: '0.5rem',
-                        gridColumn: '1 / -1'
-                      }}
+                      className="form-grid form-field-full-span event-detail-inline-airfield-grid"
                     >
                       {(() => {
                         const mode = takeoffFormMode[draftIndex];
@@ -2217,7 +2193,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                                 placeholder="Optional"
                               />
                             </label>
-                            <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+                            <div className="form-actions form-field-full-span">
                               {mode === 'new' && (
                                 <button
                                   type="button"
@@ -2252,7 +2228,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </div>
               );
             })}
-          <div className="form-actions" style={{ flexWrap: 'wrap', gap: '0.75rem', marginTop: '1rem' }}>
+          <div className="form-actions event-detail-action-wrap event-detail-top-margin">
             <button type="button" className="primary" onClick={handleAddRow} disabled={saving}>
               Create new Innhopp
             </button>
@@ -2268,11 +2244,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('airfields')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -2283,26 +2258,25 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.airfields ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Airfields</h3>
+            <h3 className="event-detail-section-title">Airfields</h3>
           </div>
           <span className="badge neutral">{airfieldIds.length} AIRFIELDS</span>
         </header>
         {openSections.airfields && (airfieldIds.length === 0 ? (
           <p className="muted">No airfields linked yet.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list event-detail-scroll-list">
             {airfieldIds.map((id) => {
               const airfield = airfields.find((a) => a.id === id);
               return (
                 <li
                   key={id}
                   id={`airfield-${id}`}
-                  style={{ ...listItemPadding, ...(highlightId === `airfield-${id}` ? highlightFrame : {}) }}
+                  className={`event-detail-list-item${highlightId === `airfield-${id}` ? ' event-detail-list-item--highlighted' : ''}`}
                 >
                   <Link
                     to={`/airfields/${id}`}
-                    className="card-link"
-                    style={{ flex: 1 }}
+                    className="card-link event-detail-list-link"
                     onClick={() => {
                       if (eventId) {
                         try {
@@ -2335,7 +2309,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         ))}
         {openSections.airfields && (
           <>
-        <div className="form-grid" style={{ marginTop: '1rem' }}>
+        <div className="form-grid event-detail-top-margin">
           <label className="form-field">
             <span>Select airfield</span>
             <select
@@ -2364,7 +2338,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               ))}
             </select>
           </label>
-          <div className="form-actions" style={{ gap: '0.75rem', alignItems: 'center' }}>
+          <div className="form-actions event-detail-inline-actions">
             <button
               type="button"
               className="primary"
@@ -2379,7 +2353,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </div>
         </div>
         {showAirfieldForm && (
-          <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateAirfield}>
+          <form className="form-grid event-detail-top-margin" onSubmit={handleCreateAirfield}>
             <label className="form-field">
               <span>Name</span>
               <input
@@ -2460,11 +2434,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('participants')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -2475,7 +2448,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.participants ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Participants</h3>
+            <h3 className="event-detail-section-title">Participants</h3>
           </div>
           <span className="badge neutral">
             {
@@ -2494,7 +2467,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           }).length === 0 ? (
             <p className="muted">No participants yet.</p>
           ) : (
-            <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+            <ul className="status-list event-detail-scroll-list">
               {participantIds
                 .map((id) => participants.find((p) => p.id === id))
                 .filter(
@@ -2517,13 +2490,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <li
                       key={id}
                       id={`participant-${id}`}
-                      style={{ ...listItemPadding, ...(highlightId === `participant-${id}` ? highlightFrame : {}) }}
+                      className={`event-detail-list-item${highlightId === `participant-${id}` ? ' event-detail-list-item--highlighted' : ''}`}
                     >
                       <Link
                         to={`/participants/${id}`}
                         state={{ fromEventId: eventId, highlightId: `participant-${id}` }}
-                        className="card-link"
-                        style={{ flex: 1 }}
+                        className="card-link event-detail-list-link"
                         onClick={() => {
                           if (eventId) {
                             try {
@@ -2544,7 +2516,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                           Experience: {profile.experience_level || 'Not provided'}
                         </div>
                         {extraRoles.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                          <div className="event-detail-role-badges">
                             {extraRoles.map((role) => (
                               <span key={role} className="badge neutral">
                                 {role}
@@ -2567,7 +2539,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           ))}
         {openSections.participants && (
           <>
-            <div className="form-grid" style={{ marginTop: '1rem' }}>
+            <div className="form-grid event-detail-top-margin">
               <label className="form-field">
                 <span>Select participant</span>
                 <select
@@ -2591,7 +2563,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   ))}
                 </select>
               </label>
-              <div className="form-actions" style={{ gap: '0.5rem', alignItems: 'center' }}>
+              <div className="form-actions event-detail-compact-actions">
                 <button type="button" className="primary" onClick={handleAssignParticipant} disabled={!selectedParticipantId}>
                   Add
                 </button>
@@ -2601,7 +2573,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </div>
             </div>
             {showParticipantForm && (
-              <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateParticipant}>
+              <form className="form-grid event-detail-top-margin" onSubmit={handleCreateParticipant}>
                 <label className="form-field">
                   <span>Full name</span>
                   <input
@@ -2651,14 +2623,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     placeholder="Optional"
                   />
                 </label>
-                <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+                <div className="form-field form-field-full-span">
                   <span>Roles</span>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div className="event-detail-role-options">
                     {roleOptions.map((role) => {
                       const checked = participantForm.roles?.includes(role);
                       const disabled = role === 'Staff';
                       return (
-                        <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <label key={role} className="badge neutral event-detail-role-option">
                           <input
                             type="checkbox"
                             checked={checked}
@@ -2681,7 +2653,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                       );
                     })}
                   </div>
-                  <p className="muted" style={{ margin: 0 }}>Staff cannot be assigned here.</p>
+                  <p className="muted event-detail-zero-margin">Staff cannot be assigned here.</p>
                 </div>
                 <div className="form-actions">
                   <button type="submit" className="primary" disabled={addingParticipant}>
@@ -2704,11 +2676,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('staff')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -2719,14 +2690,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.staff ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Staff</h3>
+            <h3 className="event-detail-section-title">Staff</h3>
           </div>
           <span className="badge neutral">{staffParticipants.length} staff</span>
         </header>
         {openSections.staff && (staffParticipants.length === 0 ? (
           <p className="muted">No staff yet.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list event-detail-scroll-list">
             {staffParticipants.map((profile) => {
               const id = profile.id;
               const roles = Array.isArray(profile.roles) ? profile.roles : [];
@@ -2742,12 +2713,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <li
                   key={id}
                   id={`staff-${id}`}
-                  style={{ ...listItemPadding, ...(highlightId === `staff-${id}` ? highlightFrame : {}) }}
+                  className={`event-detail-list-item${highlightId === `staff-${id}` ? ' event-detail-list-item--highlighted' : ''}`}
                 >
                   <Link
                     to={`/participants/${id}`}
-                    className="card-link"
-                    style={{ flex: 1 }}
+                    className="card-link event-detail-list-link"
                     onClick={() => {
                       if (eventId) {
                         try {
@@ -2764,7 +2734,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <div className="muted">{profile.email || 'No email on file'}</div>
                     <div className="muted">Experience: {profile.experience_level || 'Not provided'}</div>
                     {extraRoles.length > 0 && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.25rem' }}>
+                      <div className="event-detail-role-badges">
                         {extraRoles.map((role) => (
                           <span key={role} className="badge neutral">
                             {role}
@@ -2788,7 +2758,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         ))}
         {openSections.staff && (
           <>
-        <div className="form-grid" style={{ marginTop: '1rem' }}>
+        <div className="form-grid event-detail-top-margin">
           <label className="form-field">
             <span>Select staff</span>
             <select
@@ -2812,7 +2782,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               ))}
             </select>
           </label>
-          <div className="form-actions" style={{ gap: '0.5rem', alignItems: 'center' }}>
+          <div className="form-actions event-detail-compact-actions">
             <button
               type="button"
               className="primary"
@@ -2832,7 +2802,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </div>
         </div>
         {showStaffForm && (
-          <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateStaffParticipant}>
+          <form className="form-grid event-detail-top-margin" onSubmit={handleCreateStaffParticipant}>
             <label className="form-field">
               <span>Full name</span>
               <input
@@ -2880,14 +2850,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 placeholder="Optional"
               />
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field form-field-full-span">
               <span>Roles</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="event-detail-role-options">
             {roleOptions.map((role) => {
               const checked = staffForm.roles?.includes(role);
               const locked = role === 'Participant' || role === 'Staff';
               return (
-                <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                <label key={role} className="badge neutral event-detail-role-option">
                   <input
                     type="checkbox"
                     checked={checked}
@@ -2932,11 +2902,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('accommodations')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -2947,7 +2916,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.accommodations ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Accommodation</h3>
+            <h3 className="event-detail-section-title">Accommodation</h3>
           </div>
           <span className="badge neutral">
             {accommodations.length} ACCOMMODATIONS
@@ -2956,21 +2925,17 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         {openSections.accommodations && (
           <>
             {accommodations.length > 0 ? (
-              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+              <ul className="status-list event-detail-scroll-list">
                 {sortedAccommodations.map((acc, idx) => (
                   <li
                     key={acc.id || idx}
                     id={`accommodation-${acc.id}`}
-                    style={{
-                      ...listItemPadding,
-                      ...(highlightId === `accommodation-${acc.id}` ? highlightFrame : {})
-                    }}
+                    className={`event-detail-list-item${highlightId === `accommodation-${acc.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                   >
                     <Link
                       to={`/events/${eventId}/accommodations/${acc.id}`}
                       state={{ fromEventId: eventId, highlightId: `accommodation-${acc.id}` }}
-                      className="card-link"
-                      style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', width: '100%' }}
+                      className="card-link event-detail-logistics-link"
                       onClick={() => {
                         if (eventId) {
                           try {
@@ -2985,36 +2950,27 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         saveDetailState();
                       }}
                     >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'space-between',
-                          gap: '0.75rem',
-                          width: '100%'
-                        }}
-                      >
+                      <div className="event-detail-logistics-header-row">
                         <strong>{acc.name || 'Accommodation'}</strong>
                         <span
-                          className={`badge ${acc.booked && hasText(acc.coordinates) ? 'success' : 'danger'}`}
+                          className={`badge ${acc.booked && hasText(acc.coordinates) ? 'success' : 'danger'} event-detail-status-badge-shrink`}
                           aria-label={acc.booked ? 'Booked' : 'Not booked'}
-                          style={{ flexShrink: 0 }}
                         >
                           {acc.booked && hasText(acc.coordinates) ? '✓' : 'NOT BOOKED'}
                         </span>
                     </div>
-                    <div className="muted" style={{ marginTop: '0.2rem' }}>
+                    <div className="muted event-detail-logistics-meta-top">
                       {acc.capacity ? `Capacity: ${acc.capacity}` : 'Capacity: n/a'}
                     </div>
                     {(acc.check_in_at || acc.check_out_at) && (
-                      <div className="muted" style={{ marginTop: '0.1rem' }}>
+                      <div className="muted event-detail-logistics-meta">
                         {acc.check_in_at ? `${formatDateTime24h(acc.check_in_at)}` : ''}
                         {acc.check_in_at && acc.check_out_at ? ' — ' : ''}
                         {acc.check_out_at ? `${formatDateTime24h(acc.check_out_at)}` : ''}
                       </div>
                     )}
                     {acc.notes ? (
-                      <div className="muted" style={{ marginTop: '0.1rem' }}>
+                      <div className="muted event-detail-logistics-meta">
                         {acc.notes}
                       </div>
                     ) : null}
@@ -3025,13 +2981,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             ) : (
               <p className="muted">No accommodation linked yet.</p>
             )}
-            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <div className="form-actions event-detail-form-toggle-actions">
               <button type="button" className="ghost" onClick={() => setShowAccommodationForm((prev) => !prev)}>
                 {showAccommodationForm ? 'Cancel' : 'Create new accommodation'}
               </button>
             </div>
             {showAccommodationForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid event-detail-form-toggle-grid">
                 <label className="form-field">
                   <span>Name</span>
                   <input
@@ -3118,7 +3074,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <span>Mark as booked</span>
                   </div>
                 </label>
-                <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-field form-field-full-span">
                   <span>Notes</span>
                   <input
                     type="text"
@@ -3183,7 +3139,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </div>
               </div>
             )}
-            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <div className="form-actions event-detail-save-actions">
               <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
                 {saveButtonLabel}
               </button>
@@ -3194,11 +3150,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('transports')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -3209,14 +3164,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.transports ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Transport</h3>
+            <h3 className="event-detail-section-title">Transport</h3>
           </div>
           <span className="badge neutral">{transports.length} ROUTES</span>
         </header>
         {openSections.transports && (
           <>
             {transports.length > 0 ? (
-              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+              <ul className="status-list event-detail-scroll-list">
                 {transports
                   .slice()
                   .sort((a, b) => {
@@ -3241,18 +3196,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <li
                       key={t.id}
                       id={`transport-${t.id}`}
-                      style={{ ...listItemPadding, ...(highlightId === `transport-${t.id}` ? highlightFrame : {}) }}
+                      className={`event-detail-list-item${highlightId === `transport-${t.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                     >
                     <Link
                       to={`/logistics/${t.id}`}
                       state={{ fromEventId: eventId, highlightId: `transport-${t.id}` }}
-                      className="card-link"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.25rem',
-                        width: '100%'
-                      }}
+                      className="card-link event-detail-logistics-link"
                       onClick={() => {
                         if (eventId) {
                           try {
@@ -3267,20 +3216,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         saveDetailState();
                       }}
                     >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          justifyContent: 'space-between',
-                          gap: '0.75rem',
-                          width: '100%'
-                        }}
-                      >
-                        <strong style={{ display: 'block' }}>
+                      <div className="event-detail-logistics-header-row">
+                        <strong className="event-detail-block-strong">
                           {t.pickup_location} → {t.destination}
                         </strong>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
-                          <span className={`badge ${transportComplete ? 'success' : 'danger'}`} style={{ minWidth: '2.4ch', textAlign: 'center' }}>
+                        <div className="event-detail-status-row">
+                          <span className={`badge ${transportComplete ? 'success' : 'danger'} event-detail-ready-indicator`}>
                             {transportComplete ? '✓' : '!'}
                           </span>
                           <span className="badge neutral">
@@ -3288,13 +3229,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                           </span>
                         </div>
                       </div>
-                      <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <div className="muted event-detail-inline-muted-list">
                         {t.scheduled_at ? `${formatDateTime24h(t.scheduled_at)}` : 'Unscheduled'}
                       </div>
                       {Array.isArray((t as any).vehicles) && (t as any).vehicles.length > 0 ? (
-                        <div className="muted" style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                        <div className="muted event-detail-vehicle-list">
                           {(t as any).vehicles.map((v: any, idx: number) => (
-                            <div key={idx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <div key={idx} className="event-detail-vehicle-row">
                               <strong>{v.name}</strong>
                             </div>
                           ))}
@@ -3308,13 +3249,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             ) : (
               <p className="muted">No transport routes yet.</p>
             )}
-            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <div className="form-actions event-detail-form-toggle-actions">
               <button type="button" className="ghost" onClick={() => setShowTransportForm((prev) => !prev)}>
                 {showTransportForm ? 'Cancel' : 'Create new transport route'}
               </button>
             </div>
             {showTransportForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid event-detail-form-toggle-grid">
                 <label className="form-field">
                   <span>Pickup location</span>
                   <select
@@ -3408,7 +3349,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             </div>
           </div>
         )}
-        <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+        <div className="form-actions event-detail-save-actions">
           <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
             {saveButtonLabel}
           </button>
@@ -3419,11 +3360,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('groundCrews')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -3434,14 +3374,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.groundCrews ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Ground Crew</h3>
+            <h3 className="event-detail-section-title">Ground Crew</h3>
           </div>
           <span className="badge neutral">{groundCrews.length} ENTRIES</span>
         </header>
         {openSections.groundCrews && (
           <>
             {groundCrews.length > 0 ? (
-              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+              <ul className="status-list event-detail-scroll-list">
                 {groundCrews
                   .slice()
                   .sort((a, b) => {
@@ -3466,18 +3406,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                       <li
                         key={g.id}
                         id={`ground-crew-${g.id}`}
-                        style={{ ...listItemPadding, ...(highlightId === `ground-crew-${g.id}` ? highlightFrame : {}) }}
+                        className={`event-detail-list-item${highlightId === `ground-crew-${g.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                       >
                         <Link
                           to={`/logistics/ground-crew/${g.id}`}
                           state={{ fromEventId: eventId, highlightId: `ground-crew-${g.id}` }}
-                          className="card-link"
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.25rem',
-                            width: '100%'
-                          }}
+                          className="card-link event-detail-logistics-link"
                           onClick={() => {
                             if (eventId) {
                               try {
@@ -3492,31 +3426,23 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                             saveDetailState();
                           }}
                         >
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'flex-start',
-                              justifyContent: 'space-between',
-                              gap: '0.75rem',
-                              width: '100%'
-                            }}
-                          >
-                            <strong style={{ display: 'block' }}>
+                          <div className="event-detail-logistics-header-row">
+                            <strong className="event-detail-block-strong">
                               {g.pickup_location} → {g.destination}
                             </strong>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
-                              <span className={`badge ${groundCrewComplete ? 'success' : 'danger'}`} style={{ minWidth: '2.4ch', textAlign: 'center' }}>
+                            <div className="event-detail-status-row">
+                              <span className={`badge ${groundCrewComplete ? 'success' : 'danger'} event-detail-ready-indicator`}>
                                 {groundCrewComplete ? '✓' : '!'}
                               </span>
                             </div>
                           </div>
-                          <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                          <div className="muted event-detail-inline-muted-list">
                             {g.scheduled_at ? `${formatDateTime24h(g.scheduled_at)}` : 'Unscheduled'}
                           </div>
                           {Array.isArray((g as any).vehicles) && (g as any).vehicles.length > 0 ? (
-                            <div className="muted" style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                            <div className="muted event-detail-vehicle-list">
                               {(g as any).vehicles.map((v: any, idx: number) => (
-                                <div key={idx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <div key={idx} className="event-detail-vehicle-row">
                                   <strong>{v.name}</strong>
                                 </div>
                               ))}
@@ -3530,13 +3456,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             ) : (
               <p className="muted">No ground crew entries yet.</p>
             )}
-            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <div className="form-actions event-detail-form-toggle-actions">
               <button type="button" className="ghost" onClick={() => setShowGroundCrewForm((prev) => !prev)}>
                 {showGroundCrewForm ? 'Cancel' : 'Create new ground crew entry'}
               </button>
             </div>
             {showGroundCrewForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid event-detail-form-toggle-grid">
                 <label className="form-field">
                   <span>Start location</span>
                   <select
@@ -3630,7 +3556,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </div>
               </div>
             )}
-            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <div className="form-actions event-detail-save-actions">
               <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
                 {saveButtonLabel}
               </button>
@@ -3641,11 +3567,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('meals')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -3656,27 +3581,26 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.meals ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Meals</h3>
+            <h3 className="event-detail-section-title">Meals</h3>
           </div>
           <span className="badge neutral">{meals.length} MEALS</span>
         </header>
         {openSections.meals && (
           <>
             {meals.length > 0 ? (
-              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+              <ul className="status-list event-detail-scroll-list">
                 {sortedMeals.map((m) => {
                   const mealComplete = hasText(m.name) && hasText(m.location) && hasText(m.scheduled_at);
                   return (
                         <li
                           key={m.id}
                           id={`meal-${m.id}`}
-                          style={{ ...listItemPadding, ...(highlightId === `meal-${m.id}` ? highlightFrame : {}) }}
+                          className={`event-detail-list-item${highlightId === `meal-${m.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                         >
                       <Link
                         to={`/logistics/meals/${m.id}`}
                         state={{ fromEventId: eventId, highlightId: `meal-${m.id}` }}
-                        className="card-link"
-                        style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.2rem', flex: 1 }}
+                        className="card-link event-detail-simple-logistics-link"
                         onClick={() => {
                           if (eventId) {
                             try {
@@ -3688,16 +3612,15 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                           saveDetailState();
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                          <strong style={{ flex: 1 }}>{m.name}</strong>
+                        <div className="event-detail-meal-header">
+                          <strong className="event-detail-flex-1">{m.name}</strong>
                           <span
-                            className={`badge ${mealComplete ? 'success' : 'danger'}`}
-                            style={{ minWidth: '2.4ch', textAlign: 'center', flexShrink: 0 }}
+                            className={`badge ${mealComplete ? 'success' : 'danger'} event-detail-ready-indicator`}
                           >
                             {mealComplete ? '✓' : '!'}
                           </span>
                         </div>
-                        <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <div className="muted event-detail-inline-muted-list">
                           {m.location ? m.location : 'Location required'}
                           {m.scheduled_at ? `• ${formatDateTime24h(m.scheduled_at)}` : ''}
                         </div>
@@ -3716,11 +3639,10 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
       <article className="card">
         <header
-          className="card-header"
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('others')}
-          style={{ cursor: 'pointer' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+          <div className="event-detail-section-header-main">
             <button
               className="ghost"
               type="button"
@@ -3731,14 +3653,14 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               {openSections.others ? '▾' : '▸'}
             </button>
-            <h3 style={{ margin: 0 }}>Other logistics</h3>
+            <h3 className="event-detail-section-title">Other logistics</h3>
           </div>
           <span className="badge neutral">{others.length} ENTRIES</span>
         </header>
         {openSections.others && (
           <>
             {others.length > 0 ? (
-              <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+              <ul className="status-list event-detail-scroll-list">
                 {others
                   .slice()
                   .sort((a, b) => {
@@ -3752,13 +3674,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <li
                       key={o.id}
                       id={`other-${o.id}`}
-                      style={{ ...listItemPadding, ...(highlightId === `other-${o.id}` ? highlightFrame : {}) }}
+                      className={`event-detail-list-item${highlightId === `other-${o.id}` ? ' event-detail-list-item--highlighted' : ''}`}
                     >
                     <Link
                       to={`/logistics/others/${o.id}`}
                       state={{ fromEventId: eventId, highlightId: `other-${o.id}` }}
-                      className="card-link"
-                      style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.25rem', flex: 1 }}
+                      className="card-link event-detail-simple-logistics-link"
                       onClick={() => {
                         if (eventId) {
                           try {
@@ -3770,16 +3691,15 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         saveDetailState();
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                      <div className="event-detail-other-header">
                         <strong>{o.name}</strong>
                         <span
-                          className={`badge ${otherComplete ? 'success' : 'danger'}`}
-                          style={{ minWidth: '2.4ch', textAlign: 'center', marginLeft: 'auto', flexShrink: 0 }}
+                          className={`badge ${otherComplete ? 'success' : 'danger'} event-detail-ready-indicator event-detail-auto-margin-left`}
                         >
                           {otherComplete ? '✓' : '!'}
                         </span>
                       </div>
-                      <div className="muted" style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <div className="muted event-detail-inline-muted-list">
                         {o.scheduled_at ? formatDateTime24h(o.scheduled_at) : 'Unscheduled'}
                       </div>
                       {o.notes && <div className="muted">Notes: {o.notes}</div>}
@@ -3791,13 +3711,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             ) : (
               <p className="muted">No other logistics yet.</p>
             )}
-            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <div className="form-actions event-detail-form-toggle-actions">
               <button type="button" className="ghost" onClick={() => setShowOtherForm((prev) => !prev)}>
                 {showOtherForm ? 'Cancel' : 'Create new entry'}
               </button>
             </div>
             {showOtherForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid event-detail-form-toggle-grid">
                 <label className="form-field">
                   <span>Name</span>
                   <input
@@ -3855,7 +3775,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     onChange={(e) => setOtherForm((prev) => ({ ...prev, description: e.target.value }))}
                   />
                 </label>
-                <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-field form-field-full-span">
                   <span>Notes</span>
                   <input
                     type="text"
@@ -3873,7 +3793,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </div>
               </div>
             )}
-            <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+            <div className="form-actions event-detail-save-actions">
               <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
                 {saveButtonLabel}
               </button>

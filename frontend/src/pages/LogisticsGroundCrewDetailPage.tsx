@@ -511,15 +511,14 @@ const LogisticsGroundCrewDetailPage = () => {
     <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="logistics-detail-title-row">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 style={{ margin: 0 }}>{routeSummary || 'Ground Crew Entry'}</h2>
+              <h2 className="logistics-detail-title">{routeSummary || 'Ground Crew Entry'}</h2>
             </DetailPageLockTitle>
             <span
-              className={`badge ${transportComplete ? 'success' : 'danger'}`}
+              className={`badge ${transportComplete ? 'success' : 'danger'} logistics-detail-status-badge`}
               aria-label={transportComplete ? 'Complete' : 'Missing info'}
               title={transportComplete ? 'Complete' : 'Missing info'}
-              style={{ minWidth: '2.4ch', textAlign: 'center' }}
             >
               {transportComplete ? '✓' : '!'}
             </span>
@@ -528,8 +527,7 @@ const LogisticsGroundCrewDetailPage = () => {
             <p>
               <button
                 type="button"
-                className="link-button"
-                style={{ fontSize: '1.25em' }}
+                className="link-button logistics-detail-maps-link"
                 disabled={!canOpenRoute}
                 onClick={() => {
                   if (!routeLink) return;
@@ -606,7 +604,7 @@ const LogisticsGroundCrewDetailPage = () => {
                         markDirty();
                       }}
                       required
-                      style={{ flex: 1, minWidth: 0 }}
+                      className="logistics-detail-select-grow"
                     >
                       <option value="">Select event</option>
                       {events.map((ev) => (
@@ -615,7 +613,7 @@ const LogisticsGroundCrewDetailPage = () => {
                     </option>
                   ))}
                 </select>
-                <span style={{ visibility: 'hidden' }}>Open in Maps</span>
+                <span className="logistics-detail-hidden-helper">Open in Maps</span>
               </div>
             </label>
             <label className={`form-field ${pickupOptionKey && !pickupHasCoordinates ? 'field-missing' : ''}`}>
@@ -631,7 +629,7 @@ const LogisticsGroundCrewDetailPage = () => {
                   setForm((prev) => ({ ...prev, pickup_location: opt ? opt.label : '' }));
                 }}
                 required
-                style={{ flex: 1, minWidth: 0 }}
+                className="logistics-detail-select-grow"
                 >
                   <option value="">Select start location</option>
                 {pickupOptions
@@ -730,7 +728,7 @@ const LogisticsGroundCrewDetailPage = () => {
                     setForm((prev) => ({ ...prev, destination: opt ? opt.label : '' }));
                   }}
                   required
-                  style={{ flex: 1, minWidth: 0 }}
+                  className="logistics-detail-select-grow"
                 >
                   <option value="">Select destination</option>
                 {destinationOptions.filter((opt) => opt.type === 'Innhopp').length > 0 && (
@@ -808,12 +806,9 @@ const LogisticsGroundCrewDetailPage = () => {
                 </button>
               </div>
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1', padding: 0 }}>
-              <div
-                className="form-grid"
-                style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}
-              >
-                <label className={`form-field ${missingPassengerCount ? 'field-missing' : ''}`} style={{ margin: 0 }}>
+            <div className="form-field form-field-full-span logistics-detail-zero-pad-field">
+              <div className="form-grid logistics-detail-subgrid">
+                <label className={`form-field ${missingPassengerCount ? 'field-missing' : ''} logistics-detail-zero-margin-field`}>
                   <span>Passenger count</span>
                   <input
                     type="number"
@@ -826,7 +821,7 @@ const LogisticsGroundCrewDetailPage = () => {
                     required
                   />
                 </label>
-                <label className="form-field" style={{ margin: 0 }}>
+                <label className="form-field logistics-detail-zero-margin-field">
                   <span>Duration (minutes)</span>
                   <input
                     type="number"
@@ -840,7 +835,7 @@ const LogisticsGroundCrewDetailPage = () => {
                     placeholder="Auto if blank"
                   />
                 </label>
-                <label className={`form-field ${missingScheduledAt ? 'field-missing' : ''}`} style={{ margin: 0 }}>
+                <label className={`form-field ${missingScheduledAt ? 'field-missing' : ''} logistics-detail-zero-margin-field`}>
                   <span>Scheduled at</span>
                   <Flatpickr
                     value={toEventLocalPickerDate(form.scheduled_at)}
@@ -863,7 +858,7 @@ const LogisticsGroundCrewDetailPage = () => {
               </div>
             </div>
           </div>
-          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+          <div className="form-actions logistics-detail-half-gap">
             <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
               {saveButtonLabel}
             </button>
@@ -871,7 +866,7 @@ const LogisticsGroundCrewDetailPage = () => {
         </article>
 
         <article className="card">
-          <div className={`form-field ${missingVehicles ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
+          <div className={`form-field ${missingVehicles ? 'field-missing' : ''} form-field-full-span`}>
             <span>Vehicles</span>
             {(() => {
               type DisplayVehicle = {
@@ -940,26 +935,17 @@ const LogisticsGroundCrewDetailPage = () => {
               if (items.length === 0) return null;
 
               return (
-                <ul className="status-list" style={{ marginTop: '0.5rem' }}>
+                <ul className="status-list logistics-detail-half-gap">
                   {items.map((entry, idx) => (
                     <li key={`${entry.id}-${idx}`}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.75rem',
-                          justifyContent: 'space-between',
-                          width: '100%'
-                        }}
-                      >
+                      <div className="logistics-detail-vehicle-row">
                         {entry.removable ? (
                           <Link
                             to={{
                               pathname: `/logistics/vehicles/${entry.id}`,
                               search: groundCrewId ? `?groundCrewId=${groundCrewId}` : undefined
                             }}
-                            className="card-link"
-                            style={{ flex: 1 }}
+                            className="card-link logistics-detail-card-link-grow"
                           >
                             <strong>{entry.name}</strong>
                             <div className="muted">
@@ -969,7 +955,7 @@ const LogisticsGroundCrewDetailPage = () => {
                             {entry.notes && <div className="muted">Notes: {entry.notes}</div>}
                           </Link>
                         ) : (
-                          <div style={{ flex: 1 }}>
+                          <div className="logistics-detail-card-link-grow">
                             <strong>{entry.name}</strong>
                             <div className="muted">
                               {entry.driver ? `Driver: ${entry.driver} • ` : ''}
@@ -990,10 +976,10 @@ const LogisticsGroundCrewDetailPage = () => {
               );
             })()}
             {existingVehicles.length > 0 && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid logistics-detail-half-gap">
                 <label className="form-field">
                   <span>Add vehicle</span>
-                  <div className="form-actions" style={{ gap: '0.5rem', alignItems: 'center' }}>
+                  <div className="form-actions logistics-detail-inline-actions">
                     <select
                       value=""
                       onChange={(e) => {
@@ -1017,16 +1003,13 @@ const LogisticsGroundCrewDetailPage = () => {
                 </label>
               </div>
             )}
-            <div
-              className="form-actions"
-              style={{ marginTop: '0.5rem', justifyContent: 'flex-start', marginLeft: '-1.5rem' }}
-            >
+            <div className="form-actions logistics-detail-create-vehicle-row">
               <button type="button" className="ghost" onClick={handleAddVehicle}>
                 Create new vehicle
               </button>
             </div>
             {showVehicleForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid logistics-detail-half-gap">
                 <label className="form-field">
                   <span>Vehicle name</span>
                   <input
@@ -1090,7 +1073,7 @@ const LogisticsGroundCrewDetailPage = () => {
                 </div>
               </div>
             )}
-            <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+            <div className="form-actions logistics-detail-half-gap">
               <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
                 {saveButtonLabel}
               </button>
@@ -1099,7 +1082,7 @@ const LogisticsGroundCrewDetailPage = () => {
         </article>
 
         <article className="card">
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <textarea
               value={form.notes}
@@ -1111,14 +1094,14 @@ const LogisticsGroundCrewDetailPage = () => {
               rows={3}
             />
           </label>
-          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+          <div className="form-actions logistics-detail-half-gap">
             <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
               {saveButtonLabel}
             </button>
           </div>
         </article>
         {message && (
-          <div className="form-actions" style={{ marginTop: '0.5rem' }}>
+          <div className="form-actions logistics-detail-half-gap">
             <span className="muted">{message}</span>
           </div>
         )}

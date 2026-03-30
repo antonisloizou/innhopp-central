@@ -268,6 +268,9 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS medical_conditions TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS medical_expertise TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS hss_qualities TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+		`UPDATE participant_profiles
+		 SET hss_qualities = array_remove(hss_qualities, 'Experiment with drugs')
+		 WHERE hss_qualities @> ARRAY['Experiment with drugs']::TEXT[]`,
 		`CREATE TABLE IF NOT EXISTS event_participants (
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
@@ -329,6 +332,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS notam TEXT`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS distance_by_air NUMERIC`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS distance_by_road NUMERIC`,
+		`ALTER TABLE event_innhopps ALTER COLUMN distance_by_air TYPE NUMERIC USING distance_by_air::numeric`,
+		`ALTER TABLE event_innhopps ALTER COLUMN distance_by_road TYPE NUMERIC USING distance_by_road::numeric`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_name TEXT`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_description TEXT`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS primary_landing_area_size TEXT`,

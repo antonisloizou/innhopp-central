@@ -115,7 +115,7 @@ const ManifestManagementPage = () => {
       </header>
 
       <article className="card">
-        <div className="form-grid" style={{ marginBottom: '1rem' }}>
+        <div className="form-grid manifest-management-filter-grid">
           <label className="form-field">
             <span>Event</span>
             <select
@@ -164,17 +164,16 @@ const ManifestManagementPage = () => {
                     <Link
                       key={manifest.id}
                       to={`/manifests/${manifest.id}?eventId=${selectedEventId}`}
-                      className="card-link"
-                      style={{ textDecoration: 'none' }}
+                      className="card-link manifest-management-card-link"
                     >
                       <article className="card">
                         <header className="card-header">
                           <div>
                             <h3>Load {manifest.load_number}</h3>
-                            <p className="muted" style={{ marginBottom: 0 }}>
+                            <p className="muted manifest-management-meta">
                               Capacity: {manifest.capacity ?? 'Not set'} • Participants: {nonStaff} • Staff: {staffCount}
                             </p>
-                            {manifest.notes && <p className="muted" style={{ margin: 0 }}>Notes: {manifest.notes}</p>}
+                            {manifest.notes && <p className="muted manifest-management-notes">Notes: {manifest.notes}</p>}
                           </div>
                           {isFull ? <span className="badge danger">FULL</span> : <span className="badge success">Slots Available</span>}
                         </header>

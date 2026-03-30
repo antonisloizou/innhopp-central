@@ -284,8 +284,8 @@ const EventCalendarPage = () => {
       {groups.map((group, idx) => (
         <div key={group.seasonId} className="stack">
           {idx === 0 && !options?.showFirstHeading ? null : (
-            <p className="muted" style={{ margin: '0 0 0.5rem' }}>
-              <span style={{ fontSize: '1.25rem', fontWeight: 800 }}>{group.label}</span>
+            <p className="muted event-calendar-group-heading">
+              <span className="event-calendar-group-title">{group.label}</span>
             </p>
           )}
           <div className="stack">
@@ -361,8 +361,8 @@ const EventCalendarPage = () => {
       <div className="stack">
         {myEvents.length > 0 && (
           <article className="card">
-            <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <div style={{ flex: '1 1 0%', minWidth: 0, fontWeight: 800, fontSize: '1.25rem' }}>My Events</div>
+            <header className="card-header event-calendar-card-header">
+              <div className="event-calendar-title-block">My Events</div>
               <span className="badge neutral">
                 {myEvents.length} {myEvents.length === 1 ? 'event' : 'events'}
               </span>
@@ -372,67 +372,26 @@ const EventCalendarPage = () => {
         )}
 
         <article className="card">
-          <header className="card-header" style={{ alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 0%', minWidth: 0, flexWrap: 'wrap' }}>
-              <div style={{ fontWeight: 800, fontSize: '1.25rem' }}>Event Calendar</div>
-              <div
-                ref={seasonMenuRef}
-                style={{ position: 'relative', minWidth: 0, flex: '1 1 220px', maxWidth: '100%' }}
-              >
+          <header className="card-header event-calendar-card-header">
+            <div className="event-calendar-toolbar">
+              <div className="event-calendar-title-block">Event Calendar</div>
+              <div ref={seasonMenuRef} className="event-calendar-season-menu-wrap">
                 <button
                   type="button"
-                  className="ghost"
+                  className="ghost event-calendar-season-trigger"
                   onClick={() => setSeasonMenuOpen((open) => !open)}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '0.75rem',
-                    padding: '0.55rem 0.75rem',
-                    borderRadius: '0.5rem',
-                    border: '1px solid var(--panel-input-border)',
-                    background: 'var(--panel-input-bg)',
-                    color: 'var(--text-strong)',
-                    fontSize: '1rem'
-                  }}
                 >
                   <span>{selectedSeasonName}</span>
                   <span aria-hidden="true">{seasonMenuOpen ? '▴' : '▾'}</span>
                 </button>
                 {seasonMenuOpen && (
-                  <div
-                    className="card"
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 0.35rem)',
-                      left: 0,
-                      right: 0,
-                      zIndex: 20,
-                      minWidth: 0,
-                      width: '100%',
-                      maxWidth: 'min(280px, 100vw - 3rem)',
-                      padding: '0.35rem',
-                      boxShadow: 'var(--panel-card-shadow)',
-                      background: 'var(--modal-surface)',
-                      border: '1px solid var(--modal-border)',
-                      backdropFilter: 'blur(10px)'
-                    }}
-                  >
+                  <div className="card event-calendar-season-menu">
                     <button
                       type="button"
-                      className="ghost"
+                      className="ghost event-calendar-season-option"
                       onClick={() => {
                         setSelectedSeason('');
                         setSeasonMenuOpen(false);
-                      }}
-                      style={{
-                        width: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '0.55rem 0.65rem',
-                        borderRadius: '0.5rem'
                       }}
                     >
                       <span>All seasons</span>
@@ -442,53 +401,29 @@ const EventCalendarPage = () => {
                       .map((season) => (
                         <div
                           key={season.id}
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
+                          className="event-calendar-season-row"
                         >
                           <button
                             type="button"
-                            className="ghost"
+                            className="ghost event-calendar-season-option event-calendar-season-option-grow"
                             onClick={() => {
                               setSelectedSeason(String(season.id));
                               setSeasonMenuOpen(false);
                             }}
-                            style={{
-                              flex: 1,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              minWidth: 0,
-                              padding: '0.55rem 0.65rem',
-                              borderRadius: '0.5rem'
-                            }}
                           >
-                            <span
-                              style={{
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }}
-                            >
+                            <span className="event-calendar-season-option-label">
                               {season.name}
                             </span>
                           </button>
                           {canManage && (
                             <button
                               type="button"
-                              className="ghost danger"
+                              className="ghost danger event-calendar-season-delete"
                               aria-label={`Delete ${season.name}`}
                               disabled={deletingSeasonId === season.id}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 void handleDeleteSeason(season);
-                              }}
-                              style={{
-                                padding: '0.4rem 0.6rem',
-                                lineHeight: 1,
-                                fontSize: '1rem'
                               }}
                             >
                               {deletingSeasonId === season.id ? '…' : 'x'}
@@ -499,18 +434,10 @@ const EventCalendarPage = () => {
                     {canManage && (
                       <button
                         type="button"
-                        className="ghost"
+                        className="ghost event-calendar-season-option event-calendar-season-create"
                         onClick={() => {
                           setSeasonMenuOpen(false);
                           navigate('/seasons/new');
-                        }}
-                        style={{
-                          width: '100%',
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: '0.55rem 0.65rem',
-                          borderRadius: '0.5rem',
-                          fontWeight: 700
                         }}
                       >
                         Create season

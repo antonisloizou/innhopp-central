@@ -11,11 +11,12 @@ Create a single source of truth for operational data that keeps the team synchro
 - Logistics tracking for transports, vehicles, accommodations, meals, and ad-hoc logistics items.
 - Registration backbone for participant-event lifecycle tracking, payment obligations, and activity history.
 - Event-level commercial registration settings including public signup toggles, deadlines, pricing, currency, and confirmation thresholds.
+- Public event registration pages by slug that create participant-linked registrations and default payment placeholders.
 - Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
 - RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.
 
 ## Not yet implemented
-- Public registration pages, automated notifications, and campaign email sending.
+- Automated notifications and campaign email sending.
 - Payment provider integrations, waivers, certifications, and health declarations.
 - Check-in flows or public driver route pages.
 - Analytics dashboards beyond raw data access.
@@ -45,7 +46,8 @@ RBAC ensures each user only sees the modules and actions needed for their duties
 - Register airfields, attach them to events, and manage manifests with capacity, staff slots, and participant assignments.
 - Maintain a participant roster (roles, experience, contacts), add people to events/manifests, and track crew roles such as Jump Master/Leader, Ground Crew, Driver, and Packer.
 - Create event registrations for participants, record deposit/balance payment entries, track registration status, and append internal activity notes.
-- Configure event registration settings such as public slug, opening/closing windows, deposit and balance deadlines, pricing, and minimum deposit thresholds.
+- Configure event registration settings such as public slug, opening windows, balance deadlines, pricing, and minimum registration thresholds.
+- Share public `/register/:slug` links, accept self-serve signups, auto-create or match participant profiles by email, and generate deposit/balance payment placeholders from the event settings.
 - Coordinate transports, vehicles, accommodations, meals, and other logistics items per operation.
 - Authenticate via OIDC (authorization code flow), persist sessions in secure cookies, and enforce role-based permissions seeded on startup (Admin, Staff, Jump Master, Jump Leader, Ground Crew, Driver, Packer, Participant). Set `DEV_ALLOW_ALL=true` to bypass auth locally.
 - Use the frontend pages for login, events, manifests, participants, logistics, seasons, innhopp details, and airfield details (see `frontend/src/pages/` and `frontend/src/components/Layout.tsx` for the routes).
@@ -115,4 +117,4 @@ Frontend environment variables:
 
 ## API and UI references
 - Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, registrations, crew assignments, logistics transports, and auth are documented in `backend/README.md`.
-- Frontend routes include `/login`, `/events`, `/events/:eventId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.
+- Frontend routes include `/login`, `/register/:slug`, `/events`, `/events/:eventId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.

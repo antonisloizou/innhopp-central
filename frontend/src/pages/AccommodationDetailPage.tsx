@@ -110,9 +110,9 @@ const AccommodationDetailPage = () => {
   return (
     <section className="stack" {...editGuardProps}>
       <header className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div className="accommodation-detail-header-row">
           <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-            <h2 style={{ margin: 0 }}>Accommodation</h2>
+            <h2 className="accommodation-detail-title">Accommodation</h2>
           </DetailPageLockTitle>
           <span className={`badge ${form.booked && !missingCoordinates ? 'success' : 'danger'}`}>
             {form.booked && !missingCoordinates ? '✓' : 'NOT BOOKED'}
@@ -261,7 +261,7 @@ const AccommodationDetailPage = () => {
               }}
             />
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <input
               type="text"

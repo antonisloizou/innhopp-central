@@ -449,7 +449,7 @@ const ManifestDetailPage = () => {
               onChange={(e) => setForm((prev) => ({ ...prev, staff_slots: e.target.value }))}
             />
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <input
               type="text"
@@ -472,7 +472,7 @@ const ManifestDetailPage = () => {
           <div>
             <h3>Participants</h3>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="manifest-detail-badge-row">
             <span className="badge neutral">{nonStaffParticipants.length} total</span>
             {participantsFull && <span className="badge danger">FULL</span>}
           </div>
@@ -480,12 +480,12 @@ const ManifestDetailPage = () => {
         {nonStaffParticipants.length === 0 ? (
           <p className="muted">No participants assigned to this load.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list manifest-detail-scroll-list">
             {nonStaffParticipants.map((id) => {
               const profile = participants.find((p) => p.id === id);
               return (
                 <li key={id}>
-                  <Link to={`/participants/${id}`} className="card-link" style={{ flex: 1 }}>
+                  <Link to={`/participants/${id}`} className="card-link manifest-detail-card-link">
                     <strong>{participantLabel(id)}</strong>
                     <div className="muted">{profile?.email || 'No email on file'}</div>
                     <div className="muted">Experience: {profile?.experience_level || 'Not provided'}</div>
@@ -500,7 +500,7 @@ const ManifestDetailPage = () => {
         )}
         {!participantsFull && (
           <>
-            <div className="form-grid" style={{ marginTop: '1rem' }}>
+            <div className="form-grid manifest-detail-top-gap">
               <label className="form-field">
                 <span>Select participant</span>
                 <select value={selectedParticipantId} onChange={(e) => setSelectedParticipantId(e.target.value)}>
@@ -519,7 +519,7 @@ const ManifestDetailPage = () => {
               </div>
             </div>
             {!showParticipantForm && (
-              <div className="form-actions" style={{ marginTop: '1rem' }}>
+              <div className="form-actions manifest-detail-top-gap">
                 <button type="button" className="ghost" onClick={() => setShowParticipantForm(true)}>
                   Create new participant
                 </button>
@@ -528,7 +528,7 @@ const ManifestDetailPage = () => {
           </>
         )}
         {!participantsFull && showParticipantForm && (
-          <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateParticipant}>
+          <form className="form-grid manifest-detail-top-gap" onSubmit={handleCreateParticipant}>
             <label className="form-field">
               <span>Full name</span>
               <input
@@ -574,14 +574,14 @@ const ManifestDetailPage = () => {
                 placeholder="Optional"
               />
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field form-field-full-span">
               <span>Roles</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="multi-select-badges">
                 {roleOptions.map((role) => {
                   const checked = participantForm.roles?.includes(role);
                   const disabled = role === 'Staff';
                   return (
-                    <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <label key={role} className="badge neutral" data-option-display="badge">
                       <input
                         type="checkbox"
                         checked={checked}
@@ -604,7 +604,7 @@ const ManifestDetailPage = () => {
                   );
                 })}
               </div>
-              <p className="muted" style={{ margin: 0 }}>Staff cannot be assigned here.</p>
+              <p className="muted manifest-detail-inline-note">Staff cannot be assigned here.</p>
             </div>
             <div className="form-actions">
               <button type="submit" className="primary" disabled={addingParticipant}>
@@ -630,7 +630,7 @@ const ManifestDetailPage = () => {
           <div>
             <h3>Staff</h3>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div className="manifest-detail-badge-row">
             <span className="badge neutral">{staffParticipants.length} staff</span>
             {staffIsFull && <span className="badge danger">FULL</span>}
           </div>
@@ -638,12 +638,12 @@ const ManifestDetailPage = () => {
         {staffParticipants.length === 0 ? (
           <p className="muted">No staff assigned to this load.</p>
         ) : (
-          <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+          <ul className="status-list manifest-detail-scroll-list">
             {staffParticipants.map((id) => {
               const profile = participants.find((p) => p.id === id);
               return (
                 <li key={id}>
-                  <Link to={`/participants/${id}`} className="card-link" style={{ flex: 1 }}>
+                  <Link to={`/participants/${id}`} className="card-link manifest-detail-card-link">
                     <strong>{participantLabel(id)}</strong>
                     <div className="muted">{profile?.email || 'No email on file'}</div>
                     <div className="muted">Experience: {profile?.experience_level || 'Not provided'}</div>
@@ -658,7 +658,7 @@ const ManifestDetailPage = () => {
         )}
         {!staffIsFull && (
           <>
-            <div className="form-grid" style={{ marginTop: '1rem' }}>
+            <div className="form-grid manifest-detail-top-gap">
               <label className="form-field">
                 <span>Select staff</span>
                 <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)}>
@@ -677,7 +677,7 @@ const ManifestDetailPage = () => {
               </div>
             </div>
             {!showStaffForm && (
-              <div className="form-actions" style={{ marginTop: '1rem' }}>
+              <div className="form-actions manifest-detail-top-gap">
                 <button type="button" className="ghost" onClick={() => setShowStaffForm(true)}>
                   Create new staff
                 </button>
@@ -686,7 +686,7 @@ const ManifestDetailPage = () => {
           </>
         )}
         {!staffIsFull && showStaffForm && (
-          <form className="form-grid" style={{ marginTop: '1rem' }} onSubmit={handleCreateStaffParticipant}>
+          <form className="form-grid manifest-detail-top-gap" onSubmit={handleCreateStaffParticipant}>
             <label className="form-field">
               <span>Full name</span>
               <input
@@ -732,14 +732,14 @@ const ManifestDetailPage = () => {
                 placeholder="Optional"
               />
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field form-field-full-span">
               <span>Roles</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="multi-select-badges">
                 {roleOptions.map((role) => {
                   const checked = staffForm.roles?.includes(role);
                   const locked = role === 'Participant' || role === 'Skydiver' || role === 'Staff';
                   return (
-                    <label key={role} className="badge neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <label key={role} className="badge neutral" data-option-display="badge">
                       <input
                         type="checkbox"
                         checked={checked}
@@ -762,7 +762,7 @@ const ManifestDetailPage = () => {
                   );
                 })}
               </div>
-              <p className="muted" style={{ margin: 0 }}>Staff include Participant, Staff, and Skydiver roles by default.</p>
+              <p className="muted manifest-detail-inline-note">Staff include Participant, Staff, and Skydiver roles by default.</p>
             </div>
             <div className="form-actions">
               <button type="submit" className="primary" disabled={addingStaff}>

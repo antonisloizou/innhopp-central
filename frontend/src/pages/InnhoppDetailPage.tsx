@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState, useCallback, useRef, DragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { ClipboardEvent as ReactClipboardEvent } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Event,
   Innhopp,
@@ -21,6 +21,7 @@ import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '
 import { formatMetersWithFeet, metersToFeet } from '../utils/units';
 import {
   formatEventLocalPickerDateTime,
+  toEventLocalInput,
   fromEventLocalInput,
   fromEventLocalPickerDate,
   parseEventLocal,
@@ -139,6 +140,13 @@ const toLandingAreaPayload = (area: LandingAreaForm): LandingArea => ({
   obstacles: area.obstacles.trim()
 });
 
+const formatLandOwnersForPayload = (owners: LandOwnerForm[]): LandOwner[] =>
+  compactLandOwners(owners).map((owner) => ({
+    name: owner.name.trim(),
+    telephone: owner.telephone.trim(),
+    email: owner.email.trim()
+  }));
+
 type InnhoppFormState = Omit<InnhoppInput, 'land_owners' | 'primary_landing_area' | 'secondary_landing_area'> & {
   land_owners: LandOwnerForm[];
   primary_landing_area: LandingAreaForm;
@@ -198,7 +206,9 @@ const InnhoppDetailPage = () => {
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
   const [imagesDirty, setImagesDirty] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -472,49 +482,40 @@ const InnhoppDetailPage = () => {
     };
   }, []);
 
-  const buildPayload = (
-    override?: Partial<InnhoppFormState>,
-    options?: { includeImages?: boolean }
-  ): UpdateInnhoppPayload => {
+  const buildPayload = (override?: Partial<InnhoppFormState>): UpdateInnhoppPayload => {
     const state = { ...form, ...override };
-    const owners = compactLandOwners(state.land_owners || []);
-    const payload: UpdateInnhoppPayload = {
+    return {
       sequence: state.sequence,
       name: state.name.trim(),
-      coordinates: state.coordinates?.trim(),
-      scheduled_at: state.scheduled_at?.trim() || undefined,
+      coordinates: state.coordinates?.trim() || '',
+      scheduled_at: state.scheduled_at ? toEventLocalInput(state.scheduled_at) : '',
       notes: state.notes?.trim() || '',
       elevation: state.elevation,
       takeoff_airfield_id: state.takeoff_airfield_id,
-      reason_for_choice: state.reason_for_choice?.trim(),
-      adjust_altimeter_aad: state.adjust_altimeter_aad?.trim(),
-      notam: state.notam?.trim(),
+      reason_for_choice: state.reason_for_choice?.trim() || '',
+      adjust_altimeter_aad: state.adjust_altimeter_aad?.trim() || '',
+      notam: state.notam?.trim() || '',
       distance_by_air: state.distance_by_air,
       distance_by_road: state.distance_by_road,
       primary_landing_area: toLandingAreaPayload(state.primary_landing_area),
       secondary_landing_area: toLandingAreaPayload(state.secondary_landing_area),
-      risk_assessment: state.risk_assessment?.trim(),
-      safety_precautions: state.safety_precautions?.trim(),
-      jumprun: state.jumprun?.trim(),
-      hospital: state.hospital?.trim(),
+      risk_assessment: state.risk_assessment?.trim() || '',
+      safety_precautions: state.safety_precautions?.trim() || '',
+      jumprun: state.jumprun?.trim() || '',
+      hospital: state.hospital?.trim() || '',
       rescue_boat: state.rescue_boat ?? undefined,
-      minimum_requirements: state.minimum_requirements?.trim(),
-      land_owners: owners.map((owner) => ({
-        name: owner.name.trim(),
-        telephone: owner.telephone.trim(),
-        email: owner.email.trim()
-      })),
+      minimum_requirements: state.minimum_requirements?.trim() || '',
+      land_owners: formatLandOwnersForPayload(state.land_owners || []),
       land_owner_permission: state.land_owner_permission ?? undefined
     };
-    if (options?.includeImages) {
-      payload.image_files = (state.image_files || []).map((img) => ({
-        name: img.name?.trim() || undefined,
-        mime_type: img.mime_type?.trim() || undefined,
-        data: img.data
-      }));
-    }
-    return payload;
   };
+
+  const buildImagePayload = (images: InnhoppImage[]): InnhoppImage[] =>
+    images.map((img) => ({
+      name: img.name?.trim() || undefined,
+      mime_type: img.mime_type?.trim() || undefined,
+      data: img.data
+    }));
 
   const handleLandingAreaChange = (
     targetArea: 'primary' | 'secondary',
@@ -671,8 +672,10 @@ const InnhoppDetailPage = () => {
     setMessage(null);
     setSaved(false);
     try {
-      const includeImages = isCreateMode || imagesDirty;
-      const payload = buildPayload(undefined, { includeImages });
+      const payload = buildPayload();
+      if (isCreateMode || imagesDirty) {
+        payload.image_files = buildImagePayload(form.image_files || []);
+      }
       if (isCreateMode || !innhopp) {
         const created = await createInnhopp(Number(eventId), payload);
         setInnhopp(created);
@@ -683,7 +686,7 @@ const InnhoppDetailPage = () => {
         setInnhopp(updated);
         setMessage('Innhopp updated');
       }
-      if (includeImages) {
+      if (isCreateMode || imagesDirty) {
         setImagesDirty(false);
       }
       setSaved(true);
@@ -706,7 +709,8 @@ const InnhoppDetailPage = () => {
     setMessage(null);
     setSaved(false);
     try {
-      const payload = buildPayload({ image_files: nextImages }, { includeImages: true });
+      const payload = buildPayload();
+      payload.image_files = buildImagePayload(nextImages);
       const updated = await updateInnhopp(innhopp.id, payload);
       setInnhopp(updated);
       setForm((prev) => ({ ...prev, image_files: updated.image_files || nextImages }));
@@ -755,7 +759,7 @@ const InnhoppDetailPage = () => {
       if (!innhopp) {
         setMessage('Airfield created and assigned as takeoff');
       } else {
-        const payload = buildPayload({ takeoff_airfield_id: created.id }, { includeImages: false });
+        const payload = buildPayload({ takeoff_airfield_id: created.id });
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
         setForm((prev) => ({ ...prev, takeoff_airfield_id: updated.takeoff_airfield_id || created.id }));
@@ -773,6 +777,30 @@ const InnhoppDetailPage = () => {
       setSaved(false);
     }
   }, [currentSignature, lastSavedSignature, saved]);
+
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const handlePointer = (event: globalThis.MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!actionMenuRef.current || !target) return;
+      if (!actionMenuRef.current.contains(target)) {
+        setActionMenuOpen(false);
+      }
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('touchstart', handlePointer);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('touchstart', handlePointer);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [actionMenuOpen]);
 
   useEffect(() => {
     const onWindowPaste = (e: ClipboardEvent) => {
@@ -798,59 +826,86 @@ const InnhoppDetailPage = () => {
     <section {...editGuardProps}>
       <header className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="innhopp-detail-header-row">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 style={{ margin: 0 }}>
+              <h2 className="innhopp-detail-title">
                 {eventData.name} — {isCreateMode ? 'New innhopp' : `#${innhopp?.sequence} ${innhopp?.name}`}
               </h2>
             </DetailPageLockTitle>
             {!isCreateMode && (
-              <span
-                className={`badge ${ready ? 'success' : 'danger'}`}
-                style={{ minWidth: '2.4ch', textAlign: 'center', display: 'inline-block' }}
-              >
+              <span className={`badge ${ready ? 'success' : 'danger'} innhopp-detail-ready-badge`}>
                 {ready ? 'OP READY' : '!'}
               </span>
             )}
           </div>
         </div>
-        <div className="card-actions">
-          {!isCreateMode && (
-            <button
-              className="ghost"
-              type="button"
-              onClick={(event) => {
-                if (locked) {
-                  showLockedNoticeAtEvent(event);
-                  return;
-                }
-                navigate(`/events/${eventId}/innhopps/new`, {
-                  state: { copyInnhopp: innhopp }
-                });
-              }}
-            >
-              Make a copy
-            </button>
-          )}
-          {!isCreateMode && (
-            <button
-              className="ghost danger"
-              type="button"
-              onClick={(event) => {
-                if (locked) {
-                  showLockedNoticeAtEvent(event);
-                  return;
-                }
-                handleDelete();
-              }}
-              disabled={saving || deleting}
-            >
-              {deleting ? 'Deleting…' : 'Delete innhopp'}
-            </button>
-          )}
-          <button className="ghost" type="button" onClick={() => navigate(-1)}>
-            Back
+        <div className="event-schedule-actions" ref={actionMenuRef}>
+          <button
+            className="ghost event-schedule-gear"
+            type="button"
+            aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
+            aria-expanded={actionMenuOpen}
+            aria-controls="innhopp-detail-actions-menu"
+            onClick={() => setActionMenuOpen((open) => !open)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
+              />
+            </svg>
           </button>
+          {actionMenuOpen && (
+            <div className="event-schedule-menu" id="innhopp-detail-actions-menu" role="menu">
+              {!isCreateMode && (
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    setActionMenuOpen(false);
+                    if (locked) {
+                      showLockedNoticeAtEvent(event);
+                      return;
+                    }
+                    navigate(`/events/${eventId}/innhopps/new`, {
+                      state: { copyInnhopp: innhopp }
+                    });
+                  }}
+                >
+                  Make a copy
+                </button>
+              )}
+              {!isCreateMode && (
+                <button
+                  className="event-schedule-menu-item danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={(event) => {
+                    setActionMenuOpen(false);
+                    if (locked) {
+                      showLockedNoticeAtEvent(event);
+                      return;
+                    }
+                    handleDelete();
+                  }}
+                  disabled={saving || deleting}
+                >
+                  {deleting ? 'Deleting…' : 'Delete innhopp'}
+                </button>
+              )}
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenuOpen(false);
+                  navigate(-1);
+                }}
+              >
+                Back
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -858,17 +913,10 @@ const InnhoppDetailPage = () => {
         <article className="card">
           <div className="form-grid">
             <div
-              className="form-grid"
-              style={{
-                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                gridColumn: '1 / -1',
-                gap: '1rem',
-                alignItems: 'end'
-              }}
+              className="form-grid innhopp-detail-sequence-grid form-field-full-span"
             >
               <label
-                className={`form-field ${missingRequired.sequence ? 'field-missing' : ''}`}
-                style={{ maxWidth: '140px' }}
+                className={`form-field innhopp-detail-sequence-field ${missingRequired.sequence ? 'field-missing' : ''}`}
               >
                 <span>Sequence</span>
                 <input
@@ -877,7 +925,7 @@ const InnhoppDetailPage = () => {
                   value={form.sequence}
                   onFocus={(e) => e.target.select()}
                   onChange={(e) => setForm((prev) => ({ ...prev, sequence: Number(e.target.value) }))}
-                  style={{ minWidth: 0 }}
+                  className="innhopp-detail-min-width-reset"
                 />
               </label>
               <label className={`form-field ${missingRequired.name ? 'field-missing' : ''}`}>
@@ -900,49 +948,30 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid innhopp-location-grid"
-              style={{
-                gridTemplateColumns: form.coordinates?.trim() ? 'repeat(2,minmax(0,1fr))' : '1fr',
-                gridColumn: '1 / -1',
-                alignItems: 'start',
-                gap: '1rem'
-              }}
+              className={`form-grid innhopp-location-grid form-field-full-span${
+                form.coordinates?.trim() ? ' innhopp-location-grid--with-preview' : ''
+              }`}
             >
               <div
-                className="form-grid innhopp-location-fields"
-                style={{
-                  gridTemplateColumns: '1fr',
-                  rowGap: '0.9rem',
-                  gridColumn: form.coordinates?.trim() ? '1 / span 1' : '1 / -1'
-                }}
+                className={`form-grid innhopp-location-fields${
+                  form.coordinates?.trim() ? ' innhopp-location-fields--with-preview' : ''
+                }`}
               >
                 <label className={`form-field ${missingRequired.coordinates ? 'field-missing' : ''}`}>
                   <span>Coordinates (DMS)</span>
-                  <div
-                    className="input-with-button"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%', maxWidth: '100%', flexWrap: 'wrap' }}
-                  >
+                  <div className="input-with-button innhopp-detail-input-with-button">
                     <input
                       type="text"
                       value={form.coordinates || ''}
                       onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
                       pattern={`^[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[NS]\\s[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[EW]$`}
                       title={`Use DMS format like 11°14'30.0\"N 73°42'59.7\"W`}
-                      style={{ width: '100%', minWidth: 0, maxWidth: '24ch', flex: '1 1 24ch' }}
+                      className="innhopp-detail-compact-input"
                     />
                     {form.coordinates?.trim() ? (
                       <button
                         type="button"
-                        className="ghost"
-                        style={{
-                          minWidth: 0,
-                          maxWidth: '100%',
-                          textAlign: 'left',
-                          justifyContent: 'flex-start',
-                          whiteSpace: 'normal',
-                          paddingLeft: 0,
-                          paddingRight: 0
-                        }}
+                        className="ghost innhopp-detail-map-link"
                         onClick={() => {
                           const coords = form.coordinates?.trim();
                           if (!coords) return;
@@ -958,17 +987,16 @@ const InnhoppDetailPage = () => {
                   </div>
                 </label>
                 <div
-                  className="form-grid innhopp-metric-grid"
-                  style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
+                  className="form-grid innhopp-metric-grid innhopp-detail-auto-grid"
                 >
                 <label className={`form-field ${missingRequired.elevation ? 'field-missing' : ''}`}>
                   <span>Elevation (m)</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <div className="innhopp-detail-input-value-row">
                     <input
                       type="number"
                       min={0}
                       value={form.elevation ?? ''}
-                      style={{ width: '100%', minWidth: 0, maxWidth: '24ch', flex: '1 1 24ch' }}
+                      className="innhopp-detail-compact-input"
                       onFocus={(e) => {
                         const target = e.target as HTMLInputElement;
                         requestAnimationFrame(() => target.select());
@@ -979,7 +1007,7 @@ const InnhoppDetailPage = () => {
                       }}
                       onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
                     />
-                    <span className="muted" style={{ whiteSpace: 'normal', minWidth: 0, textAlign: 'left' }}>
+                    <span className="muted innhopp-detail-value-hint">
                       {form.elevation !== undefined && form.elevation !== null && !Number.isNaN(form.elevation)
                         ? `${metersToFeet(form.elevation)} ft`
                         : '— ft'}
@@ -988,12 +1016,11 @@ const InnhoppDetailPage = () => {
                 </label>
                 </div>
                 <div
-                  className="form-grid innhopp-metric-grid"
-                  style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: '0.75rem' }}
+                  className="form-grid innhopp-metric-grid innhopp-detail-auto-grid"
                 >
                   <label className={`form-field ${missingRequired.scheduled_at ? 'field-missing' : ''}`}>
                     <span>Scheduled at</span>
-                    <div style={{ width: '100%', maxWidth: '24ch' }}>
+                    <div className="innhopp-detail-compact-input-wrap">
                       <Flatpickr
                         value={toEventLocalPickerDate(form.scheduled_at || undefined)}
                         options={{
@@ -1005,7 +1032,7 @@ const InnhoppDetailPage = () => {
                           dateFormat: 'Y-m-d H:i',
                           formatDate: (date) => formatEventLocalPickerDateTime(date)
                         }}
-                        style={{ width: '100%' }}
+                        className="innhopp-detail-full-width-input"
                         onChange={(dates) => {
                           const picked = dates[0];
                           setForm((prev) => ({
@@ -1020,38 +1047,16 @@ const InnhoppDetailPage = () => {
                 </div>
               </div>
               {form.coordinates?.trim() ? (
-                <div
-                  className="form-field innhopp-location-preview"
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.4rem',
-                    gridRow: '1 / span 3',
-                    gridColumn: '2',
-                    alignSelf: 'stretch'
-                  }}
-                >
-                  <span className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                <div className="form-field innhopp-location-preview innhopp-location-preview--with-map">
+                  <span className="muted innhopp-detail-section-label">
                     Location preview
                   </span>
-                  <div
-                    style={{
-                      height: '100%',
-                      minHeight: '220px',
-                      borderRadius: '10px',
-                      overflow: 'hidden',
-                      border: '1px solid #d7dfe7'
-                    }}
-                  >
+                  <div className="innhopp-detail-map-frame">
                     <iframe
                       title="Innhopp location preview"
                       src={`https://www.google.com/maps?q=${encodeURIComponent(form.coordinates.trim())}&t=k&z=15&output=embed`}
                       loading="lazy"
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        border: 0
-                      }}
+                      className="innhopp-detail-map-embed"
                       allowFullScreen
                       referrerPolicy="no-referrer-when-downgrade"
                     />
@@ -1060,7 +1065,7 @@ const InnhoppDetailPage = () => {
               ) : null}
             </div>
           </div>
-        <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+        <div className="form-actions innhopp-detail-save-actions">
           <button type="submit" className={saveButtonClass} disabled={saving || saved}>
             {saveButtonLabel}
           </button>
@@ -1068,20 +1073,11 @@ const InnhoppDetailPage = () => {
       </article>
 
         <article className="card">
-          <div className="form-field" style={{ gridColumn: '1 / -1', marginBottom: '0.5rem' }}>
+          <div className="form-field form-field-full-span innhopp-detail-gallery-title">
             <span>Image gallery</span>
           </div>
           <div
-            className="form-grid"
-            style={{
-              gridTemplateColumns: '1fr',
-              gap: '0.75rem',
-              border: dragOver ? '2px dashed #2b5fab' : undefined,
-              borderRadius: dragOver ? '12px' : undefined,
-              padding: dragOver ? '0.5rem' : undefined,
-              transition: 'border 0.15s ease, background 0.15s ease',
-              background: dragOver ? '#f1f6ff' : undefined
-            }}
+            className={`form-grid innhopp-detail-gallery-grid${dragOver ? ' innhopp-detail-gallery-grid--drag-over' : ''}`}
             tabIndex={0}
             id="innhopp-gallery-card"
             onDragOver={handleDragOver}
@@ -1090,26 +1086,15 @@ const InnhoppDetailPage = () => {
             onPaste={handlePaste}
           >
             {galleryImages.length ? (
-              <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.6rem',
-                    alignItems: 'center',
-                    gridColumn: '1 / -1',
-                    width: '100%',
-                    maxWidth: '100%'
-                  }}
-                >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', justifyContent: 'center' }}>
+              <div className="innhopp-detail-gallery-center">
+                <div className="innhopp-detail-gallery-stack">
+                <div className="innhopp-detail-gallery-carousel">
                   {galleryImages.length > 4 ? (
                     <button
                       type="button"
-                      className="ghost"
+                      className="ghost innhopp-detail-gallery-arrow"
                       aria-label="Previous image"
                       disabled={galleryImages.length <= 1}
-                      style={{ fontSize: '2rem', padding: '0.4rem 0.6rem' }}
                       onClick={() =>
                         setActiveImageIndex((prev) =>
                           galleryImages.length ? (prev - 1 + galleryImages.length) % galleryImages.length : 0
@@ -1119,18 +1104,10 @@ const InnhoppDetailPage = () => {
                       ‹
                     </button>
                   ) : (
-                    <div style={{ width: '2.5rem' }} />
+                    <div className="innhopp-detail-gallery-arrow-spacer" />
                   )}
                   <div
-                    style={{
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      justifyContent: 'center',
-                      gap: '0.5rem',
-                      margin: '0 auto',
-                      width: '100%',
-                      maxWidth: '900px'
-                    }}
+                    className="innhopp-detail-gallery-strip"
                   >
                     {galleryImages
                       .slice(activeImageIndex, activeImageIndex + 4)
@@ -1145,21 +1122,7 @@ const InnhoppDetailPage = () => {
                         return (
                           <figure
                             key={`${img.key}-${idx}`}
-                            style={{
-                              margin: 0,
-                              border: '1px solid #d7dfe7',
-                              borderRadius: '10px',
-                              overflow: 'hidden',
-                              background: '#fff',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              position: 'relative',
-                              cursor: 'pointer',
-                              width: 'min(180px, 100%)',
-                              height: '180px',
-                              flex: '1 1 160px',
-                              maxWidth: '180px'
-                            }}
+                            className="innhopp-detail-gallery-item"
                             onClick={() => setLightboxIndex(absoluteIndex)}
                           >
                             <button
@@ -1169,50 +1132,15 @@ const InnhoppDetailPage = () => {
                                 e.stopPropagation();
                                 handleRemoveImage(absoluteIndex);
                               }}
-                              style={{
-                                position: 'absolute',
-                                top: '8px',
-                                left: '8px',
-                                background: 'rgba(0,0,0,0.6)',
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: '50%',
-                                width: '28px',
-                                height: '28px',
-                                padding: 0,
-                                lineHeight: 1,
-                                fontSize: '16px',
-                                minWidth: '28px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                zIndex: 2
-                              }}
+                              className="innhopp-detail-gallery-remove"
                             >
                               ×
                             </button>
-                            <div
-                              style={{
-                                position: 'relative',
-                                width: '100%',
-                                height: '100%',
-                                background: '#f9fbfd',
-                                overflow: 'hidden'
-                              }}
-                            >
+                            <div className="innhopp-detail-gallery-image-frame">
                               <img
                                 src={img.src}
                                 alt={`Image ${absoluteIndex + 1}`}
-                                style={{
-                                  position: 'absolute',
-                                  inset: 0,
-                                  width: '100%',
-                                  height: '100%',
-                                  objectFit: 'cover',
-                                  objectPosition: 'center',
-                                  display: 'block'
-                                }}
+                                className="innhopp-detail-gallery-image"
                               />
                             </div>
                           </figure>
@@ -1222,10 +1150,9 @@ const InnhoppDetailPage = () => {
                   {galleryImages.length > 4 ? (
                     <button
                       type="button"
-                      className="ghost"
+                      className="ghost innhopp-detail-gallery-arrow"
                       aria-label="Next image"
                       disabled={galleryImages.length <= 1}
-                      style={{ fontSize: '2rem', padding: '0.4rem 0.6rem' }}
                       onClick={() =>
                         setActiveImageIndex((prev) =>
                           galleryImages.length ? (prev + 1) % galleryImages.length : 0
@@ -1235,29 +1162,20 @@ const InnhoppDetailPage = () => {
                       ›
                     </button>
                   ) : (
-                    <div style={{ width: '2.5rem' }} />
+                    <div className="innhopp-detail-gallery-arrow-spacer" />
                   )}
                 </div>
                 {galleryImages.length > 4 ? (
-                  <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div className="innhopp-detail-gallery-dots">
                     {galleryImages.map((img, idx) => (
                       <button
                         key={img.key}
                         type="button"
                         aria-label={`Go to image ${idx + 1}`}
                         onClick={() => setActiveImageIndex(idx)}
-                        style={{
-                          width: '10px',
-                          height: '10px',
-                          borderRadius: '50%',
-                          border: 'none',
-                          background: idx === activeImageIndex ? '#2b5fab' : '#d3dbe6',
-                          cursor: 'pointer',
-                          padding: 0,
-                          minWidth: 'auto',
-                          lineHeight: 1,
-                          display: 'inline-block'
-                        }}
+                        className={`innhopp-detail-gallery-dot${
+                          idx === activeImageIndex ? ' innhopp-detail-gallery-dot--active' : ''
+                        }`}
                       />
                     ))}
                   </div>
@@ -1265,48 +1183,39 @@ const InnhoppDetailPage = () => {
                 </div>
               </div>
             ) : (
-              <p className="muted" style={{ margin: 0 }}>
+              <p className="muted innhopp-detail-empty-gallery">
                 No images uploaded yet.
               </p>
             )}
             <div
-              className="form-actions upload-pane"
-              style={{
-                gridColumn: '1 / -1',
-                display: 'flex',
-                gap: '0.75rem',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                padding: '0.75rem 0.9rem',
-                background: dragOver ? 'var(--upload-pane-hover-bg)' : undefined,
-                borderColor: dragOver ? 'var(--upload-pane-hover-border)' : undefined
-              }}
+              className={`form-actions upload-pane form-field-full-span innhopp-detail-upload-pane${
+                dragOver ? ' innhopp-detail-upload-pane--drag-over' : ''
+              }`}
             >
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
-                style={{ display: 'none' }}
+                className="innhopp-detail-hidden-input"
                 onChange={(e) => {
                   handleFilesSelected(e.target.files);
                   e.target.value = '';
                 }}
               />
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <div className="innhopp-detail-upload-copy">
                 <button
                   type="button"
-                  className="ghost browse-button"
+                  className="ghost browse-button innhopp-detail-browse-button"
                   onClick={() => fileInputRef.current?.click()}
-                  style={{ alignSelf: 'flex-start' }}
                 >
                   Browse your device
                 </button>
-                <span className="muted" style={{ fontSize: '0.95rem' }}>
+                <span className="muted innhopp-detail-upload-hint">
                   or drag & drop / paste images into this box
                 </span>
               </div>
-              <span className="muted" style={{ marginLeft: 'auto' }}>
+              <span className="muted innhopp-detail-upload-count">
                 {galleryImages.length} uploaded
               </span>
             </div>
@@ -1317,38 +1226,19 @@ const InnhoppDetailPage = () => {
                 <div
                   role="dialog"
                   aria-modal="true"
-                  style={{
-                    position: 'fixed',
-                    inset: 0,
-                    background: 'rgba(0,0,0,0.75)',
-                    display: 'grid',
-                    placeItems: 'center',
-                    zIndex: 1000,
-                    padding: '1rem'
-                  }}
+                  className="innhopp-detail-lightbox-backdrop"
                   onClick={() => setLightboxIndex(null)}
                 >
-                  <div
-                    style={{
-                      position: 'relative',
-                      maxWidth: '90vw',
-                      maxHeight: '90vh'
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  <div className="innhopp-detail-lightbox-panel" onClick={(e) => e.stopPropagation()}>
                     <img
                       src={galleryImages[lightboxIndex].src}
                       alt={galleryImages[lightboxIndex].name}
-                      style={{ maxWidth: '90vw', maxHeight: '80vh', display: 'block', borderRadius: '12px' }}
+                      className="innhopp-detail-lightbox-image"
                     />
                     <div
-                      style={{
-                        position: 'absolute',
-                        top: '50%',
-                        left: '-2.5rem',
-                        transform: 'translateY(-50%)',
-                        display: galleryImages.length > 1 ? 'flex' : 'none'
-                      }}
+                      className={`innhopp-detail-lightbox-nav innhopp-detail-lightbox-nav--prev${
+                        galleryImages.length > 1 ? '' : ' innhopp-detail-lightbox-nav--hidden'
+                      }`}
                     >
                       <button
                         type="button"
@@ -1364,13 +1254,9 @@ const InnhoppDetailPage = () => {
                       </button>
                     </div>
                     <div
-                      style={{
-                        position: 'absolute',
-                        top: '50%',
-                        right: '-2.5rem',
-                        transform: 'translateY(-50%)',
-                        display: galleryImages.length > 1 ? 'flex' : 'none'
-                      }}
+                      className={`innhopp-detail-lightbox-nav innhopp-detail-lightbox-nav--next${
+                        galleryImages.length > 1 ? '' : ' innhopp-detail-lightbox-nav--hidden'
+                      }`}
                     >
                       <button
                         type="button"
@@ -1387,8 +1273,7 @@ const InnhoppDetailPage = () => {
                     </div>
                     <button
                       type="button"
-                      className="ghost danger"
-                      style={{ position: 'absolute', top: '-2.75rem', right: 0 }}
+                      className="ghost danger innhopp-detail-lightbox-close"
                       onClick={(e) => {
                         e.stopPropagation();
                         setLightboxIndex(null);
@@ -1401,7 +1286,7 @@ const InnhoppDetailPage = () => {
                 document.body
               )}
           </div>
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <div className="form-actions innhopp-detail-save-actions">
             <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>
@@ -1442,15 +1327,7 @@ const InnhoppDetailPage = () => {
             </label>
             {showNewAirfieldForm && (
               <div
-                className="form-grid"
-                style={{
-                  gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))',
-                  gridColumn: '1 / -1',
-                  border: '1px dashed #c6d1dd',
-                  padding: '1rem',
-                  borderRadius: '10px',
-                  marginTop: '0.5rem'
-                }}
+                className="form-grid form-field-full-span innhopp-detail-airfield-create-grid"
               >
                 <label className="form-field">
                   <span>Name</span>
@@ -1495,7 +1372,7 @@ const InnhoppDetailPage = () => {
                         coordinates: e.target.value
                       }))
                     }
-                    style={{ minWidth: 0, width: '100%' }}
+                    className="innhopp-detail-full-width-input innhopp-detail-min-width-reset"
                     required
                   />
                 </label>
@@ -1513,7 +1390,7 @@ const InnhoppDetailPage = () => {
                     placeholder="Optional"
                   />
                 </label>
-                <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+                <div className="form-actions form-field-full-span">
                   <button type="button" className="ghost" onClick={handleCreateAirfield} disabled={saving}>
                     {saving ? 'Creating…' : 'Create & attach'}
                   </button>
@@ -1533,8 +1410,7 @@ const InnhoppDetailPage = () => {
             )}
             {elevationDifference !== null ? (
               <div
-                className="form-grid"
-                style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gridColumn: '1 / -1' }}
+                className="form-grid form-field-full-span innhopp-detail-auto-grid"
               >
                 <label className="form-field">
                   <span>Elevation difference</span>
@@ -1571,8 +1447,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid"
-              style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gridColumn: '1 / -1', alignItems: 'end' }}
+              className="form-grid form-field-full-span innhopp-detail-distance-grid"
             >
               <label className={`form-field ${missingRequired.distance_by_air ? 'field-missing' : ''}`}>
                 <span>Distance by air (km)</span>
@@ -1604,7 +1479,7 @@ const InnhoppDetailPage = () => {
                   }
                 />
               </label>
-              <div className="form-field" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <div className="form-field innhopp-detail-route-action">
                 <span>&nbsp;</span>
                 {form.coordinates?.trim() &&
                 airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim() ? (
@@ -1639,7 +1514,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
           </div>
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <div className="form-actions innhopp-detail-save-actions">
             <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>
@@ -1647,13 +1522,12 @@ const InnhoppDetailPage = () => {
         </article>
 
         <article className="card">
-          <div className="form-grid innhopp-landing-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <div className="form-grid innhopp-landing-grid innhopp-detail-auto-grid">
+            <div className="form-field form-field-full-span">
               <span>Primary landing area</span>
             </div>
             <label
-              className={`form-field ${missingRequired.primary_name ? 'field-missing' : ''}`}
-              style={{ gridColumn: '1 / -1' }}
+              className={`form-field form-field-full-span ${missingRequired.primary_name ? 'field-missing' : ''}`}
             >
               <span>Name</span>
               <input
@@ -1663,8 +1537,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid innhopp-landing-pair"
-              style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
+              className="form-grid innhopp-landing-pair form-field-full-span innhopp-detail-landing-pair"
             >
               <label className={`form-field ${missingRequired.primary_size ? 'field-missing' : ''}`}>
                 <span>Size and surface</span>
@@ -1685,7 +1558,7 @@ const InnhoppDetailPage = () => {
                 />
               </label>
             </div>
-            <label className={`form-field ${missingRequired.primary_description ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
+            <label className={`form-field form-field-full-span ${missingRequired.primary_description ? 'field-missing' : ''}`}>
               <span>Description</span>
               <textarea
                 data-autosize
@@ -1695,10 +1568,10 @@ const InnhoppDetailPage = () => {
                 placeholder="Surface, Obstacles, etc"
               />
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field form-field-full-span">
               <span>Secondary landing area</span>
             </div>
-            <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-field form-field-full-span">
               <span>Name</span>
               <input
                 type="text"
@@ -1707,8 +1580,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
             <div
-              className="form-grid innhopp-landing-pair"
-              style={{ gridTemplateColumns: 'minmax(200px, 320px) 1fr', gridColumn: '1 / -1', gap: '0.75rem' }}
+              className="form-grid innhopp-landing-pair form-field-full-span innhopp-detail-landing-pair"
             >
               <label className="form-field">
                 <span>Size and surface</span>
@@ -1729,7 +1601,7 @@ const InnhoppDetailPage = () => {
                 />
               </label>
             </div>
-            <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-field form-field-full-span">
               <span>Description</span>
               <textarea
                 data-autosize
@@ -1739,7 +1611,7 @@ const InnhoppDetailPage = () => {
                 placeholder="Surface, Obstacles, etc"
               />
             </label>
-            <label className={`form-field ${missingRequired.risk_assessment ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
+            <label className={`form-field form-field-full-span ${missingRequired.risk_assessment ? 'field-missing' : ''}`}>
               <span>Risk assessment</span>
               <textarea
                 data-autosize
@@ -1749,7 +1621,7 @@ const InnhoppDetailPage = () => {
                 placeholder="Key risks and mitigations"
               />
             </label>
-            <label className={`form-field ${missingRequired.safety_precautions ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
+            <label className={`form-field form-field-full-span ${missingRequired.safety_precautions ? 'field-missing' : ''}`}>
               <span>Safety precautions</span>
               <textarea
                 data-autosize
@@ -1759,7 +1631,7 @@ const InnhoppDetailPage = () => {
                 placeholder="Briefings and other measures"
               />
             </label>
-            <label className={`form-field ${missingRequired.minimum_requirements ? 'field-missing' : ''}`} style={{ gridColumn: '1 / -1' }}>
+            <label className={`form-field form-field-full-span ${missingRequired.minimum_requirements ? 'field-missing' : ''}`}>
               <span>Minimum requirements</span>
               <textarea
                 data-autosize
@@ -1770,7 +1642,7 @@ const InnhoppDetailPage = () => {
               />
             </label>
           </div>
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <div className="form-actions innhopp-detail-save-actions">
             <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>
@@ -1820,14 +1692,13 @@ const InnhoppDetailPage = () => {
                 <option value="no">Pending / No</option>
               </select>
             </label>
-            <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+            <div className="form-field form-field-full-span">
               <span>Land owners</span>
               {(form.land_owners || []).length === 0 && <p className="muted">No land owners added yet.</p>}
               {(form.land_owners || []).map((owner, index) => (
                 <div
                   key={index}
-                  className="form-grid"
-                  style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', marginBottom: '0.75rem' }}
+                  className="form-grid innhopp-detail-auto-grid innhopp-detail-owner-grid"
                 >
                   <label className="form-field">
                     <span>Name</span>
@@ -1853,7 +1724,7 @@ const InnhoppDetailPage = () => {
                       onChange={(e) => handleOwnerChange(index, 'email', e.target.value)}
                     />
                   </label>
-                  <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+                  <div className="form-actions form-field-full-span">
                     <button type="button" className="ghost danger" onClick={() => handleRemoveOwner(index)}>
                       Remove owner
                     </button>
@@ -1867,7 +1738,7 @@ const InnhoppDetailPage = () => {
               </div>
             </div>
           </div>
-          <div className="form-actions" style={{ marginTop: '0.75rem' }}>
+          <div className="form-actions innhopp-detail-save-actions">
             <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>

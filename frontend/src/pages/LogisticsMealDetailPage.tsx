@@ -123,15 +123,14 @@ const LogisticsMealDetailPage = () => {
     <section className="stack" {...editGuardProps}>
       <header className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="logistics-detail-title-row">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 style={{ margin: 0 }}>{meal.name}</h2>
+              <h2 className="logistics-detail-title">{meal.name}</h2>
             </DetailPageLockTitle>
             <span
-              className={`badge ${complete ? 'success' : 'danger'}`}
+              className={`badge ${complete ? 'success' : 'danger'} logistics-detail-status-badge`}
               aria-label={complete ? 'Complete' : 'Missing info'}
               title={complete ? 'Complete' : 'Missing info'}
-              style={{ minWidth: '2.4ch', textAlign: 'center' }}
             >
               {complete ? '✓' : '!'}
             </span>
@@ -227,7 +226,7 @@ const LogisticsMealDetailPage = () => {
               }}
             />
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
           </label>

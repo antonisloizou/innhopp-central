@@ -548,28 +548,19 @@ const LogisticsCreatePage = () => {
         </article>
 
         <article className="card">
-          <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <div className="form-field form-field-full-span">
             <span>Vehicles</span>
             {selectedVehicleIds.length > 0 && (
-              <ul className="status-list" style={{ marginTop: '0.5rem' }}>
+              <ul className="status-list logistics-detail-half-gap">
                 {selectedVehicleIds.map((id) => {
                   const v = existingVehicles.find((ev) => ev.id === id);
                   if (!v) return null;
                   return (
                     <li key={id}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.75rem',
-                          justifyContent: 'space-between',
-                          width: '100%'
-                        }}
-                      >
+                      <div className="logistics-detail-vehicle-row">
                         <Link
                           to={`/logistics/vehicles/${v.id}`}
-                          className="card-link"
-                          style={{ flex: 1, textDecoration: 'none' }}
+                          className="card-link logistics-detail-card-link-grow logistics-create-link-reset"
                         >
                           <strong>{v.name}</strong>
                           <div className="muted">
@@ -588,10 +579,10 @@ const LogisticsCreatePage = () => {
               </ul>
             )}
             {existingVehicles.length > 0 && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid logistics-detail-half-gap">
                 <label className="form-field">
                   <span>Add vehicle</span>
-                  <div className="form-actions" style={{ gap: '0.5rem', alignItems: 'center' }}>
+                  <div className="form-actions logistics-detail-inline-actions">
                     <select
                       value=""
                       onChange={(e) => {
@@ -614,16 +605,13 @@ const LogisticsCreatePage = () => {
                 </label>
               </div>
             )}
-            <div
-              className="form-actions"
-              style={{ marginTop: '0.5rem', justifyContent: 'flex-start', marginLeft: '-1.5rem' }}
-            >
+            <div className="form-actions logistics-detail-create-vehicle-row">
               <button type="button" className="ghost" onClick={handleAddVehicle}>
                 Create new vehicle
               </button>
             </div>
             {showVehicleForm && (
-              <div className="form-grid" style={{ marginTop: '0.5rem' }}>
+              <div className="form-grid logistics-detail-half-gap">
                 <label className="form-field">
                   <span>Vehicle name</span>
                   <input

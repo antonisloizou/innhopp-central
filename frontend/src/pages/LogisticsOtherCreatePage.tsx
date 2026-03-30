@@ -76,10 +76,9 @@ const LogisticsOtherCreatePage = () => {
         </div>
         <div className="card-actions">
           <button
-            className="ghost"
+            className="ghost logistics-list-back-link"
             type="button"
             onClick={() => navigate(-1)}
-            style={{ fontWeight: 700, fontSize: '1.05rem' }}
           >
             Back
           </button>
@@ -142,7 +141,7 @@ const LogisticsOtherCreatePage = () => {
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
             />
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <input
               type="text"

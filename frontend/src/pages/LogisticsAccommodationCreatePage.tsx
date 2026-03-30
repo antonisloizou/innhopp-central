@@ -188,7 +188,7 @@ const LogisticsAccommodationCreatePage = () => {
               <span>Mark as booked</span>
             </div>
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <input
               type="text"

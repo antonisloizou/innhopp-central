@@ -1,4 +1,4 @@
-import { ReactNode, SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, ReactNode, SyntheticEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 const EDITABLE_SELECTOR = 'input, textarea, select, [contenteditable="true"], .flatpickr-input';
@@ -143,11 +143,12 @@ export const useDetailPageLock = () => {
               className="detail-lock-notice"
               role="status"
               aria-live="polite"
-              style={{
-                top: `${noticePosition.top}px`,
-                left: `${noticePosition.left}px`,
-                transform: 'translate(-50%, -50%)'
-              }}
+              style={
+                {
+                  '--detail-lock-notice-top': `${noticePosition.top}px`,
+                  '--detail-lock-notice-left': `${noticePosition.left}px`
+                } as CSSProperties
+              }
             >
               Unlock the page before making edits.
             </div>,

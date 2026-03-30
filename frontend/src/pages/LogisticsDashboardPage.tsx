@@ -229,7 +229,7 @@ const LogisticsDashboardPage = () => {
           <h2>Transport</h2>
         </div>
         <div className="card-actions">
-          <Link className="ghost" to="/logistics" style={{ fontWeight: 700, fontSize: '1.05rem' }}>
+          <Link className="ghost logistics-list-back-link" to="/logistics">
             Back to logistics
           </Link>
          <Link className="primary button-link" to="/logistics/new">
@@ -251,7 +251,7 @@ const LogisticsDashboardPage = () => {
                   setSelectedVehicles([]);
                   setSelectedDates([]);
                 }}
-                style={{ width: '100%', minWidth: '180px' }}
+                className="logistics-dashboard-filter-select"
               >
                 <option value="">All seasons</option>
                 {[...seasons].sort((a, b) => b.name.localeCompare(a.name)).map((season) => (
@@ -270,7 +270,7 @@ const LogisticsDashboardPage = () => {
                   setSelectedVehicles([]);
                   setSelectedDates([]);
                 }}
-                style={{ width: '100%', minWidth: '180px' }}
+                className="logistics-dashboard-filter-select"
               >
                 <option value="">All events</option>
                 {filteredEvents.map((event) => (
@@ -297,7 +297,7 @@ const LogisticsDashboardPage = () => {
                     </button>
                   )}
                   {vehicleOptions.length === 0 ? (
-                    <div className="muted" style={{ padding: '0.4rem 0.45rem' }}>
+                    <div className="muted logistics-dashboard-empty-option">
                       No vehicles
                     </div>
                   ) : (
@@ -341,7 +341,7 @@ const LogisticsDashboardPage = () => {
                     </button>
                   )}
                   {dateOptions.length === 0 ? (
-                    <div className="muted" style={{ padding: '0.4rem 0.45rem' }}>
+                    <div className="muted logistics-dashboard-empty-option">
                       No scheduled dates
                     </div>
                   ) : (
@@ -394,7 +394,7 @@ const LogisticsDashboardPage = () => {
             <div>
               <h3>Transport routes</h3>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <div className="logistics-dashboard-badge-row">
               <span className="badge neutral">
                 {filteredTransports.length} {filteredTransports.length === 1 ? 'route' : 'routes'}
               </span>
@@ -410,14 +410,13 @@ const LogisticsDashboardPage = () => {
           ) : filteredTransports.length === 0 ? (
             <p className="muted">No transports match the selected filters.</p>
           ) : (
-            <ul className="status-list" style={{ maxHeight: '24rem', overflowY: 'auto' }}>
+            <ul className="status-list logistics-list-scroll">
               {filteredTransports.map((t) => (
                 <li key={t.id}>
                   <div
                     role="button"
                     tabIndex={0}
-                    className="card-link"
-                    style={{ flex: 1, cursor: 'pointer' }}
+                    className="card-link logistics-dashboard-preview-trigger"
                     onClick={() => setPreviewRoute(t)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {
@@ -426,7 +425,7 @@ const LogisticsDashboardPage = () => {
                       }
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <div className="logistics-dashboard-route-row">
                       <div>
                         <strong>
                           {t.pickup_location} → {t.destination}
@@ -454,8 +453,8 @@ const LogisticsDashboardPage = () => {
                           </span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexShrink: 0 }}>
-                        <span className="badge" style={{ backgroundColor: '#2b8a3e', color: '#fff' }}>
+                      <div className="logistics-dashboard-event-badges">
+                        <span className="badge logistics-list-event-badge">
                           {events.find((e) => e.id === t.event_id)?.name || `Event #${t.event_id ?? '—'}`}
                         </span>
                         <span className="badge neutral">
@@ -477,18 +476,7 @@ const LogisticsDashboardPage = () => {
             onClick={() => setPreviewRoute(null)}
             role="button"
             tabIndex={-1}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'var(--overlay-scrim)',
-              backdropFilter: 'blur(6px)',
-              zIndex: 9999,
-              pointerEvents: 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '2rem 1rem'
-            }}
+            className="logistics-dashboard-overlay"
             onKeyDown={(e) => {
               if (e.key === 'Escape') {
                 setPreviewRoute(null);
@@ -499,22 +487,11 @@ const LogisticsDashboardPage = () => {
             }}
           >
             <div
-              className="card overlay-panel-with-close"
+              className="card overlay-panel-with-close logistics-dashboard-overlay-panel"
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(`/logistics/${previewRoute.id}`);
                 setPreviewRoute(null);
-              }}
-              style={{
-                position: 'relative',
-                width: 'min(720px, 92vw)',
-                maxHeight: '85vh',
-                overflowY: 'auto',
-                boxShadow: '0 18px 48px rgba(0,0,0,0.4), 0 0 0 1px var(--modal-border)',
-                cursor: 'pointer',
-                backgroundColor: 'var(--modal-surface)',
-                border: '1px solid var(--modal-border)',
-                color: 'var(--text-strong)'
               }}
             >
               <button
@@ -528,41 +505,34 @@ const LogisticsDashboardPage = () => {
               >
                 ×
               </button>
-              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ margin: 0 }}>
+              <div className="card-header logistics-dashboard-overlay-header">
+                <h3 className="logistics-dashboard-overlay-title">
                   {previewRoute.pickup_location} → {previewRoute.destination}
                 </h3>
-                <span className="badge schedule-type-badge" style={{ background: '#2563eb' }}>
+                <span className="badge schedule-type-badge logistics-dashboard-type-badge">
                   Transport
                 </span>
               </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gap: '0.85rem',
-                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                  padding: '1rem'
-                }}
-              >
+              <div className="logistics-dashboard-overlay-grid">
                 <div>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>DURATION</div>
+                  <div className="muted logistics-dashboard-overlay-label">DURATION</div>
                   <div>{formatDuration(previewRoute.duration_minutes)}</div>
                 </div>
                 <div>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>SCHEDULED AT</div>
+                  <div className="muted logistics-dashboard-overlay-label">SCHEDULED AT</div>
                   <div>{formatScheduledAt(previewRoute.scheduled_at)}</div>
                 </div>
                 <div>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>PASSENGERS</div>
+                  <div className="muted logistics-dashboard-overlay-label">PASSENGERS</div>
                   <div>{previewRoute.passenger_count}</div>
                 </div>
                 <div>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>EVENT</div>
+                  <div className="muted logistics-dashboard-overlay-label">EVENT</div>
                   <div>{events.find((e) => e.id === previewRoute.event_id)?.name || `Event #${previewRoute.event_id ?? '—'}`}</div>
                 </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>VEHICLES</div>
-                  <div style={{ marginTop: '0.15rem' }}>
+                <div className="form-field-full-span">
+                  <div className="muted logistics-dashboard-overlay-label">VEHICLES</div>
+                  <div className="logistics-dashboard-overlay-subsection">
                     {!previewRoute.vehicles || previewRoute.vehicles.length === 0 ? (
                       <div className="muted">—</div>
                     ) : (
@@ -576,8 +546,8 @@ const LogisticsDashboardPage = () => {
                     )}
                   </div>
                 </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <div className="muted" style={{ fontWeight: 700, letterSpacing: '0.04em' }}>NOTES</div>
+                <div className="form-field-full-span">
+                  <div className="muted logistics-dashboard-overlay-label">NOTES</div>
                   <div>{previewRoute.notes || '—'}</div>
                 </div>
               </div>

@@ -128,15 +128,14 @@ const LogisticsOtherDetailPage = () => {
     <section className="stack" {...editGuardProps}>
       <header className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="logistics-detail-title-row">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 style={{ margin: 0 }}>Other logistics</h2>
+              <h2 className="logistics-detail-title">Other logistics</h2>
             </DetailPageLockTitle>
             <span
-              className={`badge ${complete ? 'success' : 'danger'}`}
+              className={`badge ${complete ? 'success' : 'danger'} logistics-detail-status-badge`}
               aria-label={complete ? 'Complete' : 'Missing info'}
               title={complete ? 'Complete' : 'Missing info'}
-              style={{ minWidth: '2.4ch', textAlign: 'center' }}
             >
               {complete ? '✓' : '!'}
             </span>
@@ -171,10 +170,9 @@ const LogisticsOtherDetailPage = () => {
             Delete
           </button>
           <button
-            className="ghost"
+            className="ghost logistics-list-back-link"
             type="button"
             onClick={() => navigate(-1)}
-            style={{ fontWeight: 700, fontSize: '1.05rem' }}
           >
             Back
           </button>
@@ -253,7 +251,7 @@ const LogisticsOtherDetailPage = () => {
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
             />
           </label>
-          <label className="form-field" style={{ gridColumn: '1 / -1' }}>
+          <label className="form-field form-field-full-span">
             <span>Notes</span>
             <input
               type="text"

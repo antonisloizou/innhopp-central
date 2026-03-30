@@ -181,7 +181,7 @@ const AirfieldDetailPage = () => {
           </label>
           <label className="form-field">
             <span>Elevation (m)</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div className="airfield-detail-elevation-row">
               <input
                 type="number"
                 min={0}
@@ -190,7 +190,7 @@ const AirfieldDetailPage = () => {
                 onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
                 required
               />
-              <span className="muted" style={{ whiteSpace: 'nowrap' }}>
+              <span className="muted airfield-detail-elevation-feet">
                 {elevationFeet !== null ? `${elevationFeet} ft` : '— ft'}
               </span>
             </div>
@@ -209,7 +209,7 @@ const AirfieldDetailPage = () => {
                 }
                 placeholder="Lat, Long"
                 required
-                style={{ minWidth: '22ch' }}
+                className="airfield-detail-coordinates-input"
               />
               <button
                 type="button"
