@@ -37,6 +37,8 @@ import ManifestDetailPage from './pages/ManifestDetailPage';
 import AccommodationDetailPage from './pages/AccommodationDetailPage';
 import InnhoppCsvPage from './pages/InnhoppCsvPage';
 import PublicEventRegistrationPage from './pages/PublicEventRegistrationPage';
+import EventRegistrationsPage from './pages/EventRegistrationsPage';
+import RegistrationDetailPage from './pages/RegistrationDetailPage';
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -50,6 +52,8 @@ const App = () => (
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
+          <Route path="registrations/:registrationId" element={<ParticipantRouteGuard><RegistrationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/new" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/:innhoppId" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />

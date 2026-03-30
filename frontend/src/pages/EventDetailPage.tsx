@@ -1558,6 +1558,17 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 role="menuitem"
                 onClick={() => {
                   setActionMenuOpen(false);
+                  navigate(`/events/${eventData.id}/registrations`);
+                }}
+              >
+                Registrations
+              </button>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenuOpen(false);
                   navigate(`/manifests?eventId=${eventData.id}`);
                 }}
               >
