@@ -1,6 +1,12 @@
 import { apiRequest } from './client';
 
 export type EventStatus = 'draft' | 'planned' | 'scouted' | 'launched' | 'live' | 'past';
+export type EventCommercialStatus =
+  | 'draft'
+  | 'registration_open'
+  | 'awaiting_threshold'
+  | 'confirmed'
+  | 'cancelled';
 
 export interface Season {
   id: number;
@@ -67,6 +73,15 @@ export interface Event {
   status: EventStatus;
   starts_at: string;
   ends_at?: string | null;
+  public_registration_slug?: string | null;
+  public_registration_enabled: boolean;
+  registration_open_at?: string | null;
+  balance_deadline?: string | null;
+  deposit_amount?: number | null;
+  balance_amount?: number | null;
+  currency?: string | null;
+  minimum_deposit_count: number;
+  commercial_status: EventCommercialStatus;
   airfield_ids: number[];
   participant_ids: number[];
   innhopps: Innhopp[];
@@ -100,6 +115,15 @@ export interface CreateEventPayload {
   status?: EventStatus;
   starts_at: string;
   ends_at?: string;
+  public_registration_slug?: string;
+  public_registration_enabled?: boolean;
+  registration_open_at?: string;
+  balance_deadline?: string;
+  deposit_amount?: number;
+  balance_amount?: number;
+  currency?: string;
+  minimum_deposit_count?: number;
+  commercial_status?: EventCommercialStatus;
   airfield_ids?: number[];
   participant_ids?: number[];
   innhopps?: InnhoppInput[];

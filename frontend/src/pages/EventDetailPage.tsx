@@ -4,6 +4,7 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import {
   Event,
+  EventCommercialStatus,
   Innhopp,
   EventStatus,
   InnhoppInput,
@@ -35,6 +36,7 @@ import {
   formatEventLocalInputFromDate,
   formatEventLocalPickerDateTime,
   fromEventLocalDateInput,
+  fromEventLocalInput,
   fromEventLocalPickerDate,
   parseEventLocal,
   toEventLocalInput,
@@ -116,6 +118,14 @@ const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'scouted', label: 'Scouted' },
   { value: 'live', label: 'Live' },
   { value: 'past', label: 'Past' }
+];
+
+const commercialStatusOptions: { value: EventCommercialStatus; label: string }[] = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'registration_open', label: 'Registration open' },
+  { value: 'awaiting_threshold', label: 'Awaiting threshold' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'cancelled', label: 'Cancelled' }
 ];
 
 const toInputDateTime = (value?: string | null) => toEventLocalInput(value);
@@ -246,7 +256,16 @@ const EventDetailPage = () => {
     slots: '',
     status: 'draft' as EventStatus,
     starts_at: '',
-    ends_at: ''
+    ends_at: '',
+    public_registration_slug: '',
+    public_registration_enabled: false,
+    registration_open_at: '',
+    balance_deadline: '',
+    deposit_amount: '',
+    balance_amount: '',
+    currency: 'EUR',
+    minimum_deposit_count: '',
+    commercial_status: 'draft' as EventCommercialStatus
   });
   const [participantForm, setParticipantForm] = useState<ParticipantFormState>({
     full_name: '',
@@ -310,6 +329,18 @@ const currentSignature = useMemo(
   () => buildSignature(eventForm, participantIds, airfieldIds, innhopps),
   [buildSignature, eventForm, participantIds, airfieldIds, innhopps]
 );
+  const publicRegistrationUrl = useMemo(() => {
+    const slug = eventForm.public_registration_slug.trim().toLowerCase();
+    if (!slug || typeof window === 'undefined') return '';
+    return `${window.location.origin}/register/${slug}`;
+  }, [eventForm.public_registration_slug]);
+  const [copiedPublicLink, setCopiedPublicLink] = useState(false);
+  const totalRegistrationAmount = useMemo(() => {
+    const deposit = Number(eventForm.deposit_amount || 0);
+    const balance = Number(eventForm.balance_amount || 0);
+    const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(balance) ? balance : 0);
+    return total.toFixed(2);
+  }, [eventForm.deposit_amount, eventForm.balance_amount]);
   type AccommodationItem = {
     id?: number;
     name: string;
@@ -477,6 +508,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   );
   type SectionKey =
     | 'details'
+    | 'registration'
     | 'innhopps'
     | 'airfields'
     | 'participants'
@@ -488,6 +520,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     | 'others';
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
     details: true,
+    registration: false,
     innhopps: false,
     airfields: false,
     participants: false,
@@ -722,7 +755,21 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           slots: event.slots ? String(event.slots) : '',
           status: event.status,
           starts_at: toInputDate(event.starts_at),
-          ends_at: toInputDate(event.ends_at)
+          ends_at: toInputDate(event.ends_at),
+          public_registration_slug: event.public_registration_slug || '',
+          public_registration_enabled: !!event.public_registration_enabled,
+          registration_open_at: toInputDateTime(event.registration_open_at),
+          balance_deadline: toInputDateTime(event.balance_deadline),
+          deposit_amount:
+            typeof event.deposit_amount === 'number' ? String(event.deposit_amount) : '',
+          balance_amount:
+            typeof event.balance_amount === 'number' ? String(event.balance_amount) : '',
+          currency: event.currency || 'EUR',
+          minimum_deposit_count:
+            typeof event.minimum_deposit_count === 'number' && event.minimum_deposit_count > 0
+              ? String(event.minimum_deposit_count)
+              : '',
+          commercial_status: event.commercial_status || 'draft'
         });
       } catch (err) {
         if (!cancelled) {
@@ -964,6 +1011,22 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         status: eventForm.status,
         starts_at: toIsoDate(eventForm.starts_at) || eventData.starts_at,
         ends_at: eventForm.ends_at ? toIsoDate(eventForm.ends_at) : undefined,
+        public_registration_slug: eventForm.public_registration_slug.trim().toLowerCase() || undefined,
+        public_registration_enabled: eventForm.public_registration_enabled,
+        registration_open_at: eventForm.registration_open_at
+          ? fromEventLocalInput(eventForm.registration_open_at)
+          : undefined,
+        balance_deadline: eventForm.balance_deadline
+          ? fromEventLocalInput(eventForm.balance_deadline)
+          : undefined,
+        deposit_amount:
+          eventForm.deposit_amount !== '' ? Number(eventForm.deposit_amount) : undefined,
+        balance_amount:
+          eventForm.balance_amount !== '' ? Number(eventForm.balance_amount) : undefined,
+        currency: eventForm.currency.trim().toUpperCase() || 'EUR',
+        minimum_deposit_count:
+          eventForm.minimum_deposit_count !== '' ? Number(eventForm.minimum_deposit_count) : 0,
+        commercial_status: eventForm.commercial_status,
         airfield_ids: nextAirfieldIds,
         participant_ids: nextParticipantIds,
         innhopps: (nextInnhopps ?? innhopps)
@@ -1019,6 +1082,50 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
 
   const handleSaveAll = async () => {
     await persistEvent(participantIds, airfieldIds, innhopps);
+  };
+
+  const handleSaveRegistrationSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!eventData) return;
+    setSaving(true);
+    setMessage(null);
+    setSaved(false);
+    try {
+      const updated = await updateEvent(eventData.id, {
+        season_id: Number(eventForm.season_id || eventData.season_id),
+        name: eventForm.name.trim() || eventData.name,
+        location: eventForm.location.trim() || undefined,
+        slots: eventForm.slots ? Number(eventForm.slots) : eventData.slots || 0,
+        status: eventForm.status,
+        starts_at: toIsoDate(eventForm.starts_at) || eventData.starts_at,
+        ends_at: eventForm.ends_at ? toIsoDate(eventForm.ends_at) : undefined,
+        public_registration_slug: eventForm.public_registration_slug.trim().toLowerCase() || undefined,
+        public_registration_enabled: eventForm.public_registration_enabled,
+        registration_open_at: eventForm.registration_open_at
+          ? fromEventLocalInput(eventForm.registration_open_at)
+          : undefined,
+        balance_deadline: eventForm.balance_deadline
+          ? fromEventLocalInput(eventForm.balance_deadline)
+          : undefined,
+        deposit_amount:
+          eventForm.deposit_amount !== '' ? Number(eventForm.deposit_amount) : undefined,
+        balance_amount:
+          eventForm.balance_amount !== '' ? Number(eventForm.balance_amount) : undefined,
+        currency: eventForm.currency.trim().toUpperCase() || 'EUR',
+        minimum_deposit_count:
+          eventForm.minimum_deposit_count !== '' ? Number(eventForm.minimum_deposit_count) : 0,
+        commercial_status: eventForm.commercial_status
+      });
+      setEventData(updated);
+      setMessage('Registration settings updated');
+      setLastSavedSignature(buildSignature(eventForm, participantIds, airfieldIds, innhopps));
+      setSaved(true);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to update registration settings');
+      setSaved(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleTakeoffAirfieldChange = (index: number, value: string) => {
@@ -1647,6 +1754,216 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               {message && <span className="muted">{message}</span>}
             </div>
         </form>
+        )}
+      </article>
+
+      <article className="card">
+        <header
+          className="card-header"
+          onClick={() => toggleSection('registration')}
+          style={{ cursor: 'pointer' }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}>
+            <button
+              className="ghost"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection('registration');
+              }}
+            >
+              {openSections.registration ? '▾' : '▸'}
+            </button>
+            <h3 style={{ margin: 0 }}>Registration settings</h3>
+          </div>
+        </header>
+        {openSections.registration && (
+          <form className="form-grid" onSubmit={handleSaveRegistrationSettings}>
+            <div className="registration-settings-grid">
+              <label className="form-field registration-settings-field">
+                <span>Commercial status</span>
+                <select
+                  value={eventForm.commercial_status}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({
+                      ...prev,
+                      commercial_status: e.target.value as EventCommercialStatus
+                    }))
+                  }
+                >
+                  {commercialStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Registration opens</span>
+                <input
+                  type="datetime-local"
+                  value={eventForm.registration_open_at}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, registration_open_at: e.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Registration slug</span>
+                <input
+                  type="text"
+                  value={eventForm.public_registration_slug}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, public_registration_slug: e.target.value }))
+                  }
+                  placeholder="event-name-2026"
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Currency</span>
+                <input
+                  type="text"
+                  maxLength={8}
+                  value={eventForm.currency}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))
+                  }
+                  placeholder="EUR"
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Minimum registrations</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={eventForm.minimum_deposit_count}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, minimum_deposit_count: e.target.value }))
+                  }
+                  placeholder="0"
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Deposit amount</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={eventForm.deposit_amount}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, deposit_amount: e.target.value }))
+                  }
+                  placeholder="0.00"
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Balance amount</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={eventForm.balance_amount}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, balance_amount: e.target.value }))
+                  }
+                  placeholder="0.00"
+                />
+              </label>
+
+              <label className="form-field registration-settings-field">
+                <span>Balance deadline</span>
+                <input
+                  type="datetime-local"
+                  value={eventForm.balance_deadline}
+                  onChange={(e) =>
+                    setEventForm((prev) => ({ ...prev, balance_deadline: e.target.value }))
+                  }
+                />
+              </label>
+
+              <label className="form-field registration-settings-field registration-total-field">
+                <span>Total amount</span>
+                <div className="registration-total-amount">
+                  {totalRegistrationAmount} {eventForm.currency.trim().toUpperCase() || 'EUR'}
+                </div>
+              </label>
+
+              <label className="form-field registration-settings-field registration-checkbox-field">
+                <span className="registration-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={eventForm.public_registration_enabled}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        public_registration_enabled: e.target.checked
+                      }))
+                    }
+                  />
+                  <span className="registration-checkbox-label">Enable public registration</span>
+                </span>
+              </label>
+
+              <div className="form-field registration-settings-field registration-link-preview">
+                <span>Public link preview</span>
+                <div className="registration-link-preview-row">
+                  <div className="muted registration-link-preview-text">
+                    {publicRegistrationUrl || 'Set a registration slug to generate the public link'}
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost registration-link-copy-button"
+                    disabled={!publicRegistrationUrl}
+                    aria-label={copiedPublicLink ? 'Public link copied' : 'Copy public link'}
+                    title={copiedPublicLink ? 'Copied' : 'Copy link'}
+                    onClick={async () => {
+                      if (!publicRegistrationUrl || !navigator.clipboard) return;
+                      try {
+                        await navigator.clipboard.writeText(publicRegistrationUrl);
+                        setCopiedPublicLink(true);
+                        window.setTimeout(() => setCopiedPublicLink(false), 1600);
+                      } catch {
+                        setCopiedPublicLink(false);
+                      }
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M9 9V5.75A1.75 1.75 0 0 1 10.75 4h7.5A1.75 1.75 0 0 1 20 5.75v7.5A1.75 1.75 0 0 1 18.25 15H15"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <rect
+                        x="4"
+                        y="9"
+                        width="11"
+                        height="11"
+                        rx="1.75"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                      />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="form-actions">
+              <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+                {saveButtonLabel}
+              </button>
+              {message && <span className="muted">{message}</span>}
+            </div>
+          </form>
         )}
       </article>
 

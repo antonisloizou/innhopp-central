@@ -1,7 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CreateEventPayload, EventStatus, Season, createEvent, listSeasons } from '../api/events';
-import { fromEventLocalDateInput } from '../utils/eventDate';
+import {
+  CreateEventPayload,
+  EventCommercialStatus,
+  EventStatus,
+  Season,
+  createEvent,
+  listSeasons
+} from '../api/events';
+import { fromEventLocalDateInput, fromEventLocalInput } from '../utils/eventDate';
 
 const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'draft', label: 'Draft' },
@@ -12,7 +19,16 @@ const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'past', label: 'Past' }
 ];
 
+const commercialStatusOptions: { value: EventCommercialStatus; label: string }[] = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'registration_open', label: 'Registration open' },
+  { value: 'awaiting_threshold', label: 'Awaiting threshold' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'cancelled', label: 'Cancelled' }
+];
+
 const toIsoDate = (value: string) => fromEventLocalDateInput(value);
+const toIsoDateTime = (value: string) => fromEventLocalInput(value);
 
 const EventCreatePage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -27,7 +43,16 @@ const EventCreatePage = () => {
     slots: '',
     status: 'draft' as EventStatus,
     starts_at: '',
-    ends_at: ''
+    ends_at: '',
+    public_registration_slug: '',
+    public_registration_enabled: false,
+    registration_open_at: '',
+    balance_deadline: '',
+    deposit_amount: '',
+    balance_amount: '',
+    currency: 'EUR',
+    minimum_deposit_count: '',
+    commercial_status: 'draft' as EventCommercialStatus
   });
   const navigate = useNavigate();
 
@@ -63,7 +88,10 @@ const EventCreatePage = () => {
         season_id: Number(form.season_id),
         name: form.name.trim(),
         status: form.status,
-        starts_at: toIsoDate(form.starts_at)
+        starts_at: toIsoDate(form.starts_at),
+        public_registration_enabled: form.public_registration_enabled,
+        commercial_status: form.commercial_status,
+        currency: form.currency.trim() || 'EUR'
       };
       if (form.location.trim()) {
         payload.location = form.location.trim();
@@ -74,6 +102,24 @@ const EventCreatePage = () => {
       if (form.slots) {
         payload.slots = Number(form.slots);
       }
+      if (form.public_registration_slug.trim()) {
+        payload.public_registration_slug = form.public_registration_slug.trim().toLowerCase();
+      }
+      if (form.registration_open_at) {
+        payload.registration_open_at = toIsoDateTime(form.registration_open_at);
+      }
+      if (form.balance_deadline) {
+        payload.balance_deadline = toIsoDateTime(form.balance_deadline);
+      }
+      if (form.deposit_amount) {
+        payload.deposit_amount = Number(form.deposit_amount);
+      }
+      if (form.balance_amount) {
+        payload.balance_amount = Number(form.balance_amount);
+      }
+      if (form.minimum_deposit_count) {
+        payload.minimum_deposit_count = Number(form.minimum_deposit_count);
+      }
       await createEvent(payload);
       setMessage('Event created');
       setForm({
@@ -83,7 +129,16 @@ const EventCreatePage = () => {
         slots: '',
         status: 'draft',
         starts_at: '',
-        ends_at: ''
+        ends_at: '',
+        public_registration_slug: '',
+        public_registration_enabled: false,
+        registration_open_at: '',
+        balance_deadline: '',
+        deposit_amount: '',
+        balance_amount: '',
+        currency: 'EUR',
+        minimum_deposit_count: '',
+        commercial_status: 'draft'
       });
       navigate('/events');
     } catch (err) {
@@ -98,7 +153,7 @@ const EventCreatePage = () => {
       <header className="page-header">
         <div>
           <h2>Create event</h2>
-          <p>Attach a new event to a season with timing and status.</p>
+          <p>Attach a new event to a season with timing, status, and registration settings.</p>
         </div>
         <button className="ghost" type="button" onClick={() => navigate('/events')}>
           Back to events
@@ -194,6 +249,96 @@ const EventCreatePage = () => {
                 onChange={(e) => setForm((prev) => ({ ...prev, ends_at: e.target.value }))}
                 placeholder="Optional"
               />
+            </label>
+            <label className="form-field">
+              <span>Registration opens</span>
+              <input
+                type="datetime-local"
+                value={form.registration_open_at}
+                onChange={(e) => setForm((prev) => ({ ...prev, registration_open_at: e.target.value }))}
+              />
+            </label>
+            <label className="form-field">
+              <span>Commercial status</span>
+              <select
+                value={form.commercial_status}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, commercial_status: e.target.value as EventCommercialStatus }))
+                }
+              >
+                {commercialStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Minimum registrations</span>
+              <input
+                type="number"
+                min="0"
+                value={form.minimum_deposit_count}
+                onChange={(e) => setForm((prev) => ({ ...prev, minimum_deposit_count: e.target.value }))}
+                placeholder="0"
+              />
+            </label>
+            <label className="form-field">
+              <span>Deposit amount</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.deposit_amount}
+                onChange={(e) => setForm((prev) => ({ ...prev, deposit_amount: e.target.value }))}
+                placeholder="0.00"
+              />
+            </label>
+            <label className="form-field">
+              <span>Balance amount</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.balance_amount}
+                onChange={(e) => setForm((prev) => ({ ...prev, balance_amount: e.target.value }))}
+                placeholder="0.00"
+              />
+            </label>
+            <label className="form-field">
+              <span>Balance deadline</span>
+              <input
+                type="datetime-local"
+                value={form.balance_deadline}
+                onChange={(e) => setForm((prev) => ({ ...prev, balance_deadline: e.target.value }))}
+              />
+            </label>
+            <label className="form-field">
+              <span>Currency</span>
+              <input
+                type="text"
+                maxLength={8}
+                value={form.currency}
+                onChange={(e) => setForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))}
+                placeholder="EUR"
+              />
+            </label>
+            <label className="form-field">
+              <span>Registration slug</span>
+              <input
+                type="text"
+                value={form.public_registration_slug}
+                onChange={(e) => setForm((prev) => ({ ...prev, public_registration_slug: e.target.value }))}
+                placeholder="event-name-2026"
+              />
+            </label>
+            <label className="form-field" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minHeight: '100%' }}>
+              <input
+                type="checkbox"
+                checked={form.public_registration_enabled}
+                onChange={(e) => setForm((prev) => ({ ...prev, public_registration_enabled: e.target.checked }))}
+              />
+              <span>Enable public registration</span>
             </label>
             <div className="form-actions">
               <button type="submit" className="primary" disabled={submitting}>

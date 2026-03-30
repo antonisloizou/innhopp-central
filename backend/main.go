@@ -185,6 +185,20 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS slots INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS public_registration_slug TEXT`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS public_registration_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS registration_open_at TIMESTAMPTZ`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS balance_deadline TIMESTAMPTZ`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(12,2)`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS balance_amount NUMERIC(12,2)`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS minimum_deposit_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS commercial_status TEXT NOT NULL DEFAULT 'draft'`,
+		`ALTER TABLE events DROP COLUMN IF EXISTS deposit_deadline`,
+		`ALTER TABLE events DROP COLUMN IF EXISTS registration_close_at`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS events_public_registration_slug_idx
+            ON events ((lower(public_registration_slug)))
+            WHERE public_registration_slug IS NOT NULL AND btrim(public_registration_slug) <> ''`,
 		`CREATE TABLE IF NOT EXISTS manifests (
     id SERIAL PRIMARY KEY,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,

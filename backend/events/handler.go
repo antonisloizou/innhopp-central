@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/airfields"
@@ -30,7 +32,15 @@ var (
 		"live":     {},
 		"past":     {},
 	}
-	eventStatusValues = []string{"draft", "planned", "launched", "scouted", "live", "past"}
+	eventStatusValues       = []string{"draft", "planned", "launched", "scouted", "live", "past"}
+	validCommercialStatuses = map[string]struct{}{
+		"draft":              {},
+		"registration_open":  {},
+		"awaiting_threshold": {},
+		"confirmed":          {},
+		"cancelled":          {},
+	}
+	commercialStatusValues = []string{"draft", "registration_open", "awaiting_threshold", "confirmed", "cancelled"}
 )
 
 const defaultEventStatus = "draft"
@@ -89,18 +99,27 @@ type Season struct {
 }
 
 type Event struct {
-	ID             int64      `json:"id"`
-	SeasonID       int64      `json:"season_id"`
-	Name           string     `json:"name"`
-	Location       string     `json:"location,omitempty"`
-	Status         string     `json:"status"`
-	StartsAt       time.Time  `json:"starts_at"`
-	EndsAt         *time.Time `json:"ends_at,omitempty"`
-	Slots          int        `json:"slots"`
-	AirfieldIDs    []int64    `json:"airfield_ids"`
-	ParticipantIDs []int64    `json:"participant_ids"`
-	Innhopps       []Innhopp  `json:"innhopps"`
-	CreatedAt      time.Time  `json:"created_at"`
+	ID                        int64      `json:"id"`
+	SeasonID                  int64      `json:"season_id"`
+	Name                      string     `json:"name"`
+	Location                  string     `json:"location,omitempty"`
+	Status                    string     `json:"status"`
+	StartsAt                  time.Time  `json:"starts_at"`
+	EndsAt                    *time.Time `json:"ends_at,omitempty"`
+	Slots                     int        `json:"slots"`
+	PublicRegistrationSlug    string     `json:"public_registration_slug,omitempty"`
+	PublicRegistrationEnabled bool       `json:"public_registration_enabled"`
+	RegistrationOpenAt        *time.Time `json:"registration_open_at,omitempty"`
+	BalanceDeadline           *time.Time `json:"balance_deadline,omitempty"`
+	DepositAmount             *float64   `json:"deposit_amount,omitempty"`
+	BalanceAmount             *float64   `json:"balance_amount,omitempty"`
+	Currency                  string     `json:"currency,omitempty"`
+	MinimumDepositCount       int        `json:"minimum_deposit_count"`
+	CommercialStatus          string     `json:"commercial_status"`
+	AirfieldIDs               []int64    `json:"airfield_ids"`
+	ParticipantIDs            []int64    `json:"participant_ids"`
+	Innhopps                  []Innhopp  `json:"innhopps"`
+	CreatedAt                 time.Time  `json:"created_at"`
 }
 
 type Accommodation struct {
@@ -176,16 +195,25 @@ type Manifest struct {
 }
 
 type eventPayload struct {
-	SeasonID       int64            `json:"season_id"`
-	Name           string           `json:"name"`
-	Location       string           `json:"location"`
-	Status         string           `json:"status"`
-	StartsAt       string           `json:"starts_at"`
-	EndsAt         string           `json:"ends_at"`
-	Slots          int              `json:"slots"`
-	AirfieldIDs    []int64          `json:"airfield_ids"`
-	ParticipantIDs []int64          `json:"participant_ids"`
-	Innhopps       []innhoppPayload `json:"innhopps"`
+	SeasonID                  int64            `json:"season_id"`
+	Name                      string           `json:"name"`
+	Location                  string           `json:"location"`
+	Status                    string           `json:"status"`
+	StartsAt                  string           `json:"starts_at"`
+	EndsAt                    string           `json:"ends_at"`
+	Slots                     int              `json:"slots"`
+	PublicRegistrationSlug    string           `json:"public_registration_slug"`
+	PublicRegistrationEnabled bool             `json:"public_registration_enabled"`
+	RegistrationOpenAt        string           `json:"registration_open_at"`
+	BalanceDeadline           string           `json:"balance_deadline"`
+	DepositAmount             *float64         `json:"deposit_amount"`
+	BalanceAmount             *float64         `json:"balance_amount"`
+	Currency                  string           `json:"currency"`
+	MinimumDepositCount       int              `json:"minimum_deposit_count"`
+	CommercialStatus          string           `json:"commercial_status"`
+	AirfieldIDs               []int64          `json:"airfield_ids"`
+	ParticipantIDs            []int64          `json:"participant_ids"`
+	Innhopps                  []innhoppPayload `json:"innhopps"`
 }
 
 type landingAreaPayload struct {
@@ -387,7 +415,13 @@ func (h *Handler) deleteSeason(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(r.Context(), `SELECT id, season_id, name, location, status, starts_at, ends_at, slots, created_at FROM events ORDER BY starts_at DESC`)
+	rows, err := h.db.Query(r.Context(), `
+		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
+		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
+		       balance_deadline, deposit_amount, balance_amount, COALESCE(currency, 'EUR'),
+		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
+		FROM events
+		ORDER BY starts_at DESC`)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to list events")
 		return
@@ -397,7 +431,12 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	var events []Event
 	for rows.Next() {
 		var e Event
-		if err := rows.Scan(&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots, &e.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots,
+			&e.PublicRegistrationSlug, &e.PublicRegistrationEnabled, &e.RegistrationOpenAt,
+			&e.BalanceDeadline, &e.DepositAmount, &e.BalanceAmount, &e.Currency,
+			&e.MinimumDepositCount, &e.CommercialStatus, &e.CreatedAt,
+		); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
 			return
 		}
@@ -452,23 +491,56 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	airfieldIDs, err := normalizeAirfieldIDs(payload.AirfieldIDs)
+	registrationOpenAt, err := timeutil.ParseOptionalEventTimestamp(payload.RegistrationOpenAt)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "registration_open_at must be a valid timestamp")
+		return
+	}
+	balanceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.BalanceDeadline)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "balance_deadline must be a valid timestamp")
+		return
+	}
+	publicRegistrationSlug, err := normalizeRegistrationSlug(payload.PublicRegistrationSlug)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	currency := normalizeCurrency(payload.Currency)
+	commercialStatus, err := normalizeCommercialStatus(payload.CommercialStatus)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	participantIDs, err := normalizeParticipantIDs(payload.ParticipantIDs)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
-		return
+	replaceAirfields := payload.AirfieldIDs != nil
+	var airfieldIDs []int64
+	if replaceAirfields {
+		airfieldIDs, err = normalizeAirfieldIDs(payload.AirfieldIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
-	innhopps, err := normalizeInnhopps(payload.Innhopps)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
-		return
+	replaceParticipants := payload.ParticipantIDs != nil
+	var participantIDs []int64
+	if replaceParticipants {
+		participantIDs, err = normalizeParticipantIDs(payload.ParticipantIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	replaceInnhopps := payload.Innhopps != nil
+	var innhopps []innhoppInput
+	if replaceInnhopps {
+		innhopps, err = normalizeInnhopps(payload.Innhopps)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	ctx := r.Context()
@@ -484,10 +556,30 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "slots cannot be negative")
 		return
 	}
+	minimumDepositCount := payload.MinimumDepositCount
+	if minimumDepositCount < 0 {
+		httpx.Error(w, http.StatusBadRequest, "minimum_deposit_count cannot be negative")
+		return
+	}
+	depositAmount := normalizeOptionalMoney(payload.DepositAmount)
+	balanceAmount := normalizeOptionalMoney(payload.BalanceAmount)
 
 	row := tx.QueryRow(ctx,
-		`INSERT INTO events (season_id, name, location, status, starts_at, ends_at, slots) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+		`INSERT INTO events (
+			season_id, name, location, status, starts_at, ends_at, slots,
+			public_registration_slug, public_registration_enabled, registration_open_at,
+			balance_deadline, deposit_amount, balance_amount, currency,
+			minimum_deposit_count, commercial_status
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10,
+			$11, $12, $13, $14,
+			$15, $16
+		) RETURNING id, created_at`,
 		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots,
+		publicRegistrationSlug, payload.PublicRegistrationEnabled, registrationOpenAt,
+		balanceDeadline, depositAmount, balanceAmount, currency,
+		minimumDepositCount, commercialStatus,
 	)
 
 	var event Event
@@ -498,8 +590,22 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	event.StartsAt = startsAt
 	event.EndsAt = endsAt
 	event.Slots = slots
+	event.PublicRegistrationSlug = publicRegistrationSlug
+	event.PublicRegistrationEnabled = payload.PublicRegistrationEnabled
+	event.RegistrationOpenAt = registrationOpenAt
+	event.BalanceDeadline = balanceDeadline
+	event.DepositAmount = depositAmount
+	event.BalanceAmount = balanceAmount
+	event.Currency = currency
+	event.MinimumDepositCount = minimumDepositCount
+	event.CommercialStatus = commercialStatus
 
 	if err := row.Scan(&event.ID, &event.CreatedAt); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "public registration slug already exists")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to create event")
 		return
 	}
@@ -515,7 +621,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := replaceEventInnhoppsTx(ctx, tx, event.ID, innhopps); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps")
+		httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps: "+err.Error())
 		return
 	}
 
@@ -588,23 +694,56 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	airfieldIDs, err := normalizeAirfieldIDs(payload.AirfieldIDs)
+	registrationOpenAt, err := timeutil.ParseOptionalEventTimestamp(payload.RegistrationOpenAt)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "registration_open_at must be a valid timestamp")
+		return
+	}
+	balanceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.BalanceDeadline)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "balance_deadline must be a valid timestamp")
+		return
+	}
+	publicRegistrationSlug, err := normalizeRegistrationSlug(payload.PublicRegistrationSlug)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	currency := normalizeCurrency(payload.Currency)
+	commercialStatus, err := normalizeCommercialStatus(payload.CommercialStatus)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	participantIDs, err := normalizeParticipantIDs(payload.ParticipantIDs)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
-		return
+	replaceAirfields := payload.AirfieldIDs != nil
+	var airfieldIDs []int64
+	if replaceAirfields {
+		airfieldIDs, err = normalizeAirfieldIDs(payload.AirfieldIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
-	innhopps, err := normalizeInnhopps(payload.Innhopps)
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err.Error())
-		return
+	replaceParticipants := payload.ParticipantIDs != nil
+	var participantIDs []int64
+	if replaceParticipants {
+		participantIDs, err = normalizeParticipantIDs(payload.ParticipantIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	replaceInnhopps := payload.Innhopps != nil
+	var innhopps []innhoppInput
+	if replaceInnhopps {
+		innhopps, err = normalizeInnhopps(payload.Innhopps)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	slots := payload.Slots
@@ -612,6 +751,13 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "slots cannot be negative")
 		return
 	}
+	minimumDepositCount := payload.MinimumDepositCount
+	if minimumDepositCount < 0 {
+		httpx.Error(w, http.StatusBadRequest, "minimum_deposit_count cannot be negative")
+		return
+	}
+	depositAmount := normalizeOptionalMoney(payload.DepositAmount)
+	balanceAmount := normalizeOptionalMoney(payload.BalanceAmount)
 
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
@@ -622,10 +768,35 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE events SET season_id = $1, name = $2, location = $3, status = $4, starts_at = $5, ends_at = $6, slots = $7 WHERE id = $8`,
-		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots, eventID,
+		`UPDATE events
+		SET season_id = $1,
+			name = $2,
+			location = $3,
+			status = $4,
+			starts_at = $5,
+			ends_at = $6,
+			slots = $7,
+			public_registration_slug = $8,
+			public_registration_enabled = $9,
+			registration_open_at = $10,
+			balance_deadline = $11,
+			deposit_amount = $12,
+			balance_amount = $13,
+			currency = $14,
+			minimum_deposit_count = $15,
+			commercial_status = $16
+		WHERE id = $17`,
+		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots,
+		publicRegistrationSlug, payload.PublicRegistrationEnabled, registrationOpenAt,
+		balanceDeadline, depositAmount, balanceAmount, currency,
+		minimumDepositCount, commercialStatus, eventID,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "public registration slug already exists")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to update event")
 		return
 	}
@@ -634,19 +805,25 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := replaceEventParticipantsTx(ctx, tx, eventID, participantIDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
-		return
+	if replaceParticipants {
+		if err := replaceEventParticipantsTx(ctx, tx, eventID, participantIDs); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
+			return
+		}
 	}
 
-	if err := replaceEventAirfieldsTx(ctx, tx, eventID, airfieldIDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to save airfields")
-		return
+	if replaceAirfields {
+		if err := replaceEventAirfieldsTx(ctx, tx, eventID, airfieldIDs); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to save airfields")
+			return
+		}
 	}
 
-	if err := replaceEventInnhoppsTx(ctx, tx, eventID, innhopps); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps")
-		return
+	if replaceInnhopps {
+		if err := replaceEventInnhoppsTx(ctx, tx, eventID, innhopps); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps: "+err.Error())
+			return
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -766,10 +943,18 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 
 	newName := strings.TrimSpace(original.Name) + " (Copy)"
 	row := tx.QueryRow(ctx,
-		`INSERT INTO events (season_id, name, location, status, starts_at, ends_at, slots)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO events (
+			season_id, name, location, status, starts_at, ends_at, slots,
+			public_registration_slug, public_registration_enabled, registration_open_at,
+			balance_deadline, deposit_amount, balance_amount, currency,
+			minimum_deposit_count, commercial_status
+		)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING id, created_at`,
 		original.SeasonID, newName, strings.TrimSpace(original.Location), original.Status, original.StartsAt, original.EndsAt, original.Slots,
+		"", false, original.RegistrationOpenAt,
+		original.BalanceDeadline, original.DepositAmount, original.BalanceAmount, original.Currency,
+		original.MinimumDepositCount, "draft",
 	)
 
 	var created Event
@@ -780,6 +965,15 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 	created.StartsAt = original.StartsAt
 	created.EndsAt = original.EndsAt
 	created.Slots = original.Slots
+	created.PublicRegistrationSlug = ""
+	created.PublicRegistrationEnabled = false
+	created.RegistrationOpenAt = original.RegistrationOpenAt
+	created.BalanceDeadline = original.BalanceDeadline
+	created.DepositAmount = original.DepositAmount
+	created.BalanceAmount = original.BalanceAmount
+	created.Currency = original.Currency
+	created.MinimumDepositCount = original.MinimumDepositCount
+	created.CommercialStatus = "draft"
 
 	if err := row.Scan(&created.ID, &created.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy event")
@@ -1498,9 +1692,20 @@ func (h *Handler) updateManifest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) {
-	row := h.db.QueryRow(ctx, `SELECT id, season_id, name, location, status, starts_at, ends_at, slots, created_at FROM events WHERE id = $1`, eventID)
+	row := h.db.QueryRow(ctx, `
+		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
+		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
+		       balance_deadline, deposit_amount, balance_amount, COALESCE(currency, 'EUR'),
+		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
+		FROM events
+		WHERE id = $1`, eventID)
 	var event Event
-	if err := row.Scan(&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots, &event.CreatedAt); err != nil {
+	if err := row.Scan(
+		&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots,
+		&event.PublicRegistrationSlug, &event.PublicRegistrationEnabled, &event.RegistrationOpenAt,
+		&event.BalanceDeadline, &event.DepositAmount, &event.BalanceAmount, &event.Currency,
+		&event.MinimumDepositCount, &event.CommercialStatus, &event.CreatedAt,
+	); err != nil {
 		return Event{}, err
 	}
 
@@ -2462,6 +2667,53 @@ func normalizeEventStatus(raw string) (string, error) {
 	return status, nil
 }
 
+func normalizeCommercialStatus(raw string) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(raw))
+	if status == "" {
+		status = "draft"
+	}
+	if _, ok := validCommercialStatuses[status]; !ok {
+		return "", errors.New("commercial_status must be one of: " + strings.Join(commercialStatusValues, ", "))
+	}
+	return status, nil
+}
+
+func normalizeRegistrationSlug(raw string) (string, error) {
+	slug := strings.ToLower(strings.TrimSpace(raw))
+	if slug == "" {
+		return "", nil
+	}
+	for _, ch := range slug {
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-' {
+			continue
+		}
+		return "", errors.New("public_registration_slug may only contain lowercase letters, numbers, and hyphens")
+	}
+	return slug, nil
+}
+
+func normalizeCurrency(raw string) string {
+	currency := strings.ToUpper(strings.TrimSpace(raw))
+	if currency == "" {
+		return "EUR"
+	}
+	if len(currency) > 8 {
+		return currency[:8]
+	}
+	return currency
+}
+
+func normalizeOptionalMoney(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	if *value < 0 {
+		zero := 0.0
+		return &zero
+	}
+	return value
+}
+
 func parseEventTimes(starts, ends string) (time.Time, *time.Time, error) {
 	starts = strings.TrimSpace(starts)
 	if starts == "" {
@@ -2660,7 +2912,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
             $9, $10, $11, $12, $13,
             $14, $15, $16, $17,
             $18, $19, $20, $21,
-            $22, $23, $24, $25, $26, $27, $28, $29, $30
+            $22, $23, $24, $25, $26, $27, $28::jsonb, $29::jsonb, $30
         )
         RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
@@ -2672,7 +2924,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad,
 		in.PrimaryLandingArea.Name, in.PrimaryLandingArea.Description, in.PrimaryLandingArea.Size, in.PrimaryLandingArea.Obstacles,
 		in.SecondaryLandingArea.Name, in.SecondaryLandingArea.Description, in.SecondaryLandingArea.Size, in.SecondaryLandingArea.Obstacles,
-		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, imageFilesJSON, ownersJSON, in.LandOwnerPermission,
+		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, string(imageFilesJSON), string(ownersJSON), in.LandOwnerPermission,
 	)
 
 	var coords sql.NullString
@@ -2994,18 +3246,17 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		return nil
 	}
 
-	batch := &pgx.Batch{}
-	for _, innhopp := range innhopps {
+	for index, innhopp := range innhopps {
 		landOwnersJSON, err := encodeLandOwners(innhopp.LandOwners)
 		if err != nil {
-			return err
+			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
 		}
 		imageFilesJSON, err := encodeImageFiles(innhopp.ImageFiles)
 		if err != nil {
-			return err
+			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
 		}
 
-		batch.Queue(`INSERT INTO event_innhopps (
+		if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
                 event_id, sequence, name, coordinates, takeoff_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
@@ -3016,7 +3267,7 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
                 $9, $10, $11, $12, $13,
                 $14, $15, $16, $17,
                 $18, $19, $20, $21,
-                $22, $23, $24, $25, $26, $27, $28, $29, $30
+                $22, $23, $24, $25, $26, $27, $28::jsonb, $29::jsonb, $30
             )`,
 			eventID,
 			innhopp.Sequence,
@@ -3045,17 +3296,11 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			innhopp.Hospital,
 			innhopp.RescueBoat,
 			innhopp.MinimumRequirements,
-			imageFilesJSON,
-			landOwnersJSON,
+			string(imageFilesJSON),
+			string(landOwnersJSON),
 			innhopp.LandOwnerPermission,
-		)
-	}
-
-	br := tx.SendBatch(ctx, batch)
-	defer br.Close()
-	for range innhopps {
-		if _, err := br.Exec(); err != nil {
-			return err
+		); err != nil {
+			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
 		}
 	}
 	return nil

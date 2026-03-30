@@ -3,6 +3,7 @@ import {
   CreateParticipantPayload,
   ParticipantProfile,
   getMyParticipantProfile,
+  updateParticipantProfile,
   upsertMyParticipantProfile
 } from '../api/participants';
 import ParticipantProfileForm, {
@@ -20,7 +21,9 @@ const MyProfilePage = () => {
       email: user?.email || ''
     })
   );
+  const canManageAccountRoles = user?.roles?.includes('admin') ?? false;
   const hasAdminAccess = form.account_roles?.includes('admin') ?? false;
+  const canUseManagedUpdate = canManageAccountRoles && !!profile?.id;
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -87,7 +90,10 @@ const MyProfilePage = () => {
     setSaved(false);
     setError(null);
     try {
-      const saved = await upsertMyParticipantProfile(toParticipantPayload(form));
+      const payload = toParticipantPayload(form);
+      const saved = canUseManagedUpdate
+        ? await updateParticipantProfile(profile.id, payload)
+        : await upsertMyParticipantProfile(payload);
       setProfile(saved);
       setForm(createParticipantFormState(saved));
       setSaved(true);
@@ -123,10 +129,10 @@ const MyProfilePage = () => {
         submitting={saving}
         saved={saved}
         error={error}
-        roleMode="readonly"
-        showAdminRoleControl={hasAdminAccess}
-        canEditAdminRole={false}
-        canSelfRemoveElevatedRoles
+        roleMode={canUseManagedUpdate ? 'editable' : 'readonly'}
+        showAdminRoleControl={canManageAccountRoles || hasAdminAccess}
+        canEditAdminRole={canUseManagedUpdate}
+        canSelfRemoveElevatedRoles={!canUseManagedUpdate}
       />
     </section>
   );

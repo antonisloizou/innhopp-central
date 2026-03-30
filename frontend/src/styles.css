@@ -261,6 +261,111 @@ button.ghost {
   outline-offset: 1px;
 }
 
+.registration-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  grid-column: 1 / -1;
+  align-items: end;
+}
+
+.registration-settings-field {
+  margin: 0;
+}
+
+.registration-checkbox-field {
+  align-self: start;
+  grid-column: 1 / -1;
+}
+
+.registration-checkbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  min-height: 56px;
+  width: 100%;
+}
+
+.registration-checkbox-label {
+  display: inline-block;
+}
+
+.registration-checkbox-row input[type='checkbox'] {
+  width: auto;
+  min-width: auto;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+  justify-self: start;
+}
+
+.registration-link-preview {
+  grid-column: 1 / -1;
+}
+
+.registration-link-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.registration-link-preview-text {
+  word-break: break-all;
+  flex: 0 1 auto;
+}
+
+.registration-link-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  border-radius: 0.4rem;
+  line-height: 1;
+}
+
+.registration-link-copy-button svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.registration-link-copy-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.registration-total-amount {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--text-strong);
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.registration-total-field {
+  align-self: end;
+}
+
+@media (max-width: 1100px) {
+  .registration-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .registration-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-field textarea {
   min-height: 3rem;
   overflow: hidden;
