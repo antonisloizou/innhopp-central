@@ -22,6 +22,8 @@ const (
 	PermissionManageSeasons         Permission = "seasons:manage"
 	PermissionViewEvents            Permission = "events:view"
 	PermissionManageEvents          Permission = "events:manage"
+	PermissionViewRegistrations     Permission = "registrations:view"
+	PermissionManageRegistrations   Permission = "registrations:manage"
 	PermissionViewManifests         Permission = "manifests:view"
 	PermissionManageManifests       Permission = "manifests:manage"
 	PermissionViewParticipants      Permission = "participants:view"
@@ -62,6 +64,14 @@ var RoleMatrix = map[Permission][]Role{
 		RoleParticipant,
 	},
 	PermissionManageEvents: {
+		RoleAdmin,
+		RoleStaff,
+	},
+	PermissionViewRegistrations: {
+		RoleAdmin,
+		RoleStaff,
+	},
+	PermissionManageRegistrations: {
 		RoleAdmin,
 		RoleStaff,
 	},

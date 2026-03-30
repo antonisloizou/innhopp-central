@@ -5,8 +5,8 @@ This Go service provides the core REST API for the Innhopp Central platform. It 
 ## Features
 
 - Modular HTTP routing for authentication, event operations, participant management, crew RBAC, and logistics.
-- Automatic bootstrapping of the core PostgreSQL schema for seasons, events, manifests, participant profiles, crew assignments, and gear assets.
-- JSON APIs for managing seasons/events/manifests, participant records, crew assignments, and gear tracking.
+- Automatic bootstrapping of the core PostgreSQL schema for seasons, events, manifests, participant profiles, registrations, payment records, crew assignments, and gear assets.
+- JSON APIs for managing seasons/events/manifests, participant records, registration lifecycles, payment/activity records, crew assignments, and gear tracking.
 - Health check endpoint for uptime monitoring and Chi middleware for structured logging and request tracing.
 
 ## Requirements
@@ -35,6 +35,9 @@ On startup the server creates these tables if they do not already exist:
 - `event_innhopps` – ordered jump sequences planned within an event.
 - `manifests` – scheduled aircraft loads for an event.
 - `participant_profiles` – canonical roster of all flyers and staff.
+- `event_registrations` – participant-to-event lifecycle records with deadlines, notes, and ownership.
+- `registration_payments` – ledger entries for deposit, balance, refund, and manual adjustments per registration.
+- `registration_activity` – internal timeline entries attached to a registration.
 - `crew_assignments` – role assignments for a participant on a manifest.
 - `gear_assets` – tracked gear inventory with inspection status.
 
@@ -94,6 +97,14 @@ On startup the server creates these tables if they do not already exist:
 | GET | `/api/events/manifests/{id}` | Retrieve a manifest |
 | GET | `/api/participants/profiles` | List participant profiles |
 | POST | `/api/participants/profiles` | Create a participant profile |
+| GET | `/api/registrations/events/{eventID}` | List registrations for an event |
+| POST | `/api/registrations/events/{eventID}` | Create a registration for an event |
+| GET | `/api/registrations/{registrationID}` | Retrieve one registration with payments and activity |
+| PUT | `/api/registrations/{registrationID}` | Update registration metadata |
+| POST | `/api/registrations/{registrationID}/status` | Transition a registration status |
+| POST | `/api/registrations/{registrationID}/payments` | Create a payment ledger row |
+| PUT | `/api/registrations/payments/{paymentID}` | Update a payment ledger row |
+| POST | `/api/registrations/{registrationID}/activity` | Append an internal activity entry |
 | GET | `/api/rbac/crew-assignments` | List crew assignments |
 | POST | `/api/rbac/crew-assignments` | Create a crew assignment |
 | GET | `/api/logistics/gear-assets` | List gear assets |
@@ -104,6 +115,7 @@ On startup the server creates these tables if they do not already exist:
 - All timestamps in request payloads must be RFC3339 strings except for season dates which use `YYYY-MM-DD`.
 - Endpoints respond with JSON and enforce strict payload validation (unknown fields are rejected).
 - Foreign key constraints ensure referenced seasons, events, manifests, and participants must already exist.
+- The registration backbone enforces one active registration per participant per event; cancelled or expired registrations can be recreated.
 
 ## Testing
 

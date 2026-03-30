@@ -19,6 +19,7 @@ import (
 	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/participants"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/registrations"
 )
 
 func main() {
@@ -120,6 +121,7 @@ func main() {
 	router.Mount("/api/auth", authHandler.Routes())
 	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))
@@ -509,6 +511,84 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             UNIQUE (account_id, role_name)
         )`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS account_id INTEGER UNIQUE REFERENCES accounts(id) ON DELETE SET NULL`,
+		`CREATE TABLE IF NOT EXISTS event_registrations (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'deposit_pending',
+            source TEXT,
+            registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deposit_due_at TIMESTAMPTZ,
+            deposit_paid_at TIMESTAMPTZ,
+            balance_due_at TIMESTAMPTZ,
+            balance_paid_at TIMESTAMPTZ,
+            cancelled_at TIMESTAMPTZ,
+            expired_at TIMESTAMPTZ,
+            waitlist_position INTEGER,
+            staff_owner_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+            internal_notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'deposit_pending'`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS source TEXT`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_due_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS balance_due_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS balance_paid_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS waitlist_position INTEGER`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS staff_owner_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS internal_notes TEXT`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS event_registrations_active_participant_idx
+            ON event_registrations (event_id, participant_id)
+            WHERE cancelled_at IS NULL AND expired_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS registration_payments (
+            id SERIAL PRIMARY KEY,
+            registration_id INTEGER NOT NULL REFERENCES event_registrations(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL,
+            amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'EUR',
+            status TEXT NOT NULL DEFAULT 'pending',
+            due_at TIMESTAMPTZ,
+            paid_at TIMESTAMPTZ,
+            provider TEXT,
+            provider_ref TEXT,
+            recorded_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'deposit'`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) NOT NULL DEFAULT 0`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS provider TEXT`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS provider_ref TEXT`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS recorded_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS registration_activity (
+            id SERIAL PRIMARY KEY,
+            registration_id INTEGER NOT NULL REFERENCES event_registrations(id) ON DELETE CASCADE,
+            type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'note'`,
+		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
+		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 	}
 
 	for _, stmt := range stmts {

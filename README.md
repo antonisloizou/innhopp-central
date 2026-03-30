@@ -9,12 +9,14 @@ Create a single source of truth for operational data that keeps the team synchro
 - Operations planning for seasons, events, innhopps, manifests, and landing zones.
 - Participant roster and event assignments, including crew roles per manifest.
 - Logistics tracking for transports, vehicles, accommodations, meals, and ad-hoc logistics items.
+- Registration backbone for participant-event lifecycle tracking, payment obligations, and activity history.
 - Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
 - RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.
 
 ## Not yet implemented
-- Payments, waivers, certifications, and health declarations.
-- Automated notifications, check-in flows, or public driver route pages.
+- Public registration pages, automated notifications, and campaign email sending.
+- Payment provider integrations, waivers, certifications, and health declarations.
+- Check-in flows or public driver route pages.
 - Analytics dashboards beyond raw data access.
 
 ## User roles
@@ -34,13 +36,14 @@ RBAC ensures each user only sees the modules and actions needed for their duties
 
 ## Workflows
 1. **Event planning**: Create seasons/events, define innhopps with landing and safety details, and publish manifests.
-2. **Participant coordination**: Maintain the roster, attach participants to events, and assign crew roles per manifest.
+2. **Participant coordination**: Maintain the roster, attach participants to events, assign crew roles per manifest, and track registrations with status, notes, and payment records.
 3. **Logistics tracking**: Capture transports, vehicles, accommodations, meals, and other logistics items per event.
 
 ## What you can do today
 - Build seasons and events, including detailed innhopp plans with landing areas, NOTAM notes, risk mitigation, and hospital/boat coverage metadata.
 - Register airfields, attach them to events, and manage manifests with capacity, staff slots, and participant assignments.
 - Maintain a participant roster (roles, experience, contacts), add people to events/manifests, and track crew roles such as Jump Master/Leader, Ground Crew, Driver, and Packer.
+- Create event registrations for participants, record deposit/balance payment entries, track registration status, and append internal activity notes.
 - Coordinate transports, vehicles, accommodations, meals, and other logistics items per operation.
 - Authenticate via OIDC (authorization code flow), persist sessions in secure cookies, and enforce role-based permissions seeded on startup (Admin, Staff, Jump Master, Jump Leader, Ground Crew, Driver, Packer, Participant). Set `DEV_ALLOW_ALL=true` to bypass auth locally.
 - Use the frontend pages for login, events, manifests, participants, logistics, seasons, innhopp details, and airfield details (see `frontend/src/pages/` and `frontend/src/components/Layout.tsx` for the routes).
@@ -109,5 +112,5 @@ Frontend environment variables:
 | `VITE_GOOGLE_MAPS_API_KEY` | Google Maps API key for route duration features | placeholder value |
 
 ## API and UI references
-- Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, crew assignments, logistics transports, and auth are documented in `backend/README.md`.
+- Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, registrations, crew assignments, logistics transports, and auth are documented in `backend/README.md`.
 - Frontend routes include `/login`, `/events`, `/events/:eventId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.
