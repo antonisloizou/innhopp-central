@@ -13,11 +13,12 @@ Create a single source of truth for operational data that keeps the team synchro
 - Event-level commercial registration settings including public signup toggles, deadlines, pricing, currency, and confirmation thresholds.
 - Public event registration pages by slug that create participant-linked registrations and default payment placeholders.
 - Staff registration operations pages for event-level registration lists, status changes, payment updates, and internal notes.
+- Event comms pages with reusable email templates, audience preview by registration/payment filters, manual campaign send, and delivery history.
 - Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
 - RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.
 
 ## Not yet implemented
-- Automated notifications and campaign email sending.
+- Automated notifications with background scheduling and real provider delivery.
 - Payment provider integrations, waivers, certifications, and health declarations.
 - Check-in flows or public driver route pages.
 - Analytics dashboards beyond raw data access.
@@ -50,6 +51,7 @@ RBAC ensures each user only sees the modules and actions needed for their duties
 - Configure event registration settings such as public slug, opening windows, balance deadlines, pricing, and minimum registration thresholds.
 - Share public `/register/:slug` links, accept self-serve signups, auto-create or match participant profiles by email, and generate deposit/balance payment placeholders from the event settings.
 - Open `/events/:eventId/registrations` to filter registrations by status and payment state, then drill into `/registrations/:registrationId` to update deadlines, payment records, status, and activity notes.
+- Open `/events/:eventId/comms` to create email templates, preview recipients for an event, send a manual campaign to filtered registrations, and review send history.
 - Coordinate transports, vehicles, accommodations, meals, and other logistics items per operation.
 - Authenticate via OIDC (authorization code flow), persist sessions in secure cookies, and enforce role-based permissions seeded on startup (Admin, Staff, Jump Master, Jump Leader, Ground Crew, Driver, Packer, Participant). Set `DEV_ALLOW_ALL=true` to bypass auth locally.
 - Use the frontend pages for login, events, manifests, participants, logistics, seasons, innhopp details, and airfield details (see `frontend/src/pages/` and `frontend/src/components/Layout.tsx` for the routes).
@@ -119,4 +121,4 @@ Frontend environment variables:
 
 ## API and UI references
 - Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, registrations, crew assignments, logistics transports, and auth are documented in `backend/README.md`.
-- Frontend routes include `/login`, `/register/:slug`, `/events`, `/events/:eventId`, `/events/:eventId/details`, `/events/:eventId/registrations`, `/registrations/:registrationId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.
+- Frontend routes include `/login`, `/register/:slug`, `/events`, `/events/:eventId`, `/events/:eventId/details`, `/events/:eventId/registrations`, `/events/:eventId/comms`, `/registrations/:registrationId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.

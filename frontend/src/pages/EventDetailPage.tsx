@@ -42,6 +42,7 @@ import {
   toEventLocalInput,
   toEventLocalPickerDate
 } from '../utils/eventDate';
+import { listEventRegistrations, Registration } from '../api/registrations';
 import { createAccommodation, listAccommodations } from '../api/events';
 import {
   Transport,
@@ -157,6 +158,29 @@ const formatDateTime24h = (value?: string | null) => {
   });
 };
 
+const badgeClassForRegistrationStatus = (status?: string | null) => {
+  if (status === 'fully_paid' || status === 'confirmed' || status === 'deposit_paid') return 'badge success';
+  if (status === 'cancelled' || status === 'expired') return 'badge danger';
+  return 'badge neutral';
+};
+
+const badgeClassForPaymentState = (state: 'paid' | 'pending' | 'overdue' | 'none') => {
+  if (state === 'paid') return 'badge success';
+  if (state === 'overdue') return 'badge danger';
+  return 'badge neutral';
+};
+
+const computePaymentState = (
+  paidAt?: string | null,
+  dueAt?: string | null,
+  registrationStatus?: string | null
+): 'paid' | 'pending' | 'overdue' | 'none' => {
+  if (paidAt) return 'paid';
+  if (!dueAt) return 'none';
+  if (registrationStatus === 'cancelled' || registrationStatus === 'expired') return 'none';
+  return new Date(dueAt).getTime() < Date.now() ? 'overdue' : 'pending';
+};
+
 const emptyLandingArea = (): LandingAreaForm => ({
   name: '',
   description: '',
@@ -242,6 +266,7 @@ const EventDetailPage = () => {
   const [eventData, setEventData] = useState<Event | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [participantIds, setParticipantIds] = useState<number[]>([]);
@@ -339,6 +364,13 @@ const currentSignature = useMemo(
     const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(balance) ? balance : 0);
     return total.toFixed(2);
   }, [eventForm.deposit_amount, eventForm.balance_amount]);
+  const registrationsByParticipantId = useMemo(() => {
+    const next = new Map<number, Registration>();
+    registrations.forEach((registration) => {
+      next.set(registration.participant_id, registration);
+    });
+    return next;
+  }, [registrations]);
   type AccommodationItem = {
     id?: number;
     name: string;
@@ -740,9 +772,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setLoading(true);
       setError(null);
       try {
-        const event = await getEvent(Number(eventId));
+        const [event, eventRegistrations] = await Promise.all([
+          getEvent(Number(eventId)),
+          listEventRegistrations(Number(eventId))
+        ]);
         if (cancelled) return;
         setEventData(event);
+        setRegistrations(Array.isArray(eventRegistrations) ? eventRegistrations : []);
         setInnhopps(normalizeInnhopps(event));
         setParticipantIds(Array.isArray(event.participant_ids) ? event.participant_ids : []);
         setAirfieldIds(Array.isArray(event.airfield_ids) ? event.airfield_ids : []);
@@ -931,6 +967,46 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   const participantLabel = (id: number) =>
     participants.find((p) => p.id === id)?.full_name || `Participant #${id}`;
 
+  const renderRegistrationSummary = (participantId: number) => {
+    const registration = registrationsByParticipantId.get(participantId);
+    if (!registration) {
+      return <div className="muted">No registration record yet.</div>;
+    }
+    const depositState = computePaymentState(
+      registration.deposit_paid_at,
+      registration.deposit_due_at,
+      registration.status
+    );
+    const balanceState = computePaymentState(
+      registration.balance_paid_at,
+      registration.balance_due_at,
+      registration.status
+    );
+    return (
+      <>
+        <div className="event-detail-role-badges event-detail-registration-badges">
+          <span className={badgeClassForRegistrationStatus(registration.status)}>
+            {registration.status.replace(/_/g, ' ')}
+          </span>
+          <span className={badgeClassForPaymentState(depositState)}>Deposit {depositState}</span>
+          <span className={badgeClassForPaymentState(balanceState)}>Balance {balanceState}</span>
+        </div>
+        <div className="event-detail-registration-meta">
+          <span>Registered {formatDateTime24h(registration.registered_at) || 'Unknown'}</span>
+          {registration.deposit_due_at && <span>Deposit due {formatDateTime24h(registration.deposit_due_at)}</span>}
+          {registration.balance_due_at && <span>Balance due {formatDateTime24h(registration.balance_due_at)}</span>}
+        </div>
+        <Link
+          to={`/registrations/${registration.id}`}
+          className="event-detail-registration-link"
+          onClick={saveDetailState}
+        >
+          Open registration
+        </Link>
+      </>
+    );
+  };
+
   const availableParticipants = participants
     .filter((p) => {
       const roles = Array.isArray(p.roles) ? p.roles : [];
@@ -1060,10 +1136,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           }))
       };
       const updated = await updateEvent(eventData.id, payload);
+      const nextRegistrations = await listEventRegistrations(eventData.id);
       const normalizedInnhopps = normalizeInnhopps(updated);
       const normalizedParticipants = Array.isArray(updated.participant_ids) ? updated.participant_ids : [];
       const normalizedAirfields = Array.isArray(updated.airfield_ids) ? updated.airfield_ids : [];
       setEventData(updated);
+      setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
       setParticipantIds(normalizedParticipants);
       setAirfieldIds(normalizedAirfields);
       setInnhopps(normalizedInnhopps);
@@ -1114,7 +1192,9 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           eventForm.minimum_deposit_count !== '' ? Number(eventForm.minimum_deposit_count) : 0,
         commercial_status: eventForm.commercial_status
       });
+      const nextRegistrations = await listEventRegistrations(eventData.id);
       setEventData(updated);
+      setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
       setMessage('Registration settings updated');
       setLastSavedSignature(buildSignature(eventForm, participantIds, airfieldIds, innhopps));
       setSaved(true);
@@ -1573,6 +1653,17 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 }}
               >
                 Manifest
+              </button>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenuOpen(false);
+                  navigate(`/events/${eventData.id}/comms`);
+                }}
+              >
+                Communication
               </button>
               <button
                 className="event-schedule-menu-item"
@@ -2526,6 +2617,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         <div className="muted">
                           Experience: {profile.experience_level || 'Not provided'}
                         </div>
+                        {renderRegistrationSummary(id)}
                         {extraRoles.length > 0 && (
                           <div className="event-detail-role-badges">
                             {extraRoles.map((role) => (
@@ -2744,6 +2836,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <strong>{profile.full_name || participantLabel(id)}</strong>
                     <div className="muted">{profile.email || 'No email on file'}</div>
                     <div className="muted">Experience: {profile.experience_level || 'Not provided'}</div>
+                    {renderRegistrationSummary(id)}
                     {extraRoles.length > 0 && (
                       <div className="event-detail-role-badges">
                         {extraRoles.map((role) => (

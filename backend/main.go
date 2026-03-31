@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/auth"
+	"github.com/innhopp/central/backend/comms"
 	"github.com/innhopp/central/backend/events"
 	"github.com/innhopp/central/backend/innhopps"
 	"github.com/innhopp/central/backend/logistics"
@@ -55,6 +56,9 @@ func main() {
 	}
 	if err := logistics.BackfillMissingRouteDurations(backfillCtx, pool); err != nil {
 		log.Printf("route duration backfill failed: %v", err)
+	}
+	if err := registrations.BackfillEventRosterSync(backfillCtx, pool); err != nil {
+		log.Printf("event/registration sync backfill failed: %v", err)
 	}
 	cancelBackfill()
 
@@ -122,6 +126,7 @@ func main() {
 	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/comms", comms.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))
@@ -608,6 +613,66 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS email_templates (
+            id SERIAL PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            subject_template TEXT NOT NULL,
+            body_template TEXT NOT NULL,
+            audience_type TEXT NOT NULL DEFAULT 'event_registrations',
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS key TEXT`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS name TEXT`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS subject_template TEXT`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS body_template TEXT`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS audience_type TEXT NOT NULL DEFAULT 'event_registrations'`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE`,
+		`ALTER TABLE email_templates ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS email_templates_key_idx ON email_templates ((lower(key)))`,
+		`CREATE TABLE IF NOT EXISTS email_campaigns (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+            template_id INTEGER REFERENCES email_templates(id) ON DELETE SET NULL,
+            mode TEXT NOT NULL DEFAULT 'manual',
+            filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            scheduled_for TIMESTAMPTZ,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS event_id INTEGER REFERENCES events(id) ON DELETE CASCADE`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS template_id INTEGER REFERENCES email_templates(id) ON DELETE SET NULL`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'manual'`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS filter_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
+		`ALTER TABLE email_campaigns ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS email_deliveries (
+            id SERIAL PRIMARY KEY,
+            campaign_id INTEGER NOT NULL REFERENCES email_campaigns(id) ON DELETE CASCADE,
+            registration_id INTEGER REFERENCES event_registrations(id) ON DELETE SET NULL,
+            email TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            provider_message_id TEXT,
+            status TEXT NOT NULL DEFAULT 'queued',
+            sent_at TIMESTAMPTZ,
+            failed_at TIMESTAMPTZ,
+            error_message TEXT
+        )`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS campaign_id INTEGER NOT NULL REFERENCES email_campaigns(id) ON DELETE CASCADE`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS registration_id INTEGER REFERENCES event_registrations(id) ON DELETE SET NULL`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS email TEXT`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS subject TEXT`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS body TEXT`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS provider_message_id TEXT`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'queued'`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ`,
+		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS error_message TEXT`,
 	}
 
 	for _, stmt := range stmts {

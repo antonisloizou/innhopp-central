@@ -165,6 +165,16 @@ type activityPayload struct {
 	Payload map[string]any `json:"payload"`
 }
 
+type registrationEventSettings struct {
+	ID              int64
+	Name            string
+	StartsAt        time.Time
+	BalanceDeadline *time.Time
+	DepositAmount   string
+	BalanceAmount   string
+	Currency        string
+}
+
 type PublicRegistrationEvent struct {
 	ID                            int64      `json:"id"`
 	Name                          string     `json:"name"`
@@ -512,6 +522,220 @@ func activeRegistrationExists(ctx context.Context, q interface {
 	return existingID > 0, nil
 }
 
+func loadRegistrationEventSettings(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, eventID int64) (*registrationEventSettings, error) {
+	var event registrationEventSettings
+	if err := q.QueryRow(ctx, `
+		SELECT id,
+		       name,
+		       starts_at,
+		       balance_deadline,
+		       COALESCE(deposit_amount::TEXT, ''),
+		       COALESCE(balance_amount::TEXT, ''),
+		       COALESCE(currency, 'EUR')
+		FROM events
+		WHERE id = $1
+	`, eventID).Scan(
+		&event.ID,
+		&event.Name,
+		&event.StartsAt,
+		&event.BalanceDeadline,
+		&event.DepositAmount,
+		&event.BalanceAmount,
+		&event.Currency,
+	); err != nil {
+		return nil, err
+	}
+	event.Currency = strings.ToUpper(strings.TrimSpace(event.Currency))
+	if event.Currency == "" {
+		event.Currency = "EUR"
+	}
+	return &event, nil
+}
+
+func ensureEventParticipantTx(ctx context.Context, tx pgx.Tx, eventID, participantID int64) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO event_participants (event_id, participant_id)
+		VALUES ($1, $2)
+		ON CONFLICT (event_id, participant_id) DO NOTHING
+	`, eventID, participantID)
+	return err
+}
+
+func registrationStatusFromEventSettings(event *registrationEventSettings) string {
+	if event == nil {
+		return "deposit_pending"
+	}
+	if strings.TrimSpace(event.DepositAmount) == "" || event.DepositAmount == "0" || event.DepositAmount == "0.00" {
+		if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
+			return "balance_pending"
+		}
+		return "confirmed"
+	}
+	return "deposit_pending"
+}
+
+func depositDueAtFromEventSettings(now time.Time, event *registrationEventSettings) *time.Time {
+	if event == nil {
+		return nil
+	}
+	dueAt := now.Add(7 * 24 * time.Hour)
+	if event.BalanceDeadline != nil && event.BalanceDeadline.Before(dueAt) {
+		dueAt = *event.BalanceDeadline
+	}
+	if event.StartsAt.Before(dueAt) {
+		dueAt = event.StartsAt
+	}
+	return &dueAt
+}
+
+func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID int64, event *registrationEventSettings, depositDueAt, balanceDueAt *time.Time, note string) error {
+	if event == nil {
+		return nil
+	}
+	if strings.TrimSpace(event.DepositAmount) != "" && event.DepositAmount != "0" && event.DepositAmount != "0.00" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+			VALUES ($1, 'deposit', $2::numeric, $3, 'pending', $4, $5)
+		`, registrationID, event.DepositAmount, event.Currency, depositDueAt, note); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+			VALUES ($1, 'balance', $2::numeric, $3, 'pending', $4, $5)
+		`, registrationID, event.BalanceAmount, event.Currency, balanceDueAt, note); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.Tx, event *registrationEventSettings, participantID int64, source, note string) error {
+	if event == nil || participantID <= 0 {
+		return nil
+	}
+	exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID)
+	if err != nil || exists {
+		return err
+	}
+	registeredAt := time.Now().UTC()
+	depositDueAt := depositDueAtFromEventSettings(registeredAt, event)
+	balanceDueAt := event.BalanceDeadline
+	status := registrationStatusFromEventSettings(event)
+
+	var registrationID int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO event_registrations (
+			event_id, participant_id, status, source, registered_at, deposit_due_at, balance_due_at, tags, internal_notes
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], ''
+		)
+		RETURNING id
+	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, balanceDueAt).Scan(&registrationID); err != nil {
+		return err
+	}
+
+	if err := createDefaultPaymentRowsTx(ctx, tx, registrationID, event, depositDueAt, balanceDueAt, note); err != nil {
+		return err
+	}
+	if err := createActivityTx(ctx, tx, registrationID, "status_change", note, map[string]any{
+		"status": status,
+		"source": strings.TrimSpace(source),
+	}, nil); err != nil {
+		return err
+	}
+	return syncRegistrationPaymentMarkersTx(ctx, tx, registrationID)
+}
+
+func SyncEventParticipantsToRegistrationsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64, source string) error {
+	if eventID <= 0 || len(participantIDs) == 0 {
+		return nil
+	}
+	event, err := loadRegistrationEventSettings(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	for _, participantID := range participantIDs {
+		if participantID <= 0 {
+			continue
+		}
+		if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, participantID, source, "Registration created from event participant roster"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO event_participants (event_id, participant_id)
+		SELECT r.event_id, r.participant_id
+		FROM event_registrations r
+		WHERE r.cancelled_at IS NULL AND r.expired_at IS NULL
+		ON CONFLICT (event_id, participant_id) DO NOTHING
+	`); err != nil {
+		return err
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT ep.event_id, ep.participant_id
+		FROM event_participants ep
+		LEFT JOIN event_registrations r
+		  ON r.event_id = ep.event_id
+		 AND r.participant_id = ep.participant_id
+		 AND r.cancelled_at IS NULL
+		 AND r.expired_at IS NULL
+		WHERE r.id IS NULL
+		ORDER BY ep.event_id ASC, ep.participant_id ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pair struct {
+		eventID       int64
+		participantID int64
+	}
+	missing := make([]pair, 0)
+	for rows.Next() {
+		var item pair
+		if err := rows.Scan(&item.eventID, &item.participantID); err != nil {
+			return err
+		}
+		missing = append(missing, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	eventCache := make(map[int64]*registrationEventSettings)
+	for _, item := range missing {
+		event := eventCache[item.eventID]
+		if event == nil {
+			event, err = loadRegistrationEventSettings(ctx, tx, item.eventID)
+			if err != nil {
+				return err
+			}
+			eventCache[item.eventID] = event
+		}
+		if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, item.participantID, "event_roster_backfill", "Registration created by event roster backfill"); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 func normalizeOptionalPublicString(value string) string {
 	return strings.TrimSpace(value)
 }
@@ -782,6 +1006,10 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration: %v", err))
 		return
 	}
+	if err := ensureEventParticipantTx(ctx, tx, event.ID, participantID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to sync event participant: %v", err))
+		return
+	}
 
 	if strings.TrimSpace(event.DepositAmount) != "" && event.DepositAmount != "0" && event.DepositAmount != "0.00" {
 		if _, err := tx.Exec(ctx, `
@@ -944,6 +1172,10 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to create registration")
+		return
+	}
+	if err := ensureEventParticipantTx(ctx, tx, eventID, payload.ParticipantID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to sync event participant")
 		return
 	}
 

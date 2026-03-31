@@ -21,6 +21,7 @@ import (
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/registrations"
 )
 
 var (
@@ -614,6 +615,10 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
 		return
 	}
+	if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, event.ID, participantIDs, "event_roster"); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to sync registrations")
+		return
+	}
 
 	if err := replaceEventAirfieldsTx(ctx, tx, event.ID, airfieldIDs); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to save airfields")
@@ -810,6 +815,10 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
 			return
 		}
+		if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, eventID, participantIDs, "event_roster"); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync registrations")
+			return
+		}
 	}
 
 	if replaceAirfields {
@@ -982,6 +991,10 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := replaceEventParticipantsTx(ctx, tx, created.ID, original.ParticipantIDs); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy participants")
+		return
+	}
+	if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, created.ID, original.ParticipantIDs, "event_roster"); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy registrations")
 		return
 	}
 

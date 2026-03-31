@@ -1704,6 +1704,17 @@ const EventSchedulePage = () => {
                   role="menuitem"
                   onClick={() => {
                     setActionMenuOpen(false);
+                    navigate(`/events/${eventData.id}/comms`);
+                  }}
+                >
+                  Communication
+                </button>
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
                     handleCopy();
                   }}
                   disabled={copying}

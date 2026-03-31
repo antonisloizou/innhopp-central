@@ -39,6 +39,9 @@ On startup the server creates these tables if they do not already exist:
 - `event_registrations` – participant-to-event lifecycle records with deadlines, notes, and ownership.
 - `registration_payments` – ledger entries for deposit, balance, refund, and manual adjustments per registration.
 - `registration_activity` – internal timeline entries attached to a registration.
+- `email_templates` – reusable subject/body templates for event communications.
+- `email_campaigns` – manual or automated campaign executions with stored audience filters.
+- `email_deliveries` – rendered outbound messages logged per recipient and campaign.
 - `crew_assignments` – role assignments for a participant on a manifest.
 - `gear_assets` – tracked gear inventory with inspection status.
 
@@ -108,6 +111,12 @@ On startup the server creates these tables if they do not already exist:
 | POST | `/api/registrations/{registrationID}/payments` | Create a payment ledger row |
 | PUT | `/api/registrations/payments/{paymentID}` | Update a payment ledger row |
 | POST | `/api/registrations/{registrationID}/activity` | Append an internal activity entry |
+| GET | `/api/comms/templates` | List email templates |
+| POST | `/api/comms/templates` | Create an email template |
+| GET | `/api/comms/events/{eventID}/audience-preview` | Preview comms recipients for an event with status/payment filters |
+| GET | `/api/comms/events/{eventID}/campaigns` | List campaign history for an event |
+| POST | `/api/comms/campaigns` | Create and send a manual campaign |
+| GET | `/api/comms/campaigns/{campaignID}` | Retrieve one campaign with delivery log |
 | GET | `/api/rbac/crew-assignments` | List crew assignments |
 | POST | `/api/rbac/crew-assignments` | Create a crew assignment |
 | GET | `/api/logistics/gear-assets` | List gear assets |
@@ -121,6 +130,7 @@ On startup the server creates these tables if they do not already exist:
 - The registration backbone enforces one active registration per participant per event; cancelled or expired registrations can be recreated.
 - Public registration links only work for events with `public_registration_enabled=true`; the backend also respects `registration_open_at` and rejects registrations after the event start time.
 - Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/balance payment rows from the event commercial settings.
+- The first comms slice renders templates and logs per-recipient deliveries inside the database; it does not yet integrate an SMTP/provider transport or background scheduler.
 
 ## Testing
 
