@@ -245,7 +245,6 @@ const ManifestDetailPage = () => {
     try {
       await persistManifest(next);
       setSelectedParticipantId('');
-      setMessage('Participant added to manifest');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add participant');
     } finally {
@@ -263,7 +262,6 @@ const ManifestDetailPage = () => {
     try {
       await persistManifest(next);
       setSelectedStaffId('');
-      setMessage('Staff added to manifest');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add staff');
     } finally {
@@ -277,7 +275,6 @@ const ManifestDetailPage = () => {
     setMessage(null);
     try {
       await persistManifest(next);
-      setMessage('Participant removed from manifest');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to remove participant');
     } finally {
@@ -318,7 +315,6 @@ const ManifestDetailPage = () => {
         roles: ['Participant', 'Skydiver']
       });
       setShowParticipantForm(false);
-      setMessage('Participant created and added');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create participant');
     } finally {
@@ -363,7 +359,6 @@ const ManifestDetailPage = () => {
         roles: ['Participant', 'Skydiver', 'Staff']
       });
       setShowStaffForm(false);
-      setMessage('Staff participant created and added');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create staff participant');
     } finally {
@@ -377,7 +372,6 @@ const ManifestDetailPage = () => {
     setMessage(null);
     try {
       await persistManifest(participantIds);
-      setMessage('Manifest updated');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update manifest');
     } finally {

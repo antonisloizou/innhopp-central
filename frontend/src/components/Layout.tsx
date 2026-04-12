@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getMyParticipantProfile } from '../api/participants';
-import logo from '../assets/logo.webp';
+import { listMyRegistrations } from '../api/registrations';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
-
-const INNHOPP_WEBSITE_URL = 'https://www.innhopp.com';
+import AppHeader from './AppHeader';
 
 const hasText = (value?: string | number | null) => String(value ?? '').trim().length > 0;
 
@@ -25,6 +24,7 @@ const Layout = () => {
   const [navOpen, setNavOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const [hasPendingDeposits, setHasPendingDeposits] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
@@ -34,7 +34,8 @@ const Layout = () => {
     : [
         { to: '/events', label: 'Events' },
         { to: '/participants', label: 'Participants' },
-        { to: '/logistics', label: 'Logistics' }
+        { to: '/logistics', label: 'Logistics' },
+        { to: '/communications', label: 'Communications' }
       ];
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window === 'undefined') return 'dark';
@@ -74,17 +75,27 @@ const Layout = () => {
     const loadProfileCompletion = async () => {
       if (!user) {
         setProfileIncomplete(false);
+        setHasPendingDeposits(false);
         return;
       }
       try {
-        const profile = await getMyParticipantProfile();
+        const [profile, registrations] = await Promise.all([
+          getMyParticipantProfile(),
+          listMyRegistrations()
+        ]);
         if (!cancelled) {
           setProfileIncomplete(!isProfileCompleteForRegistration(profile));
+          setHasPendingDeposits(
+            registrations.some((registration) =>
+              (registration.payments || []).some((payment) => payment.kind === 'deposit' && payment.status === 'pending')
+            )
+          );
         }
       } catch (error) {
         if (cancelled) return;
         const status = (error as Error & { status?: number })?.status;
         setProfileIncomplete(status === 404);
+        setHasPendingDeposits(false);
       }
     };
 
@@ -119,11 +130,8 @@ const Layout = () => {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <a className="brand" href={INNHOPP_WEBSITE_URL}>
-          <img src={logo} alt="Innhopp Central logo" className="brand-logo" />
-        </a>
-        <div className="header-actions">
+      <AppHeader
+        actions={
           <button
             type="button"
             className={`ghost menu-toggle ${navOpen ? 'open' : ''}`}
@@ -137,8 +145,8 @@ const Layout = () => {
               <span className="bar" />
             </span>
           </button>
-        </div>
-      </header>
+        }
+      />
       <div className="app-body">
         <nav className={`app-nav ${navOpen ? 'open' : ''}`}>
           <ul>
@@ -165,11 +173,19 @@ const Layout = () => {
             >
               <span className="nav-user-label">
                 <span>{user?.full_name || user?.email}</span>
-                {profileIncomplete ? (
+                {profileIncomplete || hasPendingDeposits ? (
                   <span
                     className="nav-user-warning"
-                    title="Complete your profile to be able to register to events"
-                    aria-label="Complete your profile to be able to register to events"
+                    title={
+                      profileIncomplete
+                        ? 'Complete your profile to be able to register to events'
+                        : 'Pending deposit payments require attention'
+                    }
+                    aria-label={
+                      profileIncomplete
+                        ? 'Complete your profile to be able to register to events'
+                        : 'Pending deposit payments require attention'
+                    }
                   >
                     !
                   </span>

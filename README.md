@@ -47,9 +47,9 @@ RBAC ensures each user only sees the modules and actions needed for their duties
 - Build seasons and events, including detailed innhopp plans with landing areas, NOTAM notes, risk mitigation, and hospital/boat coverage metadata.
 - Register airfields, attach them to events, and manage manifests with capacity, staff slots, and participant assignments.
 - Maintain a participant roster (roles, experience, contacts), add people to events/manifests, and track crew roles such as Jump Master/Leader, Ground Crew, Driver, and Packer.
-- Create event registrations for participants, record deposit/balance payment entries, track registration status, and append internal activity notes.
-- Configure event registration settings such as public slug, opening windows, balance deadlines, pricing, and minimum registration thresholds.
-- Share public `/register/:slug` links, accept self-serve signups, auto-create or match participant profiles by email, and generate deposit/balance payment placeholders from the event settings.
+- Create event registrations for participants, record deposit/main invoice payment entries, track registration status, and append internal activity notes.
+- Configure event registration settings such as public slug, opening windows, main invoice deadlines, pricing, and minimum registration thresholds.
+- Share public `/register/:slug` links, accept self-serve signups, auto-create or match participant profiles by email, and generate deposit/main invoice payment placeholders from the event settings.
 - Open `/events/:eventId/registrations` to filter registrations by status and payment state, then drill into `/registrations/:registrationId` to update deadlines, payment records, status, and activity notes.
 - Open `/events/:eventId/comms` to create email templates, preview recipients for an event, send a manual campaign to filtered registrations, and review send history.
 - Coordinate transports, vehicles, accommodations, meals, and other logistics items per operation.

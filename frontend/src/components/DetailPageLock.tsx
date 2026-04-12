@@ -164,18 +164,4 @@ type DetailPageLockTitleProps = {
   children: ReactNode;
 };
 
-export const DetailPageLockTitle = ({ locked, onToggleLocked, children }: DetailPageLockTitleProps) => (
-  <div className="detail-lock-title">
-    <button
-      type="button"
-      className="detail-lock-toggle"
-      onClick={onToggleLocked}
-      aria-label={locked ? 'Unlock page editing' : 'Lock page editing'}
-      aria-pressed={!locked}
-      title={locked ? 'Unlock page editing' : 'Lock page editing'}
-    >
-      {locked ? '🔒' : '🔓'}
-    </button>
-    {children}
-  </div>
-);
+export const DetailPageLockTitle = ({ children }: DetailPageLockTitleProps) => children;

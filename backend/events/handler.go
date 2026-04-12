@@ -108,12 +108,13 @@ type Event struct {
 	StartsAt                  time.Time  `json:"starts_at"`
 	EndsAt                    *time.Time `json:"ends_at,omitempty"`
 	Slots                     int        `json:"slots"`
+	RemainingSlots            int        `json:"remaining_slots"`
 	PublicRegistrationSlug    string     `json:"public_registration_slug,omitempty"`
 	PublicRegistrationEnabled bool       `json:"public_registration_enabled"`
 	RegistrationOpenAt        *time.Time `json:"registration_open_at,omitempty"`
-	BalanceDeadline           *time.Time `json:"balance_deadline,omitempty"`
+	MainInvoiceDeadline       *time.Time `json:"main_invoice_deadline,omitempty"`
 	DepositAmount             *float64   `json:"deposit_amount,omitempty"`
-	BalanceAmount             *float64   `json:"balance_amount,omitempty"`
+	MainInvoiceAmount         *float64   `json:"main_invoice_amount,omitempty"`
 	Currency                  string     `json:"currency,omitempty"`
 	MinimumDepositCount       int        `json:"minimum_deposit_count"`
 	CommercialStatus          string     `json:"commercial_status"`
@@ -206,9 +207,9 @@ type eventPayload struct {
 	PublicRegistrationSlug    string           `json:"public_registration_slug"`
 	PublicRegistrationEnabled bool             `json:"public_registration_enabled"`
 	RegistrationOpenAt        string           `json:"registration_open_at"`
-	BalanceDeadline           string           `json:"balance_deadline"`
+	MainInvoiceDeadline       string           `json:"main_invoice_deadline"`
 	DepositAmount             *float64         `json:"deposit_amount"`
-	BalanceAmount             *float64         `json:"balance_amount"`
+	MainInvoiceAmount         *float64         `json:"main_invoice_amount"`
 	Currency                  string           `json:"currency"`
 	MinimumDepositCount       int              `json:"minimum_deposit_count"`
 	CommercialStatus          string           `json:"commercial_status"`
@@ -419,7 +420,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(), `
 		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
 		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
-		       balance_deadline, deposit_amount, balance_amount, COALESCE(currency, 'EUR'),
+		       main_invoice_deadline, deposit_amount, main_invoice_amount, COALESCE(currency, 'EUR'),
 		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
 		FROM events
 		ORDER BY starts_at DESC`)
@@ -435,7 +436,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots,
 			&e.PublicRegistrationSlug, &e.PublicRegistrationEnabled, &e.RegistrationOpenAt,
-			&e.BalanceDeadline, &e.DepositAmount, &e.BalanceAmount, &e.Currency,
+			&e.MainInvoiceDeadline, &e.DepositAmount, &e.MainInvoiceAmount, &e.Currency,
 			&e.MinimumDepositCount, &e.CommercialStatus, &e.CreatedAt,
 		); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
@@ -497,9 +498,9 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "registration_open_at must be a valid timestamp")
 		return
 	}
-	balanceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.BalanceDeadline)
+	mainInvoiceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.MainInvoiceDeadline)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "balance_deadline must be a valid timestamp")
+		httpx.Error(w, http.StatusBadRequest, "main_invoice_deadline must be a valid timestamp")
 		return
 	}
 	publicRegistrationSlug, err := normalizeRegistrationSlug(payload.PublicRegistrationSlug)
@@ -563,13 +564,17 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	depositAmount := normalizeOptionalMoney(payload.DepositAmount)
-	balanceAmount := normalizeOptionalMoney(payload.BalanceAmount)
+	mainInvoiceAmount := normalizeOptionalMoney(payload.MainInvoiceAmount)
+	if err := validateRegistrationSettings(payload.PublicRegistrationEnabled, depositAmount, mainInvoiceAmount, minimumDepositCount, commercialStatus); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	row := tx.QueryRow(ctx,
 		`INSERT INTO events (
 			season_id, name, location, status, starts_at, ends_at, slots,
 			public_registration_slug, public_registration_enabled, registration_open_at,
-			balance_deadline, deposit_amount, balance_amount, currency,
+			main_invoice_deadline, deposit_amount, main_invoice_amount, currency,
 			minimum_deposit_count, commercial_status
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
@@ -579,7 +584,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		) RETURNING id, created_at`,
 		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots,
 		publicRegistrationSlug, payload.PublicRegistrationEnabled, registrationOpenAt,
-		balanceDeadline, depositAmount, balanceAmount, currency,
+		mainInvoiceDeadline, depositAmount, mainInvoiceAmount, currency,
 		minimumDepositCount, commercialStatus,
 	)
 
@@ -594,9 +599,9 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	event.PublicRegistrationSlug = publicRegistrationSlug
 	event.PublicRegistrationEnabled = payload.PublicRegistrationEnabled
 	event.RegistrationOpenAt = registrationOpenAt
-	event.BalanceDeadline = balanceDeadline
+	event.MainInvoiceDeadline = mainInvoiceDeadline
 	event.DepositAmount = depositAmount
-	event.BalanceAmount = balanceAmount
+	event.MainInvoiceAmount = mainInvoiceAmount
 	event.Currency = currency
 	event.MinimumDepositCount = minimumDepositCount
 	event.CommercialStatus = commercialStatus
@@ -704,9 +709,9 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "registration_open_at must be a valid timestamp")
 		return
 	}
-	balanceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.BalanceDeadline)
+	mainInvoiceDeadline, err := timeutil.ParseOptionalEventTimestamp(payload.MainInvoiceDeadline)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "balance_deadline must be a valid timestamp")
+		httpx.Error(w, http.StatusBadRequest, "main_invoice_deadline must be a valid timestamp")
 		return
 	}
 	publicRegistrationSlug, err := normalizeRegistrationSlug(payload.PublicRegistrationSlug)
@@ -762,7 +767,11 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	depositAmount := normalizeOptionalMoney(payload.DepositAmount)
-	balanceAmount := normalizeOptionalMoney(payload.BalanceAmount)
+	mainInvoiceAmount := normalizeOptionalMoney(payload.MainInvoiceAmount)
+	if err := validateRegistrationSettings(payload.PublicRegistrationEnabled, depositAmount, mainInvoiceAmount, minimumDepositCount, commercialStatus); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
@@ -784,16 +793,16 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 			public_registration_slug = $8,
 			public_registration_enabled = $9,
 			registration_open_at = $10,
-			balance_deadline = $11,
+			main_invoice_deadline = $11,
 			deposit_amount = $12,
-			balance_amount = $13,
+			main_invoice_amount = $13,
 			currency = $14,
 			minimum_deposit_count = $15,
 			commercial_status = $16
 		WHERE id = $17`,
 		payload.SeasonID, name, strings.TrimSpace(payload.Location), status, startsAt, endsAt, slots,
 		publicRegistrationSlug, payload.PublicRegistrationEnabled, registrationOpenAt,
-		balanceDeadline, depositAmount, balanceAmount, currency,
+		mainInvoiceDeadline, depositAmount, mainInvoiceAmount, currency,
 		minimumDepositCount, commercialStatus, eventID,
 	)
 	if err != nil {
@@ -955,14 +964,14 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 		`INSERT INTO events (
 			season_id, name, location, status, starts_at, ends_at, slots,
 			public_registration_slug, public_registration_enabled, registration_open_at,
-			balance_deadline, deposit_amount, balance_amount, currency,
+			main_invoice_deadline, deposit_amount, main_invoice_amount, currency,
 			minimum_deposit_count, commercial_status
 		)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING id, created_at`,
 		original.SeasonID, newName, strings.TrimSpace(original.Location), original.Status, original.StartsAt, original.EndsAt, original.Slots,
 		"", false, original.RegistrationOpenAt,
-		original.BalanceDeadline, original.DepositAmount, original.BalanceAmount, original.Currency,
+		original.MainInvoiceDeadline, original.DepositAmount, original.MainInvoiceAmount, original.Currency,
 		original.MinimumDepositCount, "draft",
 	)
 
@@ -977,9 +986,9 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 	created.PublicRegistrationSlug = ""
 	created.PublicRegistrationEnabled = false
 	created.RegistrationOpenAt = original.RegistrationOpenAt
-	created.BalanceDeadline = original.BalanceDeadline
+	created.MainInvoiceDeadline = original.MainInvoiceDeadline
 	created.DepositAmount = original.DepositAmount
-	created.BalanceAmount = original.BalanceAmount
+	created.MainInvoiceAmount = original.MainInvoiceAmount
 	created.Currency = original.Currency
 	created.MinimumDepositCount = original.MinimumDepositCount
 	created.CommercialStatus = "draft"
@@ -1708,7 +1717,7 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 	row := h.db.QueryRow(ctx, `
 		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
 		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
-		       balance_deadline, deposit_amount, balance_amount, COALESCE(currency, 'EUR'),
+		       main_invoice_deadline, deposit_amount, main_invoice_amount, COALESCE(currency, 'EUR'),
 		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
 		FROM events
 		WHERE id = $1`, eventID)
@@ -1716,7 +1725,7 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 	if err := row.Scan(
 		&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots,
 		&event.PublicRegistrationSlug, &event.PublicRegistrationEnabled, &event.RegistrationOpenAt,
-		&event.BalanceDeadline, &event.DepositAmount, &event.BalanceAmount, &event.Currency,
+		&event.MainInvoiceDeadline, &event.DepositAmount, &event.MainInvoiceAmount, &event.Currency,
 		&event.MinimumDepositCount, &event.CommercialStatus, &event.CreatedAt,
 	); err != nil {
 		return Event{}, err
@@ -2118,14 +2127,62 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 		return nil, err
 	}
 
+	remainingSlotsMap, err := h.fetchRemainingSlotsForEvents(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
 	attached := make([]Event, len(events))
 	copy(attached, events)
 	for i := range attached {
 		attached[i].ParticipantIDs = participantMap[attached[i].ID]
 		attached[i].Innhopps = innhoppMap[attached[i].ID]
 		attached[i].AirfieldIDs = airfieldMap[attached[i].ID]
+		attached[i].RemainingSlots = remainingSlotsMap[attached[i].ID]
 	}
 	return attached, nil
+}
+
+func (h *Handler) fetchRemainingSlotsForEvents(ctx context.Context, eventIDs []int64) (map[int64]int, error) {
+	result := make(map[int64]int, len(eventIDs))
+	for _, eventID := range eventIDs {
+		result[eventID] = 0
+	}
+
+	rows, err := h.db.Query(ctx, `
+		SELECT e.id,
+		       GREATEST(
+		       	e.slots - (
+		       		SELECT COUNT(*)
+		       		FROM event_registrations r
+		       		JOIN participant_profiles p ON p.id = r.participant_id
+		       		WHERE r.event_id = e.id
+		       		  AND r.cancelled_at IS NULL
+		       		  AND r.expired_at IS NULL
+		       		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		       	),
+		       	0
+		       ) AS remaining_slots
+		FROM events e
+		WHERE e.id = ANY($1)
+	`, eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var eventID int64
+		var remainingSlots int
+		if err := rows.Scan(&eventID, &remainingSlots); err != nil {
+			return nil, err
+		}
+		result[eventID] = remainingSlots
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]int64, error) {
@@ -2725,6 +2782,22 @@ func normalizeOptionalMoney(value *float64) *float64 {
 		return &zero
 	}
 	return value
+}
+
+func validateRegistrationSettings(publicRegistrationEnabled bool, depositAmount, mainInvoiceAmount *float64, minimumDepositCount int, commercialStatus string) error {
+	depositRequired := publicRegistrationEnabled ||
+		minimumDepositCount > 0 ||
+		(mainInvoiceAmount != nil && *mainInvoiceAmount > 0) ||
+		commercialStatus == "registration_open" ||
+		commercialStatus == "awaiting_threshold" ||
+		commercialStatus == "confirmed"
+	if !depositRequired {
+		return nil
+	}
+	if depositAmount == nil || *depositAmount <= 0 {
+		return errors.New("deposit_amount must be greater than 0 for valid registrations")
+	}
+	return nil
 }
 
 func parseEventTimes(starts, ends string) (time.Time, *time.Time, error) {

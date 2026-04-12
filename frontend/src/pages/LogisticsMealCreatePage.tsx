@@ -80,7 +80,6 @@ const LogisticsMealCreatePage = () => {
         notes: form.notes.trim() || undefined
       });
       setCreatedMeal(meal);
-      setMessage('Meal created');
       if (!isCopy) {
         navigate('/logistics/meals', { state: { highlightMealId: meal.id } });
       }

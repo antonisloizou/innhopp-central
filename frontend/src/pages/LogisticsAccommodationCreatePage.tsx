@@ -65,7 +65,6 @@ const LogisticsAccommodationCreatePage = () => {
         notes: form.notes.trim() || undefined
       });
       setCreatedId(created.id);
-      setMessage('Accommodation created');
       const isCopy = !!(location.state as any)?.copyAccommodation;
       if (isCopy) {
         if (created.id && form.event_id) {

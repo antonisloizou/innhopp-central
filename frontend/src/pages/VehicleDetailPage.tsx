@@ -76,7 +76,6 @@ const VehicleDetailPage = () => {
         passenger_capacity: Number(form.passenger_capacity) || 0,
         notes: form.notes.trim() || undefined
       } as CreateEventVehiclePayload);
-      setMessage('Vehicle updated');
       setForm({
         event_id: String(payload.event_id),
         name: payload.name,

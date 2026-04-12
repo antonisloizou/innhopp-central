@@ -219,7 +219,6 @@ const LogisticsCreatePage = () => {
         payload.vehicle_ids = [...vehicleIds];
       }
       const created = await createTransport(payload);
-      setMessage('Transport route created');
       if (created?.id && selectedEventId) {
         try {
           sessionStorage.setItem(`event-schedule-highlight:${selectedEventId}`, `t-${created.id}`);

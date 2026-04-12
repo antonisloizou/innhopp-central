@@ -142,8 +142,8 @@ const CardSaveAction = ({
   error?: string | null;
 }) => (
   <div className="form-actions participant-profile-save-action">
-    <button type="submit" className={`primary ${saved ? 'saved' : ''}`} disabled={submitting || saved}>
-      {submitting ? 'Saving…' : saved ? 'Saved' : 'Save'}
+    <button type="submit" className="primary" disabled={submitting}>
+      {submitting ? 'Saving…' : 'Save'}
     </button>
     {error ? <span className="error-text">{error}</span> : null}
   </div>

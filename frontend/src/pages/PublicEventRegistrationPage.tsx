@@ -1,72 +1,29 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import {
-  createPublicRegistration,
-  getPublicRegistrationEvent,
-  PublicRegistrationEvent,
-  PublicRegistrationPayload,
-  Registration
-} from '../api/registrations';
-import { formatEventLocal } from '../utils/eventDate';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import logo from '../assets/logo.webp';
+import { useAuth } from '../auth/AuthProvider';
+import { getPublicRegistrationEvent, PublicRegistrationEvent } from '../api/registrations';
 
-type PublicRegistrationFormState = {
-  full_name: string;
-  email: string;
-  phone: string;
-  experience_level: string;
-  emergency_contact: string;
-  whatsapp: string;
-  instagram: string;
-  citizenship: string;
-  date_of_birth: string;
-  jumper: boolean;
-  years_in_sport: string;
-  jump_count: string;
-  recent_jump_count: string;
-  license: string;
-};
+const PENDING_PUBLIC_REGISTRATION_KEY = 'innhopp-pending-public-registration';
 
-const initialFormState: PublicRegistrationFormState = {
-  full_name: '',
-  email: '',
-  phone: '',
-  experience_level: '',
-  emergency_contact: '',
-  whatsapp: '',
-  instagram: '',
-  citizenship: '',
-  date_of_birth: '',
-  jumper: true,
-  years_in_sport: '',
-  jump_count: '',
-  recent_jump_count: '',
-  license: ''
-};
-
-const parseOptionalNumber = (value: string): number | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : undefined;
-};
-
-const formatMoney = (amount?: string | null, currency?: string | null) => {
-  const numeric = Number(amount ?? '');
-  if (!Number.isFinite(numeric)) return '';
-  return `${numeric.toFixed(2)} ${(currency || 'EUR').trim().toUpperCase() || 'EUR'}`;
+const toSentenceCase = (value?: string | null) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 };
 
 const PublicEventRegistrationPage = () => {
   const { slug } = useParams<{ slug: string }>();
+  const navigate = useNavigate();
+  const { user, isLoading, startLogin } = useAuth();
   const [event, setEvent] = useState<PublicRegistrationEvent | null>(null);
-  const [form, setForm] = useState<PublicRegistrationFormState>(initialFormState);
-  const [submittedRegistration, setSubmittedRegistration] = useState<Registration | null>(null);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [continuing, setContinuing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+
     const load = async () => {
       if (!slug) {
         setError('Registration link is missing');
@@ -77,8 +34,9 @@ const PublicEventRegistrationPage = () => {
       setError(null);
       try {
         const nextEvent = await getPublicRegistrationEvent(slug);
-        if (cancelled) return;
-        setEvent(nextEvent);
+        if (!cancelled) {
+          setEvent(nextEvent);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load registration page');
@@ -89,285 +47,132 @@ const PublicEventRegistrationPage = () => {
         }
       }
     };
-    load();
+
+    void load();
     return () => {
       cancelled = true;
     };
   }, [slug]);
 
-  const totalAmount = useMemo(() => {
-    if (!event) return '';
-    const deposit = Number(event.deposit_amount ?? '');
-    const balance = Number(event.balance_amount ?? '');
-    if (!Number.isFinite(deposit) && !Number.isFinite(balance)) return '';
-    const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(balance) ? balance : 0);
-    return `${total.toFixed(2)} ${(event.currency || 'EUR').trim().toUpperCase() || 'EUR'}`;
-  }, [event]);
-
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleContinue = async () => {
     if (!slug) {
       setError('Registration link is missing');
       return;
     }
-    setSubmitting(true);
-    setError(null);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(PENDING_PUBLIC_REGISTRATION_KEY, slug);
+    }
+    if (user) {
+      navigate('/profile?publicRegistration=1');
+      return;
+    }
     try {
-      const payload: PublicRegistrationPayload = {
-        full_name: form.full_name.trim(),
-        email: form.email.trim().toLowerCase(),
-        phone: form.phone.trim(),
-        experience_level: form.experience_level.trim(),
-        emergency_contact: form.emergency_contact.trim(),
-        whatsapp: form.whatsapp.trim(),
-        instagram: form.instagram.trim(),
-        citizenship: form.citizenship.trim(),
-        date_of_birth: form.date_of_birth,
-        jumper: form.jumper,
-        years_in_sport: parseOptionalNumber(form.years_in_sport),
-        jump_count: parseOptionalNumber(form.jump_count),
-        recent_jump_count: parseOptionalNumber(form.recent_jump_count),
-        license: form.license.trim()
-      };
-      const created = await createPublicRegistration(slug, payload);
-      setSubmittedRegistration(created);
+      setContinuing(true);
+      setError(null);
+      await startLogin('/profile?publicRegistration=1');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit registration');
-    } finally {
-      setSubmitting(false);
+      setContinuing(false);
+      setError(err instanceof Error ? err.message : 'Unable to start Google sign-in.');
     }
   };
 
   if (loading) {
     return (
-      <main className="public-registration-page">
-        <section className="card public-registration-card">
+      <div className="login-layout">
+        <section className="login-panel public-registration-login-panel">
+          <img src={logo} alt="Innhopp Central logo" className="login-logo" />
           <p>Loading registration page…</p>
         </section>
-      </main>
+      </div>
     );
   }
 
-  if (error && !event && !submittedRegistration) {
+  if (error && !event) {
     return (
-      <main className="public-registration-page">
-        <section className="card public-registration-card stack">
+      <div className="login-layout">
+        <section className="login-panel public-registration-login-panel">
+          <img src={logo} alt="Innhopp Central logo" className="login-logo" />
           <h1>Registration unavailable</h1>
           <p>{error}</p>
           <Link className="button-link" to="/login">
             Staff login
           </Link>
         </section>
-      </main>
+      </div>
     );
   }
 
+  const remainingSlots = Math.max(event?.remaining_slots ?? 0, 0);
+  const isFull = remainingSlots === 0;
+  const registrationUnavailableMessage = toSentenceCase(event?.registration_unavailable_reason);
+
   return (
-    <main className="public-registration-page">
-      <section className="card public-registration-card stack">
-        {event && (
-          <>
-            <header className="stack">
-              <span className="public-registration-eyebrow">Innhopp Central</span>
-              <div>
-                <h1>{event.name}</h1>
-                <p className="public-registration-subtitle">
-                  {event.location ? `${event.location} · ` : ''}
-                  {formatEventLocal(event.starts_at, { dateStyle: 'full', timeStyle: 'short' })}
-                </p>
+    <div className="login-layout">
+      <section className="login-panel public-registration-login-panel">
+        <img src={logo} alt="Innhopp Central logo" className="login-logo" />
+
+        {event ? (
+          <div className="public-registration-login-copy">
+            <div className="event-schedule-headline-text">
+              <div className="event-header-top">
+                <h1 className="public-registration-title">{event.name}</h1>
               </div>
-            </header>
-
-            <div className="public-registration-summary-grid">
-              <article className="public-registration-summary-item">
-                <span>Deposit</span>
-                <strong>{formatMoney(event.deposit_amount, event.currency) || 'TBD'}</strong>
-              </article>
-              <article className="public-registration-summary-item">
-                <span>Balance</span>
-                <strong>{formatMoney(event.balance_amount, event.currency) || 'TBD'}</strong>
-              </article>
-              <article className="public-registration-summary-item">
-                <span>Total</span>
-                <strong>{totalAmount || 'TBD'}</strong>
-              </article>
-              <article className="public-registration-summary-item">
-                <span>Balance deadline</span>
-                <strong>
-                  {event.balance_deadline
-                    ? formatEventLocal(event.balance_deadline, { dateStyle: 'medium', timeStyle: 'short' })
-                    : 'TBD'}
-                </strong>
-              </article>
-            </div>
-
-            {!event.registration_available && !submittedRegistration && (
-              <p className="form-error">{event.registration_unavailable_reason || 'Registration is currently unavailable'}</p>
-            )}
-          </>
-        )}
-
-        {submittedRegistration ? (
-          <section className="stack">
-            <h2>Registration received</h2>
-            <p>
-              Thanks, {submittedRegistration.participant_name || form.full_name}. Your registration is now in
-              <strong> {submittedRegistration.status.replace(/_/g, ' ')}</strong>.
-            </p>
-            <p>
-              We’ve created your event registration and payment placeholders. The team can now follow up on deposit
-              and balance deadlines from inside Innhopp Central.
-            </p>
-          </section>
-        ) : (
-          <form className="stack" onSubmit={handleSubmit}>
-            <div className="form-grid public-registration-form-grid">
-              <label className="form-field">
-                <span>Full name</span>
-                <input
-                  type="text"
-                  value={form.full_name}
-                  onChange={(e) => setForm((prev) => ({ ...prev, full_name: e.target.value }))}
-                  required
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                  required
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Phone</span>
-                <input
-                  type="text"
-                  value={form.phone}
-                  onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Emergency contact</span>
-                <input
-                  type="text"
-                  value={form.emergency_contact}
-                  onChange={(e) => setForm((prev) => ({ ...prev, emergency_contact: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Experience level</span>
-                <input
-                  type="text"
-                  value={form.experience_level}
-                  onChange={(e) => setForm((prev) => ({ ...prev, experience_level: e.target.value }))}
-                  placeholder="Beginner, intermediate, advanced…"
-                />
-              </label>
-
-              <label className="form-field">
-                <span>WhatsApp</span>
-                <input
-                  type="text"
-                  value={form.whatsapp}
-                  onChange={(e) => setForm((prev) => ({ ...prev, whatsapp: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Instagram</span>
-                <input
-                  type="text"
-                  value={form.instagram}
-                  onChange={(e) => setForm((prev) => ({ ...prev, instagram: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Citizenship</span>
-                <input
-                  type="text"
-                  value={form.citizenship}
-                  onChange={(e) => setForm((prev) => ({ ...prev, citizenship: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Date of birth</span>
-                <input
-                  type="date"
-                  value={form.date_of_birth}
-                  onChange={(e) => setForm((prev) => ({ ...prev, date_of_birth: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Years in sport</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={form.years_in_sport}
-                  onChange={(e) => setForm((prev) => ({ ...prev, years_in_sport: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Jump count</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={form.jump_count}
-                  onChange={(e) => setForm((prev) => ({ ...prev, jump_count: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>Recent jump count</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={form.recent_jump_count}
-                  onChange={(e) => setForm((prev) => ({ ...prev, recent_jump_count: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field">
-                <span>License</span>
-                <input
-                  type="text"
-                  value={form.license}
-                  onChange={(e) => setForm((prev) => ({ ...prev, license: e.target.value }))}
-                />
-              </label>
-
-              <label className="form-field public-registration-checkbox-field">
-                <span className="registration-checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={form.jumper}
-                    onChange={(e) => setForm((prev) => ({ ...prev, jumper: e.target.checked }))}
-                  />
-                  <span className="registration-checkbox-label">I am registering as a jumper</span>
+              <p className="event-location">{event.location || 'Location TBD'}</p>
+              <div className="event-detail-header-badges">
+                <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                  {isFull ? 'FULL' : `${remainingSlots} SLOTS AVAILABLE`}
                 </span>
-              </label>
+              </div>
             </div>
+          </div>
+        ) : null}
 
-            {error && <p className="form-error">{error}</p>}
+        {event?.registration_available ? (
+          <>
+            <p className="public-registration-login-message">
+              To register for this event, first sign in or create an account.
+            </p>
 
-            <div className="detail-actions">
-              <button type="submit" className="primary" disabled={!event?.registration_available || submitting}>
-                {submitting ? 'Submitting…' : 'Submit registration'}
-              </button>
-            </div>
-          </form>
-        )}
+            <button
+              type="button"
+              className="google-signin-button"
+              onClick={() => void handleContinue()}
+              disabled={isLoading || continuing}
+              aria-label={isLoading || continuing ? 'Starting sign-in' : 'Continue with Google'}
+            >
+              <span className="google-signin-button__icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M17.64 9.2045C17.64 8.56632 17.5827 7.95268 17.4764 7.36359H9V10.845H13.8436C13.635 11.97 12.9936 12.9232 12.03 13.5614V15.8195H14.9382C16.6405 14.2527 17.64 11.9455 17.64 9.2045Z"
+                    fill="#4285F4"
+                  />
+                  <path
+                    d="M9 18C11.43 18 13.4673 17.1941 14.9382 15.8195L12.03 13.5614C11.2241 14.1014 10.1932 14.4205 9 14.4205C6.65591 14.4205 4.67182 12.8373 3.96409 10.71H0.957275V13.0418C2.42046 15.9486 5.42864 18 9 18Z"
+                    fill="#34A853"
+                  />
+                  <path
+                    d="M3.96409 10.71C3.78409 10.17 3.68182 9.59318 3.68182 9C3.68182 8.40682 3.78409 7.83 3.96409 7.29V4.95818H0.957273C0.355909 6.15545 0 7.51091 0 9C0 10.4891 0.355909 11.8445 0.957273 13.0418L3.96409 10.71Z"
+                    fill="#FBBC05"
+                  />
+                  <path
+                    d="M9 3.57955C10.3023 3.57955 11.4718 4.02773 12.3914 4.90773L15.0032 2.29591C13.4632 0.856364 11.4259 0 9 0C5.42864 0 2.42046 2.05136 0.957275 4.95818L3.96409 7.29C4.67182 5.16273 6.65591 3.57955 9 3.57955Z"
+                    fill="#EA4335"
+                  />
+                </svg>
+              </span>
+              <span className="google-signin-button__label">
+                {isLoading || continuing ? 'Continuing…' : 'Continue with Google'}
+              </span>
+            </button>
+          </>
+        ) : null}
+
+        {!event?.registration_available && registrationUnavailableMessage ? (
+          <p className="error-text">{registrationUnavailableMessage}</p>
+        ) : null}
+        {error ? <p className="error-text">{error}</p> : null}
       </section>
-    </main>
+    </div>
   );
 };
 

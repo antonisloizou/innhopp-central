@@ -25,7 +25,6 @@ const SeasonCreatePage = () => {
         payload.ends_on = form.ends_on;
       }
       await createSeason(payload);
-      setMessage('Season created');
       setForm({ name: '', starts_on: '', ends_on: '' });
       navigate('/events');
     } catch (err) {

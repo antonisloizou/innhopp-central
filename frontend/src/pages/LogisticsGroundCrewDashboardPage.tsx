@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
+import CheckboxMultiSelect from '../components/CheckboxMultiSelect';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 
@@ -69,8 +70,6 @@ const LogisticsGroundCrewDashboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewRoute, setPreviewRoute] = useState<GroundCrew | null>(null);
-  const vehicleDropdownRef = useRef<HTMLDetailsElement | null>(null);
-  const datesDropdownRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,22 +113,6 @@ const LogisticsGroundCrewDashboardPage = () => {
       document.body.style.overflow = '';
     };
   }, [previewRoute]);
-
-  useEffect(() => {
-    const handleOutsidePointer = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      [vehicleDropdownRef.current, datesDropdownRef.current].forEach((dropdown) => {
-        if (dropdown?.open && target && !dropdown.contains(target)) {
-          dropdown.removeAttribute('open');
-        }
-      });
-    };
-
-    document.addEventListener('mousedown', handleOutsidePointer);
-    return () => {
-      document.removeEventListener('mousedown', handleOutsidePointer);
-    };
-  }, []);
 
   const filteredEvents = useMemo(() => {
     if (!selectedSeason) return events;
@@ -282,91 +265,37 @@ const LogisticsGroundCrewDashboardPage = () => {
             </label>
             <label className="form-field">
               <span>Vehicle</span>
-              <details className="multi-select-dropdown" ref={vehicleDropdownRef}>
-                <summary>
-                  {selectedVehicles.length === 0
+              <CheckboxMultiSelect
+                summary={
+                  selectedVehicles.length === 0
                     ? 'All vehicles'
                     : selectedVehicles.length === 1
-                    ? selectedVehicleLabels[0]
-                    : `${selectedVehicles.length} vehicles selected`}
-                </summary>
-                <div className="multi-select-panel">
-                  {selectedVehicles.length > 0 && (
-                    <button type="button" className="multi-select-option" onClick={() => setSelectedVehicles([])}>
-                      Clear vehicle filters
-                    </button>
-                  )}
-                  {vehicleOptions.length === 0 ? (
-                    <div className="muted logistics-dashboard-empty-option">
-                      No vehicles
-                    </div>
-                  ) : (
-                    vehicleOptions.map((vehicle) => {
-                      const checked = selectedVehicles.includes(vehicle.key);
-                      return (
-                        <label key={vehicle.key} className="multi-select-option">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedVehicles((prev) => [...prev, vehicle.key]);
-                              } else {
-                                setSelectedVehicles((prev) => prev.filter((v) => v !== vehicle.key));
-                              }
-                            }}
-                          />
-                          {vehicle.label}
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </details>
+                      ? selectedVehicleLabels[0]
+                      : `${selectedVehicles.length} vehicles selected`
+                }
+                options={vehicleOptions.map((vehicle) => ({ value: vehicle.key, label: vehicle.label }))}
+                selectedValues={selectedVehicles}
+                onChange={setSelectedVehicles}
+                clearLabel="Clear vehicle filters"
+                emptyLabel="No vehicles"
+              />
             </label>
             <label className="form-field">
               <span>Dates</span>
-              <details className="multi-select-dropdown" ref={datesDropdownRef}>
-                <summary>
-                  {selectedDates.length === 0
+              <CheckboxMultiSelect
+                summary={
+                  selectedDates.length === 0
                     ? 'All dates'
                     : selectedDates.length === 1
-                    ? formatDateLabel(selectedDates[0])
-                    : `${selectedDates.length} dates selected`}
-                </summary>
-                <div className="multi-select-panel">
-                  {selectedDates.length > 0 && (
-                    <button type="button" className="multi-select-option" onClick={() => setSelectedDates([])}>
-                      Clear date filters
-                    </button>
-                  )}
-                  {dateOptions.length === 0 ? (
-                    <div className="muted logistics-dashboard-empty-option">
-                      No scheduled dates
-                    </div>
-                  ) : (
-                    dateOptions.map((dateKey) => {
-                      const checked = selectedDates.includes(dateKey);
-                      return (
-                        <label key={dateKey} className="multi-select-option">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedDates((prev) => [...prev, dateKey]);
-                              } else {
-                                setSelectedDates((prev) => prev.filter((d) => d !== dateKey));
-                              }
-                            }}
-                          />
-                          {formatDateLabel(dateKey)}
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
-              </details>
+                      ? formatDateLabel(selectedDates[0])
+                      : `${selectedDates.length} dates selected`
+                }
+                options={dateOptions.map((dateKey) => ({ value: dateKey, label: formatDateLabel(dateKey) }))}
+                selectedValues={selectedDates}
+                onChange={setSelectedDates}
+                clearLabel="Clear date filters"
+                emptyLabel="No scheduled dates"
+              />
             </label>
             <label className="form-field">
               <span>Start location</span>

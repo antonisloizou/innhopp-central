@@ -37,7 +37,7 @@ On startup the server creates these tables if they do not already exist:
 - `manifests` – scheduled aircraft loads for an event.
 - `participant_profiles` – canonical roster of all flyers and staff.
 - `event_registrations` – participant-to-event lifecycle records with deadlines, notes, and ownership.
-- `registration_payments` – ledger entries for deposit, balance, refund, and manual adjustments per registration.
+- `registration_payments` – ledger entries for deposit, main invoice, refund, and manual adjustments per registration.
 - `registration_activity` – internal timeline entries attached to a registration.
 - `email_templates` – reusable subject/body templates for event communications.
 - `email_campaigns` – manual or automated campaign executions with stored audience filters.
@@ -129,7 +129,7 @@ On startup the server creates these tables if they do not already exist:
 - Foreign key constraints ensure referenced seasons, events, manifests, and participants must already exist.
 - The registration backbone enforces one active registration per participant per event; cancelled or expired registrations can be recreated.
 - Public registration links only work for events with `public_registration_enabled=true`; the backend also respects `registration_open_at` and rejects registrations after the event start time.
-- Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/balance payment rows from the event commercial settings.
+- Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/main invoice payment rows from the event commercial settings.
 - The first comms slice renders templates and logs per-recipient deliveries inside the database; it does not yet integrate an SMTP/provider transport or background scheduler.
 
 ## Testing

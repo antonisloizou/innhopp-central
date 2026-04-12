@@ -22,20 +22,18 @@ import (
 )
 
 var validRegistrationStatuses = map[string]struct{}{
-	"applied":         {},
-	"deposit_pending": {},
-	"deposit_paid":    {},
-	"confirmed":       {},
-	"balance_pending": {},
-	"fully_paid":      {},
-	"waitlisted":      {},
-	"cancelled":       {},
-	"expired":         {},
+	"deposit_pending":      {},
+	"deposit_paid":         {},
+	"main_invoice_pending": {},
+	"completed":            {},
+	"waitlisted":           {},
+	"cancelled":            {},
+	"expired":              {},
 }
 
 var validPaymentKinds = map[string]struct{}{
 	"deposit":           {},
-	"balance":           {},
+	"main_invoice":      {},
 	"refund":            {},
 	"manual_adjustment": {},
 }
@@ -55,6 +53,8 @@ var validActivityTypes = map[string]struct{}{
 	"payment_updated": {},
 }
 
+var errActiveRegistrationExists = errors.New("active registration already exists")
+
 type Handler struct {
 	db *pgxpool.Pool
 }
@@ -67,6 +67,8 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.Get("/public/events/{slug}", h.getPublicEvent)
 	r.Post("/public/events/{slug}/register", h.createPublicRegistration)
+	r.Post("/public/events/{slug}/claim", h.createClaimedPublicRegistration)
+	r.Get("/me", h.listOwnRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/events/{eventID}", h.listEventRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/events/{eventID}", h.createRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}", h.getRegistration)
@@ -90,8 +92,8 @@ type Registration struct {
 	RegisteredAt        time.Time              `json:"registered_at"`
 	DepositDueAt        *time.Time             `json:"deposit_due_at,omitempty"`
 	DepositPaidAt       *time.Time             `json:"deposit_paid_at,omitempty"`
-	BalanceDueAt        *time.Time             `json:"balance_due_at,omitempty"`
-	BalancePaidAt       *time.Time             `json:"balance_paid_at,omitempty"`
+	MainInvoiceDueAt    *time.Time             `json:"main_invoice_due_at,omitempty"`
+	MainInvoicePaidAt   *time.Time             `json:"main_invoice_paid_at,omitempty"`
 	CancelledAt         *time.Time             `json:"cancelled_at,omitempty"`
 	ExpiredAt           *time.Time             `json:"expired_at,omitempty"`
 	WaitlistPosition    *int                   `json:"waitlist_position,omitempty"`
@@ -136,7 +138,7 @@ type registrationPayload struct {
 	Source              string   `json:"source"`
 	RegisteredAt        string   `json:"registered_at"`
 	DepositDueAt        string   `json:"deposit_due_at"`
-	BalanceDueAt        string   `json:"balance_due_at"`
+	MainInvoiceDueAt    string   `json:"main_invoice_due_at"`
 	WaitlistPosition    *int     `json:"waitlist_position"`
 	StaffOwnerAccountID *int64   `json:"staff_owner_account_id"`
 	Tags                []string `json:"tags"`
@@ -166,13 +168,13 @@ type activityPayload struct {
 }
 
 type registrationEventSettings struct {
-	ID              int64
-	Name            string
-	StartsAt        time.Time
-	BalanceDeadline *time.Time
-	DepositAmount   string
-	BalanceAmount   string
-	Currency        string
+	ID                  int64
+	Name                string
+	StartsAt            time.Time
+	MainInvoiceDeadline *time.Time
+	DepositAmount       string
+	MainInvoiceAmount   string
+	Currency            string
 }
 
 type PublicRegistrationEvent struct {
@@ -180,13 +182,14 @@ type PublicRegistrationEvent struct {
 	Name                          string     `json:"name"`
 	Location                      string     `json:"location,omitempty"`
 	Slots                         int        `json:"slots"`
+	RemainingSlots                int        `json:"remaining_slots"`
 	StartsAt                      time.Time  `json:"starts_at"`
 	EndsAt                        *time.Time `json:"ends_at,omitempty"`
 	PublicRegistrationSlug        string     `json:"public_registration_slug"`
 	RegistrationOpenAt            *time.Time `json:"registration_open_at,omitempty"`
-	BalanceDeadline               *time.Time `json:"balance_deadline,omitempty"`
+	MainInvoiceDeadline           *time.Time `json:"main_invoice_deadline,omitempty"`
 	DepositAmount                 string     `json:"deposit_amount,omitempty"`
-	BalanceAmount                 string     `json:"balance_amount,omitempty"`
+	MainInvoiceAmount             string     `json:"main_invoice_amount,omitempty"`
 	Currency                      string     `json:"currency"`
 	MinimumRegistrations          int        `json:"minimum_registrations"`
 	CommercialStatus              string     `json:"commercial_status"`
@@ -223,8 +226,8 @@ const registrationSelectColumns = `
 	r.registered_at,
 	r.deposit_due_at,
 	r.deposit_paid_at,
-	r.balance_due_at,
-	r.balance_paid_at,
+	r.main_invoice_due_at,
+	r.main_invoice_paid_at,
 	r.cancelled_at,
 	r.expired_at,
 	r.waitlist_position,
@@ -240,8 +243,11 @@ func normalizeRegistrationStatus(raw string) (string, error) {
 	if status == "" {
 		status = "deposit_pending"
 	}
+	if status == "fully_paid" {
+		status = "completed"
+	}
 	if _, ok := validRegistrationStatuses[status]; !ok {
-		return "", errors.New("status must be one of: applied, deposit_pending, deposit_paid, confirmed, balance_pending, fully_paid, waitlisted, cancelled, expired")
+		return "", errors.New("status must be one of: deposit_pending, deposit_paid, main_invoice_pending, completed, waitlisted, cancelled, expired")
 	}
 	return status, nil
 }
@@ -252,7 +258,7 @@ func normalizePaymentKind(raw string) (string, error) {
 		kind = "deposit"
 	}
 	if _, ok := validPaymentKinds[kind]; !ok {
-		return "", errors.New("kind must be one of: deposit, balance, refund, manual_adjustment")
+		return "", errors.New("kind must be one of: deposit, main_invoice, refund, manual_adjustment")
 	}
 	return kind, nil
 }
@@ -305,6 +311,37 @@ func parseOptionalTimestamp(value string, field string) (*time.Time, error) {
 	return parsed, nil
 }
 
+func parseOptionalDate(value string, field string) (*time.Time, error) {
+	parsed, err := timeutil.ParseOptionalEventDate(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be a valid date", field)
+	}
+	return parsed, nil
+}
+
+func normalizePaymentPaidAt(status string, paidAt *time.Time) *time.Time {
+	if status == "paid" || status == "waived" {
+		if paidAt != nil {
+			return toOptionalUTCDate(paidAt)
+		}
+		now := toUTCDate(time.Now().UTC())
+		return &now
+	}
+	return toOptionalUTCDate(paidAt)
+}
+
+func toUTCDate(value time.Time) time.Time {
+	return time.Date(value.UTC().Year(), value.UTC().Month(), value.UTC().Day(), 0, 0, 0, 0, time.UTC)
+}
+
+func toOptionalUTCDate(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := toUTCDate(*value)
+	return &normalized
+}
+
 func currentAccountID(ctx context.Context) *int64 {
 	claims := auth.FromContext(ctx)
 	if claims == nil || claims.AccountID <= 0 {
@@ -328,8 +365,8 @@ func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registrati
 		&registration.RegisteredAt,
 		&registration.DepositDueAt,
 		&registration.DepositPaidAt,
-		&registration.BalanceDueAt,
-		&registration.BalancePaidAt,
+		&registration.MainInvoiceDueAt,
+		&registration.MainInvoicePaidAt,
 		&registration.CancelledAt,
 		&registration.ExpiredAt,
 		&registration.WaitlistPosition,
@@ -480,22 +517,22 @@ func createActivityTx(ctx context.Context, tx pgx.Tx, registrationID int64, acti
 
 func syncRegistrationPaymentMarkersTx(ctx context.Context, tx pgx.Tx, registrationID int64) error {
 	var depositPaidAt *time.Time
-	var balancePaidAt *time.Time
+	var mainInvoicePaidAt *time.Time
 	if err := tx.QueryRow(ctx, `
-		SELECT MAX(paid_at) FILTER (WHERE kind = 'deposit' AND status = 'paid'),
-		       MAX(paid_at) FILTER (WHERE kind = 'balance' AND status = 'paid')
+		SELECT MAX(COALESCE(paid_at, CURRENT_DATE)) FILTER (WHERE kind = 'deposit' AND status IN ('paid', 'waived')),
+		       MAX(COALESCE(paid_at, CURRENT_DATE)) FILTER (WHERE kind = 'main_invoice' AND status IN ('paid', 'waived'))
 		FROM registration_payments
 		WHERE registration_id = $1
-	`, registrationID).Scan(&depositPaidAt, &balancePaidAt); err != nil {
+	`, registrationID).Scan(&depositPaidAt, &mainInvoicePaidAt); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
 		UPDATE event_registrations
 		SET deposit_paid_at = $2,
-			balance_paid_at = $3,
+			main_invoice_paid_at = $3,
 			updated_at = NOW()
 		WHERE id = $1
-	`, registrationID, depositPaidAt, balancePaidAt)
+	`, registrationID, depositPaidAt, mainInvoicePaidAt)
 	return err
 }
 
@@ -530,9 +567,9 @@ func loadRegistrationEventSettings(ctx context.Context, q interface {
 		SELECT id,
 		       name,
 		       starts_at,
-		       balance_deadline,
+		       main_invoice_deadline,
 		       COALESCE(deposit_amount::TEXT, ''),
-		       COALESCE(balance_amount::TEXT, ''),
+		       COALESCE(main_invoice_amount::TEXT, ''),
 		       COALESCE(currency, 'EUR')
 		FROM events
 		WHERE id = $1
@@ -540,9 +577,9 @@ func loadRegistrationEventSettings(ctx context.Context, q interface {
 		&event.ID,
 		&event.Name,
 		&event.StartsAt,
-		&event.BalanceDeadline,
+		&event.MainInvoiceDeadline,
 		&event.DepositAmount,
-		&event.BalanceAmount,
+		&event.MainInvoiceAmount,
 		&event.Currency,
 	); err != nil {
 		return nil, err
@@ -567,30 +604,32 @@ func registrationStatusFromEventSettings(event *registrationEventSettings) strin
 	if event == nil {
 		return "deposit_pending"
 	}
-	if strings.TrimSpace(event.DepositAmount) == "" || event.DepositAmount == "0" || event.DepositAmount == "0.00" {
-		if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
-			return "balance_pending"
-		}
-		return "confirmed"
-	}
 	return "deposit_pending"
 }
 
+func participantHasStaffRoleTx(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, participantID int64) (bool, error) {
+	var isStaff bool
+	if err := q.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM participant_profiles
+			WHERE id = $1
+			  AND 'Staff' = ANY(COALESCE(roles, ARRAY[]::TEXT[]))
+		)
+	`, participantID).Scan(&isStaff); err != nil {
+		return false, err
+	}
+	return isStaff, nil
+}
+
 func depositDueAtFromEventSettings(now time.Time, event *registrationEventSettings) *time.Time {
-	if event == nil {
-		return nil
-	}
-	dueAt := now.Add(7 * 24 * time.Hour)
-	if event.BalanceDeadline != nil && event.BalanceDeadline.Before(dueAt) {
-		dueAt = *event.BalanceDeadline
-	}
-	if event.StartsAt.Before(dueAt) {
-		dueAt = event.StartsAt
-	}
+	dueAt := toUTCDate(now)
 	return &dueAt
 }
 
-func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID int64, event *registrationEventSettings, depositDueAt, balanceDueAt *time.Time, note string) error {
+func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID int64, event *registrationEventSettings, depositDueAt, mainInvoiceDueAt *time.Time, note string) error {
 	if event == nil {
 		return nil
 	}
@@ -602,20 +641,114 @@ func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID i
 			return err
 		}
 	}
-	if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
+	if strings.TrimSpace(event.MainInvoiceAmount) != "" && event.MainInvoiceAmount != "0" && event.MainInvoiceAmount != "0.00" {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
-			VALUES ($1, 'balance', $2::numeric, $3, 'pending', $4, $5)
-		`, registrationID, event.BalanceAmount, event.Currency, balanceDueAt, note); err != nil {
+			VALUES ($1, 'main_invoice', $2::numeric, $3, 'pending', $4, $5)
+		`, registrationID, event.MainInvoiceAmount, event.Currency, mainInvoiceDueAt, note); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func ensureStaffPaymentRowsWaivedTx(ctx context.Context, tx pgx.Tx, registrationID int64, event *registrationEventSettings, depositDueAt, mainInvoiceDueAt *time.Time, note string) error {
+	waivedAt := toUTCDate(time.Now().UTC())
+
+	if event != nil && hasPositiveConfiguredAmount(event.DepositAmount) {
+		var paymentID int64
+		err := tx.QueryRow(ctx, `
+			SELECT id
+			FROM registration_payments
+			WHERE registration_id = $1
+			  AND kind = 'deposit'
+			ORDER BY id ASC
+			LIMIT 1
+		`, registrationID).Scan(&paymentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, paid_at, notes)
+				VALUES ($1, 'deposit', $2::numeric, $3, 'waived', $4, $5, $6)
+			`, registrationID, event.DepositAmount, event.Currency, depositDueAt, waivedAt, note); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+
+	if event != nil && hasPositiveConfiguredAmount(event.MainInvoiceAmount) {
+		var paymentID int64
+		err := tx.QueryRow(ctx, `
+			SELECT id
+			FROM registration_payments
+			WHERE registration_id = $1
+			  AND kind = 'main_invoice'
+			ORDER BY id ASC
+			LIMIT 1
+		`, registrationID).Scan(&paymentID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, paid_at, notes)
+				VALUES ($1, 'main_invoice', $2::numeric, $3, 'waived', $4, $5, $6)
+			`, registrationID, event.MainInvoiceAmount, event.Currency, mainInvoiceDueAt, waivedAt, note); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+
+	_, err := tx.Exec(ctx, `
+		UPDATE registration_payments
+		SET status = 'waived',
+			paid_at = COALESCE(paid_at, $2),
+			notes = CASE
+				WHEN COALESCE(btrim(notes), '') = '' THEN $3
+				ELSE notes
+			END
+		WHERE registration_id = $1
+		  AND kind IN ('deposit', 'main_invoice')
+		  AND status NOT IN ('refunded')
+	`, registrationID, waivedAt, strings.TrimSpace(note))
+	return err
+}
+
+func ensureStaffRegistrationCompletedTx(ctx context.Context, tx pgx.Tx, registrationID int64, event *registrationEventSettings, depositDueAt, mainInvoiceDueAt *time.Time, note string, accountID *int64) error {
+	if err := ensureStaffPaymentRowsWaivedTx(ctx, tx, registrationID, event, depositDueAt, mainInvoiceDueAt, note); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE event_registrations
+		SET status = 'completed',
+			cancelled_at = NULL,
+			expired_at = NULL,
+			updated_at = NOW()
+		WHERE id = $1
+	`, registrationID); err != nil {
+		return err
+	}
+	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
+		return err
+	}
+	return createActivityTx(ctx, tx, registrationID, "status_change", strings.TrimSpace(note), map[string]any{
+		"status": "completed",
+		"staff":  true,
+	}, accountID)
+}
+
 func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.Tx, event *registrationEventSettings, participantID int64, source, note string) error {
 	if event == nil || participantID <= 0 {
 		return nil
+	}
+	isStaff, err := participantHasStaffRoleTx(ctx, tx, participantID)
+	if err != nil {
+		return err
+	}
+	if !isStaff {
+		if err := validateDepositRequired(event.DepositAmount); err != nil {
+			return err
+		}
 	}
 	exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID)
 	if err != nil || exists {
@@ -623,23 +756,32 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 	}
 	registeredAt := time.Now().UTC()
 	depositDueAt := depositDueAtFromEventSettings(registeredAt, event)
-	balanceDueAt := event.BalanceDeadline
+	mainInvoiceDueAt := toOptionalUTCDate(event.MainInvoiceDeadline)
 	status := registrationStatusFromEventSettings(event)
+	if isStaff {
+		status = "completed"
+	}
 
 	var registrationID int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO event_registrations (
-			event_id, participant_id, status, source, registered_at, deposit_due_at, balance_due_at, tags, internal_notes
+			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at, tags, internal_notes
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], ''
 		)
 		RETURNING id
-	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, balanceDueAt).Scan(&registrationID); err != nil {
+	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID); err != nil {
 		return err
 	}
 
-	if err := createDefaultPaymentRowsTx(ctx, tx, registrationID, event, depositDueAt, balanceDueAt, note); err != nil {
+	if err := createDefaultPaymentRowsTx(ctx, tx, registrationID, event, depositDueAt, mainInvoiceDueAt, note); err != nil {
 		return err
+	}
+	if isStaff {
+		if err := ensureStaffRegistrationCompletedTx(ctx, tx, registrationID, event, depositDueAt, mainInvoiceDueAt, note, nil); err != nil {
+			return err
+		}
+		return nil
 	}
 	if err := createActivityTx(ctx, tx, registrationID, "status_change", note, map[string]any{
 		"status": status,
@@ -651,7 +793,13 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 }
 
 func SyncEventParticipantsToRegistrationsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64, source string) error {
-	if eventID <= 0 || len(participantIDs) == 0 {
+	if eventID <= 0 {
+		return nil
+	}
+	if err := deleteRemovedStaffRegistrationsForEventTx(ctx, tx, eventID, participantIDs); err != nil {
+		return err
+	}
+	if len(participantIDs) == 0 {
 		return nil
 	}
 	event, err := loadRegistrationEventSettings(ctx, tx, eventID)
@@ -667,6 +815,44 @@ func SyncEventParticipantsToRegistrationsTx(ctx context.Context, tx pgx.Tx, even
 		}
 	}
 	return nil
+}
+
+func deleteRemovedStaffRegistrationsForEventTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64) error {
+	if eventID <= 0 {
+		return nil
+	}
+
+	keepParticipantIDs := make([]int64, 0, len(participantIDs))
+	for _, participantID := range participantIDs {
+		if participantID > 0 {
+			keepParticipantIDs = append(keepParticipantIDs, participantID)
+		}
+	}
+
+	if len(keepParticipantIDs) == 0 {
+		_, err := tx.Exec(ctx, `
+			DELETE FROM event_registrations r
+			USING participant_profiles p
+			WHERE r.participant_id = p.id
+			  AND r.event_id = $1
+			  AND r.cancelled_at IS NULL
+			  AND r.expired_at IS NULL
+			  AND 'Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
+		`, eventID)
+		return err
+	}
+
+	_, err := tx.Exec(ctx, `
+		DELETE FROM event_registrations r
+		USING participant_profiles p
+		WHERE r.participant_id = p.id
+		  AND r.event_id = $1
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		  AND 'Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
+		  AND NOT (r.participant_id = ANY($2))
+	`, eventID, keepParticipantIDs)
+	return err
 }
 
 func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
@@ -736,6 +922,180 @@ func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
 	return tx.Commit(ctx)
 }
 
+func BackfillStaffRegistrations(ctx context.Context, db *pgxpool.Pool) error {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT r.id,
+		       r.event_id,
+		       r.registered_at,
+		       r.deposit_due_at,
+		       r.main_invoice_due_at
+		FROM event_registrations r
+		JOIN participant_profiles p ON p.id = r.participant_id
+		WHERE r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		  AND 'Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
+		ORDER BY r.id ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type registrationItem struct {
+		registrationID   int64
+		eventID          int64
+		registeredAt     time.Time
+		depositDueAt     *time.Time
+		mainInvoiceDueAt *time.Time
+	}
+	items := make([]registrationItem, 0)
+	for rows.Next() {
+		var item registrationItem
+		if err := rows.Scan(&item.registrationID, &item.eventID, &item.registeredAt, &item.depositDueAt, &item.mainInvoiceDueAt); err != nil {
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	eventCache := make(map[int64]*registrationEventSettings)
+	for _, item := range items {
+		event := eventCache[item.eventID]
+		if event == nil {
+			event, err = loadRegistrationEventSettings(ctx, tx, item.eventID)
+			if err != nil {
+				return err
+			}
+			eventCache[item.eventID] = event
+		}
+		depositDueAt := item.depositDueAt
+		if depositDueAt == nil {
+			depositDueAt = depositDueAtFromEventSettings(item.registeredAt, event)
+		}
+		mainInvoiceDueAt := item.mainInvoiceDueAt
+		if mainInvoiceDueAt == nil {
+			mainInvoiceDueAt = toOptionalUTCDate(event.MainInvoiceDeadline)
+		}
+		if err := ensureStaffRegistrationCompletedTx(ctx, tx, item.registrationID, event, depositDueAt, mainInvoiceDueAt, "Registration normalized for staff participant", nil); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func EnsureStaffParticipantRegistrations(ctx context.Context, db *pgxpool.Pool, participantID int64, accountID *int64) error {
+	if participantID <= 0 {
+		return nil
+	}
+
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	isStaff, err := participantHasStaffRoleTx(ctx, tx, participantID)
+	if err != nil || !isStaff {
+		return err
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT ep.event_id
+		FROM event_participants ep
+		WHERE ep.participant_id = $1
+		ORDER BY ep.event_id ASC
+	`, participantID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	eventIDs := make([]int64, 0)
+	for rows.Next() {
+		var eventID int64
+		if err := rows.Scan(&eventID); err != nil {
+			return err
+		}
+		eventIDs = append(eventIDs, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, eventID := range eventIDs {
+		event, err := loadRegistrationEventSettings(ctx, tx, eventID)
+		if err != nil {
+			return err
+		}
+
+		var registrationID int64
+		var registeredAt time.Time
+		var depositDueAt *time.Time
+		var mainInvoiceDueAt *time.Time
+		err = tx.QueryRow(ctx, `
+			SELECT id, registered_at, deposit_due_at, main_invoice_due_at
+			FROM event_registrations
+			WHERE event_id = $1
+			  AND participant_id = $2
+			  AND cancelled_at IS NULL
+			  AND expired_at IS NULL
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, eventID, participantID).Scan(&registrationID, &registeredAt, &depositDueAt, &mainInvoiceDueAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, participantID, "staff_role_sync", "Registration created from staff role assignment"); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+
+		if depositDueAt == nil {
+			depositDueAt = depositDueAtFromEventSettings(registeredAt, event)
+		}
+		if mainInvoiceDueAt == nil {
+			mainInvoiceDueAt = toOptionalUTCDate(event.MainInvoiceDeadline)
+		}
+		if err := ensureStaffRegistrationCompletedTx(ctx, tx, registrationID, event, depositDueAt, mainInvoiceDueAt, "Registration normalized from staff role assignment", accountID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func ExpireOverdueRegistrations(ctx context.Context, db *pgxpool.Pool) (int64, error) {
+	commandTag, err := db.Exec(ctx, `
+		UPDATE event_registrations
+		SET status = 'expired',
+			expired_at = COALESCE(expired_at, NOW()),
+			updated_at = NOW()
+		WHERE cancelled_at IS NULL
+		  AND expired_at IS NULL
+		  AND status <> 'expired'
+		  AND (
+			(deposit_due_at IS NOT NULL AND deposit_paid_at IS NULL AND deposit_due_at < CURRENT_DATE)
+			OR
+			(main_invoice_due_at IS NOT NULL AND main_invoice_paid_at IS NULL AND main_invoice_due_at < CURRENT_DATE)
+		  )
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return commandTag.RowsAffected(), nil
+}
+
 func normalizeOptionalPublicString(value string) string {
 	return strings.TrimSpace(value)
 }
@@ -751,6 +1111,18 @@ func normalizeOptionalPublicInt(value *int) *int {
 	return value
 }
 
+func hasPositiveConfiguredAmount(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return trimmed != "" && trimmed != "0" && trimmed != "0.00"
+}
+
+func validateDepositRequired(depositAmount string) error {
+	if !hasPositiveConfiguredAmount(depositAmount) {
+		return errors.New("deposit_amount must be configured for registrations")
+	}
+	return nil
+}
+
 func loadPublicRegistrationEvent(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, slug string) (*PublicRegistrationEvent, error) {
@@ -760,13 +1132,25 @@ func loadPublicRegistrationEvent(ctx context.Context, q interface {
 		       name,
 		       COALESCE(location, ''),
 		       slots,
+		       GREATEST(
+		       	slots - (
+		       		SELECT COUNT(*)
+		       		FROM event_registrations r
+		       		JOIN participant_profiles p ON p.id = r.participant_id
+		       		WHERE r.event_id = events.id
+		       		  AND r.cancelled_at IS NULL
+		       		  AND r.expired_at IS NULL
+		       		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		       	),
+		       	0
+		       ) AS remaining_slots,
 		       starts_at,
 		       ends_at,
 		       COALESCE(public_registration_slug, ''),
 		       registration_open_at,
-		       balance_deadline,
+		       main_invoice_deadline,
 		       COALESCE(deposit_amount::TEXT, ''),
-		       COALESCE(balance_amount::TEXT, ''),
+		       COALESCE(main_invoice_amount::TEXT, ''),
 		       COALESCE(currency, 'EUR'),
 		       COALESCE(minimum_deposit_count, 0),
 		       COALESCE(commercial_status, 'draft')
@@ -779,13 +1163,14 @@ func loadPublicRegistrationEvent(ctx context.Context, q interface {
 		&event.Name,
 		&event.Location,
 		&event.Slots,
+		&event.RemainingSlots,
 		&event.StartsAt,
 		&event.EndsAt,
 		&event.PublicRegistrationSlug,
 		&event.RegistrationOpenAt,
-		&event.BalanceDeadline,
+		&event.MainInvoiceDeadline,
 		&event.DepositAmount,
-		&event.BalanceAmount,
+		&event.MainInvoiceAmount,
 		&event.Currency,
 		&event.MinimumRegistrations,
 		&event.CommercialStatus,
@@ -806,20 +1191,21 @@ func loadPublicRegistrationEvent(ctx context.Context, q interface {
 		event.RegistrationAvailable = false
 		event.RegistrationUnavailableReason = "registration is closed because the event has already started"
 	}
+	if event.RemainingSlots <= 0 {
+		event.RegistrationAvailable = false
+		event.RegistrationUnavailableReason = "registration is closed because the event is full"
+	}
+	if event.RegistrationAvailable {
+		if err := validateDepositRequired(event.DepositAmount); err != nil {
+			event.RegistrationAvailable = false
+			event.RegistrationUnavailableReason = err.Error()
+		}
+	}
 	return &event, nil
 }
 
 func publicDepositDueAt(now time.Time, event *PublicRegistrationEvent) *time.Time {
-	if event == nil {
-		return nil
-	}
-	dueAt := now.Add(7 * 24 * time.Hour)
-	if event.BalanceDeadline != nil && event.BalanceDeadline.Before(dueAt) {
-		dueAt = *event.BalanceDeadline
-	}
-	if event.StartsAt.Before(dueAt) {
-		dueAt = event.StartsAt
-	}
+	dueAt := toUTCDate(now)
 	return &dueAt
 }
 
@@ -902,6 +1288,201 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 	return participantID, nil
 }
 
+func ensureOwnParticipantProfileTx(ctx context.Context, tx pgx.Tx, claims *auth.Claims) (int64, error) {
+	if claims == nil {
+		return 0, errors.New("authentication required")
+	}
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	fullName := strings.TrimSpace(claims.FullName)
+	if email == "" {
+		return 0, errors.New("email claim missing")
+	}
+	if fullName == "" {
+		fullName = email
+	}
+
+	var participantID int64
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM participant_profiles
+		WHERE ($1 > 0 AND account_id = $1) OR lower(email) = $2
+		ORDER BY CASE WHEN $1 > 0 AND account_id = $1 THEN 0 ELSE 1 END, id ASC
+		LIMIT 1
+	`, claims.AccountID, email).Scan(&participantID)
+	if err == nil {
+		if claims.AccountID > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE participant_profiles
+				SET account_id = COALESCE(account_id, $2)
+				WHERE id = $1
+			`, participantID, claims.AccountID); err != nil {
+				return 0, err
+			}
+		}
+		return participantID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+
+	err = tx.QueryRow(ctx, `
+		INSERT INTO participant_profiles (
+			full_name,
+			email,
+			account_id,
+			jumper,
+			roles,
+			account_roles
+		)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			TRUE,
+			ARRAY['Participant']::TEXT[],
+			$4
+		)
+		RETURNING id
+	`, fullName, email, nullableAccountID(claims.AccountID), normalizeAccountRoles(claims.Roles)).Scan(&participantID)
+	if err != nil {
+		return 0, err
+	}
+	return participantID, nil
+}
+
+func nullableAccountID(accountID int64) any {
+	if accountID <= 0 {
+		return nil
+	}
+	return accountID
+}
+
+func normalizeAccountRoles(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	roles := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if _, ok := seen[lower]; ok {
+			continue
+		}
+		seen[lower] = struct{}{}
+		roles = append(roles, lower)
+	}
+	return roles
+}
+
+func createPublicRegistrationTx(ctx context.Context, tx pgx.Tx, event *PublicRegistrationEvent, participantID int64, source, activitySummary string, accountID *int64) (int64, error) {
+	if event == nil {
+		return 0, errors.New("public registration event not found")
+	}
+	if participantID <= 0 {
+		return 0, errors.New("participant is required")
+	}
+	if !event.RegistrationAvailable {
+		return 0, errors.New(strings.TrimSpace(event.RegistrationUnavailableReason))
+	}
+	if err := validateDepositRequired(event.DepositAmount); err != nil {
+		return 0, err
+	}
+	if exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID); err != nil {
+		return 0, err
+	} else if exists {
+		return 0, errActiveRegistrationExists
+	}
+
+	registeredAt := time.Now().UTC()
+	depositDueAt := publicDepositDueAt(registeredAt, event)
+	mainInvoiceDueAt := toOptionalUTCDate(event.MainInvoiceDeadline)
+	status := "deposit_pending"
+
+	var registrationID int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO event_registrations (
+			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at, tags, internal_notes
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], ''
+		)
+		RETURNING id
+	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID); err != nil {
+		return 0, err
+	}
+	if err := ensureEventParticipantTx(ctx, tx, event.ID, participantID); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+		VALUES ($1, 'deposit', $2::numeric, $3, 'pending', $4, 'Created from public registration')
+	`, registrationID, event.DepositAmount, event.Currency, depositDueAt); err != nil {
+		return 0, err
+	}
+	if hasPositiveConfiguredAmount(event.MainInvoiceAmount) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
+			VALUES ($1, 'main_invoice', $2::numeric, $3, 'pending', $4, 'Created from public registration')
+		`, registrationID, event.MainInvoiceAmount, event.Currency, mainInvoiceDueAt); err != nil {
+			return 0, err
+		}
+	}
+	if err := createActivityTx(ctx, tx, registrationID, "status_change", activitySummary, map[string]any{
+		"status":     status,
+		"source":     strings.TrimSpace(source),
+		"event_slug": event.PublicRegistrationSlug,
+	}, accountID); err != nil {
+		return 0, err
+	}
+	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
+		return 0, err
+	}
+	return registrationID, nil
+}
+
+func normalizeStaffPublicRegistrationTx(ctx context.Context, tx pgx.Tx, registrationID int64, participantID int64, accountID *int64) error {
+	if registrationID <= 0 || participantID <= 0 {
+		return nil
+	}
+	isStaff, err := participantHasStaffRoleTx(ctx, tx, participantID)
+	if err != nil || !isStaff {
+		return err
+	}
+
+	var eventID int64
+	var registeredAt time.Time
+	var depositDueAt *time.Time
+	var mainInvoiceDueAt *time.Time
+	if err := tx.QueryRow(ctx, `
+		SELECT event_id, registered_at, deposit_due_at, main_invoice_due_at
+		FROM event_registrations
+		WHERE id = $1
+	`, registrationID).Scan(&eventID, &registeredAt, &depositDueAt, &mainInvoiceDueAt); err != nil {
+		return err
+	}
+
+	event, err := loadRegistrationEventSettings(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	if depositDueAt == nil {
+		depositDueAt = depositDueAtFromEventSettings(registeredAt, event)
+	}
+	if mainInvoiceDueAt == nil {
+		mainInvoiceDueAt = toOptionalUTCDate(event.MainInvoiceDeadline)
+	}
+	return ensureStaffRegistrationCompletedTx(
+		ctx,
+		tx,
+		registrationID,
+		event,
+		depositDueAt,
+		mainInvoiceDueAt,
+		"Registration normalized from public registration for staff participant",
+		accountID,
+	)
+}
+
 func (h *Handler) getPublicEvent(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
 	if slug == "" {
@@ -958,6 +1539,10 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusForbidden, event.RegistrationUnavailableReason)
 		return
 	}
+	if err := validateDepositRequired(event.DepositAmount); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	participantID, err := h.findOrCreatePublicParticipantTx(ctx, tx, &payload)
 	if err != nil {
@@ -977,69 +1562,14 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	registeredAt := time.Now().UTC()
-	depositDueAt := publicDepositDueAt(registeredAt, event)
-	balanceDueAt := event.BalanceDeadline
-	status := "deposit_pending"
-	if strings.TrimSpace(event.DepositAmount) == "" || event.DepositAmount == "0" || event.DepositAmount == "0.00" {
-		if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
-			status = "balance_pending"
-		} else {
-			status = "confirmed"
-		}
-	}
-
-	var registrationID int64
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO event_registrations (
-			event_id, participant_id, status, source, registered_at, deposit_due_at, balance_due_at, tags, internal_notes
-		) VALUES (
-			$1, $2, $3, 'public_link', $4, $5, $6, ARRAY[]::TEXT[], ''
-		)
-		RETURNING id
-	`, event.ID, participantID, status, registeredAt, depositDueAt, balanceDueAt).Scan(&registrationID); err != nil {
+	registrationID, err := createPublicRegistrationTx(ctx, tx, event, participantID, "public_link", "Public registration submitted", nil)
+	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if errors.Is(err, errActiveRegistrationExists) || (errors.As(err, &pgErr) && pgErr.Code == "23505") {
 			httpx.Error(w, http.StatusConflict, "you already have an active registration for this event")
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration: %v", err))
-		return
-	}
-	if err := ensureEventParticipantTx(ctx, tx, event.ID, participantID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to sync event participant: %v", err))
-		return
-	}
-
-	if strings.TrimSpace(event.DepositAmount) != "" && event.DepositAmount != "0" && event.DepositAmount != "0.00" {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
-			VALUES ($1, 'deposit', $2::numeric, $3, 'pending', $4, 'Created from public registration')
-		`, registrationID, event.DepositAmount, event.Currency, depositDueAt); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create deposit payment: %v", err))
-			return
-		}
-	}
-	if strings.TrimSpace(event.BalanceAmount) != "" && event.BalanceAmount != "0" && event.BalanceAmount != "0.00" {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
-			VALUES ($1, 'balance', $2::numeric, $3, 'pending', $4, 'Created from public registration')
-		`, registrationID, event.BalanceAmount, event.Currency, balanceDueAt); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create balance payment: %v", err))
-			return
-		}
-	}
-
-	if err := createActivityTx(ctx, tx, registrationID, "status_change", "Public registration submitted", map[string]any{
-		"status":     status,
-		"source":     "public_link",
-		"event_slug": event.PublicRegistrationSlug,
-	}, nil); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration activity: %v", err))
-		return
-	}
-	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to finalize registration: %v", err))
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -1055,6 +1585,143 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
+func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http.Request) {
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	if slug == "" {
+		httpx.Error(w, http.StatusBadRequest, "registration slug is required")
+		return
+	}
+
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create registration")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	event, err := loadPublicRegistrationEvent(ctx, tx, slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "public registration event not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load public registration event")
+		return
+	}
+
+	participantID, err := ensureOwnParticipantProfileTx(ctx, tx, claims)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to prepare participant profile: %v", err))
+		return
+	}
+
+	accountID := claims.AccountID
+	registrationID, err := createPublicRegistrationTx(
+		ctx,
+		tx,
+		event,
+		participantID,
+		"public_google",
+		"Public registration claimed after Google sign-in",
+		&accountID,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		switch {
+		case errors.Is(err, errActiveRegistrationExists), (errors.As(err, &pgErr) && pgErr.Code == "23505"):
+			httpx.Error(w, http.StatusConflict, "you already have an active registration for this event")
+			return
+		case strings.TrimSpace(err.Error()) == strings.TrimSpace(event.RegistrationUnavailableReason):
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		default:
+			httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to create registration: %v", err))
+			return
+		}
+	}
+	if err := normalizeStaffPublicRegistrationTx(ctx, tx, registrationID, participantID, &accountID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to normalize staff registration: %v", err))
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to commit registration: %v", err))
+		return
+	}
+
+	registration, err := h.loadRegistration(ctx, registrationID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to load registration: %v", err))
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, registration)
+}
+
+func (h *Handler) listOwnRegistrations(w http.ResponseWriter, r *http.Request) {
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email claim missing")
+		return
+	}
+
+	rows, err := h.db.Query(r.Context(), `
+		SELECT id
+		FROM (
+			SELECT DISTINCT ON (r.event_id)
+			       r.id,
+			       r.event_id,
+			       r.cancelled_at,
+			       r.expired_at,
+			       r.registered_at
+			FROM event_registrations r
+			JOIN participant_profiles p ON p.id = r.participant_id
+			WHERE (($1 > 0 AND p.account_id = $1) OR lower(p.email) = $2)
+			ORDER BY
+				r.event_id,
+				CASE WHEN r.cancelled_at IS NULL AND r.expired_at IS NULL THEN 0 ELSE 1 END,
+				r.registered_at DESC,
+				r.id DESC
+		) own_registrations
+		ORDER BY registered_at DESC, id DESC
+	`, claims.AccountID, email)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list registrations")
+		return
+	}
+	defer rows.Close()
+
+	registrations := make([]Registration, 0)
+	for rows.Next() {
+		var registrationID int64
+		if err := rows.Scan(&registrationID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse registrations")
+			return
+		}
+		registration, err := h.loadRegistration(r.Context(), registrationID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load registrations")
+			return
+		}
+		registrations = append(registrations, *registration)
+	}
+	if err := rows.Err(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list registrations")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, registrations)
+}
+
 func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request) {
 	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
 	if err != nil || eventID <= 0 {
@@ -1064,10 +1731,33 @@ func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request)
 
 	rows, err := h.db.Query(r.Context(), `
 		SELECT `+registrationSelectColumns+`
-		FROM event_registrations r
+		FROM (
+			SELECT DISTINCT ON (participant_id)
+			       id,
+			       event_id,
+			       participant_id,
+			       status,
+			       source,
+			       registered_at,
+			       deposit_due_at,
+			       deposit_paid_at,
+			       main_invoice_due_at,
+			       main_invoice_paid_at,
+			       cancelled_at,
+			       expired_at,
+			       waitlist_position,
+			       staff_owner_account_id,
+			       tags,
+			       internal_notes,
+			       created_at,
+			       updated_at
+			FROM event_registrations
+			WHERE event_id = $1
+			ORDER BY participant_id, registered_at DESC, id DESC
+		) r
 		JOIN events e ON e.id = r.event_id
 		JOIN participant_profiles p ON p.id = r.participant_id
-		WHERE r.event_id = $1
+		WHERE NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
 		ORDER BY r.registered_at DESC, r.id DESC
 	`, eventID)
 	if err != nil {
@@ -1120,12 +1810,12 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	depositDueAt, err := parseOptionalTimestamp(payload.DepositDueAt, "deposit_due_at")
+	depositDueAt, err := parseOptionalDate(payload.DepositDueAt, "deposit_due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	balanceDueAt, err := parseOptionalTimestamp(payload.BalanceDueAt, "balance_due_at")
+	mainInvoiceDueAt, err := parseOptionalDate(payload.MainInvoiceDueAt, "main_invoice_due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -1147,11 +1837,30 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusConflict, "participant already has an active registration for this event")
 		return
 	}
+	eventSettings, err := loadRegistrationEventSettings(ctx, tx, eventID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusBadRequest, "event_id is invalid")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "failed to load event settings")
+		return
+	}
+	if err := validateDepositRequired(eventSettings.DepositAmount); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if depositDueAt == nil {
+		depositDueAt = depositDueAtFromEventSettings(time.Now().UTC(), eventSettings)
+	}
+	if mainInvoiceDueAt == nil {
+		mainInvoiceDueAt = toOptionalUTCDate(eventSettings.MainInvoiceDeadline)
+	}
 
 	var registrationID int64
 	row := tx.QueryRow(ctx, `
 		INSERT INTO event_registrations (
-			event_id, participant_id, status, source, registered_at, deposit_due_at, balance_due_at,
+			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at,
 			cancelled_at, expired_at, waitlist_position, staff_owner_account_id, tags, internal_notes
 		) VALUES (
 			$1, $2, $3, $4, COALESCE($5, NOW()), $6, $7,
@@ -1160,7 +1869,7 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 			$8, $9, $10, $11
 		)
 		RETURNING id
-	`, eventID, payload.ParticipantID, status, strings.TrimSpace(payload.Source), registeredAt, depositDueAt, balanceDueAt, payload.WaitlistPosition, payload.StaffOwnerAccountID, tags, strings.TrimSpace(payload.InternalNotes))
+	`, eventID, payload.ParticipantID, status, strings.TrimSpace(payload.Source), registeredAt, depositDueAt, mainInvoiceDueAt, payload.WaitlistPosition, payload.StaffOwnerAccountID, tags, strings.TrimSpace(payload.InternalNotes))
 	if err := row.Scan(&registrationID); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
@@ -1176,6 +1885,14 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := ensureEventParticipantTx(ctx, tx, eventID, payload.ParticipantID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync event participant")
+		return
+	}
+	if err := createDefaultPaymentRowsTx(ctx, tx, registrationID, eventSettings, depositDueAt, mainInvoiceDueAt, "Created from staff registration"); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create default payments")
+		return
+	}
+	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to finalize registration")
 		return
 	}
 
@@ -1231,12 +1948,12 @@ func (h *Handler) updateRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	depositDueAt, err := parseOptionalTimestamp(payload.DepositDueAt, "deposit_due_at")
+	depositDueAt, err := parseOptionalDate(payload.DepositDueAt, "deposit_due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	balanceDueAt, err := parseOptionalTimestamp(payload.BalanceDueAt, "balance_due_at")
+	mainInvoiceDueAt, err := parseOptionalDate(payload.MainInvoiceDueAt, "main_invoice_due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -1247,14 +1964,14 @@ func (h *Handler) updateRegistration(w http.ResponseWriter, r *http.Request) {
 		UPDATE event_registrations
 		SET source = $2,
 			deposit_due_at = $3,
-			balance_due_at = $4,
+			main_invoice_due_at = $4,
 			waitlist_position = $5,
 			staff_owner_account_id = $6,
 			tags = $7,
 			internal_notes = $8,
 			updated_at = NOW()
 		WHERE id = $1
-	`, registrationID, strings.TrimSpace(payload.Source), depositDueAt, balanceDueAt, payload.WaitlistPosition, payload.StaffOwnerAccountID, tags, strings.TrimSpace(payload.InternalNotes))
+	`, registrationID, strings.TrimSpace(payload.Source), depositDueAt, mainInvoiceDueAt, payload.WaitlistPosition, payload.StaffOwnerAccountID, tags, strings.TrimSpace(payload.InternalNotes))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update registration")
 		return
@@ -1357,16 +2074,17 @@ func (h *Handler) createPayment(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	dueAt, err := parseOptionalTimestamp(payload.DueAt, "due_at")
+	dueAt, err := parseOptionalDate(payload.DueAt, "due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	paidAt, err := parseOptionalTimestamp(payload.PaidAt, "paid_at")
+	paidAt, err := parseOptionalDate(payload.PaidAt, "paid_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	paidAt = normalizePaymentPaidAt(status, paidAt)
 	currency := strings.ToUpper(strings.TrimSpace(payload.Currency))
 	if currency == "" {
 		currency = "EUR"
@@ -1457,16 +2175,17 @@ func (h *Handler) updatePayment(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	dueAt, err := parseOptionalTimestamp(payload.DueAt, "due_at")
+	dueAt, err := parseOptionalDate(payload.DueAt, "due_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	paidAt, err := parseOptionalTimestamp(payload.PaidAt, "paid_at")
+	paidAt, err := parseOptionalDate(payload.PaidAt, "paid_at")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	paidAt = normalizePaymentPaidAt(status, paidAt)
 	currency := strings.ToUpper(strings.TrimSpace(payload.Currency))
 	if currency == "" {
 		currency = "EUR"

@@ -1631,24 +1631,30 @@ const EventSchedulePage = () => {
   if (!eventData) return <p className="error-text">Event not found.</p>;
 
   const totalSlots = eventData.slots ?? 0;
-  const nonStaffCount = Array.isArray(eventData.participant_ids)
-    ? eventData.participant_ids.reduce((acc, id) => {
-        const profile = participants.find((p) => p.id === id);
-        const roles = Array.isArray(profile?.roles) ? profile?.roles : [];
-        const isStaff = roles.includes('Staff');
-        return isStaff ? acc : acc + 1;
-      }, 0)
-    : 0;
-  const remaining = Math.max(totalSlots - nonStaffCount, 0);
+  const remaining = Math.max(eventData.remaining_slots ?? 0, 0);
+  const nonStaffCount = Math.max(totalSlots - remaining, 0);
   const isFull = remaining === 0;
   const pastEvent = eventData.status === 'past';
 
   return (
     <section className="stack">
-      <header className="page-header event-schedule-header">
-        <div className="event-schedule-headline">
-          {!participantOnly && (
-            <div className="event-schedule-actions" ref={actionMenuRef}>
+      <header className="page-header">
+        <div className="event-schedule-headline-text">
+          <div className="event-header-top">
+            <h2 className="event-detail-title">{eventData.name}: Schedule</h2>
+          </div>
+          <p className="event-location">{eventData.location || 'Location TBD'}</p>
+          <div className="event-detail-header-badges">
+            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
+            {!pastEvent && (
+              <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+              </span>
+            )}
+          </div>
+        </div>
+        {!participantOnly && (
+          <div className="event-schedule-actions" ref={actionMenuRef}>
               <button
                 className="ghost event-schedule-gear"
                 type="button"
@@ -1707,7 +1713,7 @@ const EventSchedulePage = () => {
                     navigate(`/events/${eventData.id}/comms`);
                   }}
                 >
-                  Communication
+                  Communications
                 </button>
                 <button
                   className="event-schedule-menu-item"
@@ -1746,23 +1752,8 @@ const EventSchedulePage = () => {
                 </button>
               </div>
               )}
-            </div>
-          )}
-          <div className="event-schedule-headline-text">
-            <div className="event-schedule-title-row">
-              <h2 className="event-schedule-title">{eventData.name}</h2>
-            </div>
-            <p className="event-location">{eventData.location || 'Location TBD'}</p>
-            <div className="event-schedule-badges">
-              <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-              {!pastEvent && (
-                <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                  {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                </span>
-              )}
-            </div>
           </div>
-        </div>
+        )}
       </header>
       {message && <p className="error-text">{message}</p>}
       <article className="card event-schedule-summary-card">

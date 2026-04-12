@@ -8,8 +8,9 @@ import (
 )
 
 type stateEntry struct {
-	nonce  string
-	expiry time.Time
+	nonce        string
+	redirectPath string
+	expiry       time.Time
 }
 
 // StateStore tracks short lived OAuth2 state and nonce pairs used to defend
@@ -29,7 +30,7 @@ func NewStateStore(ttl time.Duration) *StateStore {
 }
 
 // Create registers a new state/nonce pair.
-func (s *StateStore) Create() (state string, nonce string, err error) {
+func (s *StateStore) Create(redirectPath string) (state string, nonce string, err error) {
 	state, err = randomToken()
 	if err != nil {
 		return "", "", err
@@ -42,29 +43,33 @@ func (s *StateStore) Create() (state string, nonce string, err error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.values[state] = stateEntry{nonce: nonce, expiry: time.Now().Add(s.ttl)}
+	s.values[state] = stateEntry{
+		nonce:        nonce,
+		redirectPath: redirectPath,
+		expiry:       time.Now().Add(s.ttl),
+	}
 	s.evictExpiredLocked()
 	return state, nonce, nil
 }
 
 // Verify consumes an existing state value and returns the stored nonce if it
 // exists and is not expired.
-func (s *StateStore) Verify(state string) (string, bool) {
+func (s *StateStore) Verify(state string) (string, string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	entry, ok := s.values[state]
 	if !ok {
-		return "", false
+		return "", "", false
 	}
 
 	delete(s.values, state)
 	if time.Now().After(entry.expiry) {
-		return "", false
+		return "", "", false
 	}
 
 	s.evictExpiredLocked()
-	return entry.nonce, true
+	return entry.nonce, entry.redirectPath, true
 }
 
 func (s *StateStore) evictExpiredLocked() {

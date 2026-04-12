@@ -1,26 +1,25 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { createManifest, listEvents, listManifests, Manifest } from '../api/events';
+import { copyEvent, createManifest, deleteEvent, Event, listEvents, listManifests, Manifest } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
-
-type EventLite = {
-  id: number;
-  name: string;
-};
 
 const ManifestManagementPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const initialEventId = searchParams.get('eventId') ?? '';
-  const [events, setEvents] = useState<EventLite[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [manifests, setManifests] = useState<Manifest[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>(initialEventId);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [participantProfiles, setParticipantProfiles] = useState<ParticipantProfile[]>([]);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const [form, setForm] = useState({
     load_number: '',
     notes: '',
@@ -39,9 +38,7 @@ const ManifestManagementPage = () => {
           listParticipantProfiles()
         ]);
         if (cancelled) return;
-        const eventList = Array.isArray(eventResponse)
-          ? eventResponse.map((e) => ({ id: e.id, name: e.name }))
-          : [];
+        const eventList = Array.isArray(eventResponse) ? eventResponse : [];
         setEvents(eventList);
         setManifests(Array.isArray(manifestResponse) ? manifestResponse : []);
         setParticipantProfiles(Array.isArray(participantResponse) ? participantResponse : []);
@@ -76,6 +73,59 @@ const ManifestManagementPage = () => {
     [events, selectedEventId]
   );
 
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!actionMenuRef.current || !target) return;
+      if (!actionMenuRef.current.contains(target)) {
+        setActionMenuOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActionMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [actionMenuOpen]);
+
+  const handleDelete = async () => {
+    if (!selectedEvent) return;
+    if (!window.confirm('Delete this event?')) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      await deleteEvent(selectedEvent.id);
+      setSearchParams({});
+      setSelectedEventId('');
+      navigate('/events');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to delete event');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!selectedEvent || copying) return;
+    setCopying(true);
+    setMessage(null);
+    try {
+      const cloned = await copyEvent(selectedEvent.id);
+      navigate(`/events/${cloned.id}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to copy event');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const eventId = Number(selectedEventId);
@@ -93,7 +143,6 @@ const ManifestManagementPage = () => {
       setManifests((prev) => [...prev, created].sort((a, b) => a.load_number - b.load_number));
       setForm({ load_number: '', notes: '', capacity: '' });
       setShowForm(false);
-      setMessage('Manifest added');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create manifest');
     } finally {
@@ -104,14 +153,46 @@ const ManifestManagementPage = () => {
   return (
     <section>
       <header className="page-header">
-        <div>
-          <h2>Manifest</h2>
+        <div className="event-schedule-headline-text">
+          <div className="event-header-top">
+            <h2 className="event-detail-title">
+              {selectedEvent ? `${selectedEvent.name}: Manifest` : 'Manifest'}
+            </h2>
+          </div>
+          {selectedEvent ? <p className="event-location">{selectedEvent.location || 'Location TBD'}</p> : null}
+          {selectedEvent ? (
+            <div className="event-detail-header-badges">
+              <span className={`badge status-${selectedEvent.status}`}>{selectedEvent.status}</span>
+            </div>
+          ) : null}
         </div>
-        {selectedEventId && (
-          <button type="button" className="ghost" onClick={() => navigate(`/events/${selectedEventId}`)}>
-            Back to event{selectedEvent ? `: ${selectedEvent.name}` : ''}
-          </button>
-        )}
+        {selectedEvent ? (
+          <div className="event-schedule-actions" ref={actionMenuRef}>
+            <button
+              className="ghost event-schedule-gear"
+              type="button"
+              aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
+              aria-expanded={actionMenuOpen}
+              aria-controls="event-manifest-actions-menu"
+              onClick={() => setActionMenuOpen((open) => !open)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
+              </svg>
+            </button>
+            {actionMenuOpen && (
+              <div className="event-schedule-menu" id="event-manifest-actions-menu" role="menu">
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); navigate(`/events/${selectedEvent.id}/details`); }}>Details</button>
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); navigate(`/events/${selectedEvent.id}`); }}>Schedule</button>
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); navigate(`/events/${selectedEvent.id}/registrations`); }}>Registrations</button>
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); navigate(`/events/${selectedEvent.id}/comms`); }}>Communications</button>
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); handleCopy(); }} disabled={copying}>{copying ? 'Copying…' : 'Copy'}</button>
+                <button className="event-schedule-menu-item danger" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); handleDelete(); }} disabled={deleting}>{deleting ? 'Deleting…' : 'Delete'}</button>
+                <button className="event-schedule-menu-item" type="button" role="menuitem" onClick={() => { setActionMenuOpen(false); navigate('/events'); }}>Back</button>
+              </div>
+            )}
+          </div>
+        ) : null}
       </header>
 
       <article className="card">

@@ -70,8 +70,8 @@ const LogisticsGroundCrewDetailPage = () => {
   const initialEventSet = useRef(true);
   const [pickupOptionKey, setPickupOptionKey] = useState('');
   const [destinationOptionKey, setDestinationOptionKey] = useState('');
-  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
-  const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const saveButtonClass = 'primary';
+  const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const markDirty = () => {
     if (saved) setSaved(false);
@@ -379,7 +379,6 @@ const LogisticsGroundCrewDetailPage = () => {
       setSelectedVehicleIds(updatedVehicleIds);
       setShowVehicleForm(false);
       setNewVehicle({ name: '', driver: '', passenger_capacity: '', notes: '' });
-      setMessage('Ground crew updated');
       setSaved(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update ground crew');
@@ -859,7 +858,7 @@ const LogisticsGroundCrewDetailPage = () => {
             </div>
           </div>
           <div className="form-actions logistics-detail-half-gap">
-            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+            <button type="submit" className={saveButtonClass} disabled={submitting}>
               {saveButtonLabel}
             </button>
           </div>
@@ -1074,7 +1073,7 @@ const LogisticsGroundCrewDetailPage = () => {
               </div>
             )}
             <div className="form-actions logistics-detail-half-gap">
-              <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+              <button type="submit" className={saveButtonClass} disabled={submitting}>
                 {saveButtonLabel}
               </button>
             </div>
@@ -1095,7 +1094,7 @@ const LogisticsGroundCrewDetailPage = () => {
             />
           </label>
           <div className="form-actions logistics-detail-half-gap">
-            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+            <button type="submit" className={saveButtonClass} disabled={submitting}>
               {saveButtonLabel}
             </button>
           </div>

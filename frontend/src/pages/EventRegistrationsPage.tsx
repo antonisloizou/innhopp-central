@@ -1,9 +1,16 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Event, getEvent } from '../api/events';
+import { copyEvent, deleteEvent, Event, getEvent } from '../api/events';
 import { listParticipantProfiles, ParticipantProfile } from '../api/participants';
 import { createEventRegistration, listEventRegistrations, Registration, RegistrationStatus } from '../api/registrations';
-import { formatEventLocal, fromEventLocalInput, toEventLocalInput } from '../utils/eventDate';
+import {
+  formatEventLocalDateInputFromDate,
+  formatEventLocal,
+  formatEventLocalDateInput,
+  fromEventLocalDateInput,
+  getEventLocalDateKey,
+  getEventLocalDateKeyFromDate
+} from '../utils/eventDate';
 
 type PaymentState = 'all' | 'pending' | 'paid' | 'overdue' | 'none';
 type CreateRegistrationFormState = {
@@ -11,18 +18,16 @@ type CreateRegistrationFormState = {
   status: RegistrationStatus;
   source: string;
   deposit_due_at: string;
-  balance_due_at: string;
+  main_invoice_due_at: string;
   tags: string;
   internal_notes: string;
 };
 
 const registrationStatusOptions: RegistrationStatus[] = [
-  'applied',
   'deposit_pending',
   'deposit_paid',
-  'confirmed',
-  'balance_pending',
-  'fully_paid',
+  'main_invoice_pending',
+  'completed',
   'waitlisted',
   'cancelled',
   'expired'
@@ -32,15 +37,11 @@ const buildDefaultDepositDueAt = (event?: Event | null) => {
   const now = new Date();
   const dueAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const eventStartsAt = event?.starts_at ? new Date(event.starts_at) : null;
-  const balanceDeadline = event?.balance_deadline ? new Date(event.balance_deadline) : null;
   let nextDueAt = dueAt;
-  if (balanceDeadline && !Number.isNaN(balanceDeadline.getTime()) && balanceDeadline.getTime() < nextDueAt.getTime()) {
-    nextDueAt = balanceDeadline;
-  }
   if (eventStartsAt && !Number.isNaN(eventStartsAt.getTime()) && eventStartsAt.getTime() < nextDueAt.getTime()) {
     nextDueAt = eventStartsAt;
   }
-  return toEventLocalInput(nextDueAt.toISOString());
+  return formatEventLocalDateInputFromDate(nextDueAt);
 };
 
 const createInitialFormState = (event?: Event | null): CreateRegistrationFormState => ({
@@ -48,15 +49,23 @@ const createInitialFormState = (event?: Event | null): CreateRegistrationFormSta
   status: 'deposit_pending',
   source: 'staff_manual',
   deposit_due_at: buildDefaultDepositDueAt(event),
-  balance_due_at: toEventLocalInput(event?.balance_deadline),
+  main_invoice_due_at: formatEventLocalDateInput(event?.main_invoice_deadline),
   tags: '',
   internal_notes: ''
 });
 
 const normalizeSearch = (value: string) => value.trim().toLowerCase();
 
+const isCompletedStatus = (status: string) => status === 'completed' || status === 'fully_paid';
+
 const badgeClassForRegistrationStatus = (status: string) => {
-  if (status === 'fully_paid' || status === 'confirmed' || status === 'deposit_paid') return 'badge success';
+  if (isCompletedStatus(status)) {
+    return 'badge registration-status-badge registration-status-badge-completed';
+  }
+  if (status === 'deposit_paid') return 'badge registration-status-badge registration-status-badge-deposit-paid';
+  if (status === 'deposit_pending' || status === 'main_invoice_pending') {
+    return 'badge registration-status-badge registration-status-badge-pending';
+  }
   if (status === 'cancelled' || status === 'expired') return 'badge danger';
   return 'badge neutral';
 };
@@ -68,8 +77,30 @@ const computePaymentState = (
 ): Exclude<PaymentState, 'all'> => {
   if (paidAt) return 'paid';
   if (!dueAt) return 'none';
-  if (status === 'cancelled' || status === 'expired') return 'none';
-  return new Date(dueAt).getTime() < Date.now() ? 'overdue' : 'pending';
+  if (status === 'cancelled') return 'none';
+  return getEventLocalDateKey(dueAt) < getEventLocalDateKeyFromDate(new Date()) ? 'overdue' : 'pending';
+};
+
+const dedupeRegistrationsByParticipant = (items: Registration[]) => {
+  const latestByParticipant = new Map<number, Registration>();
+  items.forEach((registration) => {
+    const current = latestByParticipant.get(registration.participant_id);
+    if (!current) {
+      latestByParticipant.set(registration.participant_id, registration);
+      return;
+    }
+    const currentRegisteredAt = new Date(current.registered_at).getTime();
+    const nextRegisteredAt = new Date(registration.registered_at).getTime();
+    if (
+      nextRegisteredAt > currentRegisteredAt ||
+      (nextRegisteredAt === currentRegisteredAt && registration.id > current.id)
+    ) {
+      latestByParticipant.set(registration.participant_id, registration);
+    }
+  });
+  return [...latestByParticipant.values()].sort(
+    (a, b) => new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime() || b.id - a.id
+  );
 };
 
 const EventRegistrationsPage = () => {
@@ -80,11 +111,13 @@ const EventRegistrationsPage = () => {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [depositFilter, setDepositFilter] = useState<PaymentState>('all');
-  const [balanceFilter, setBalanceFilter] = useState<PaymentState>('all');
+  const [mainInvoiceFilter, setMainInvoiceFilter] = useState<PaymentState>('all');
   const [query, setQuery] = useState('');
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [createFormOpen, setCreateFormOpen] = useState(false);
@@ -106,7 +139,9 @@ const EventRegistrationsPage = () => {
         ]);
         if (cancelled) return;
         setEventData(nextEvent);
-        setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
+        setRegistrations(
+          dedupeRegistrationsByParticipant(Array.isArray(nextRegistrations) ? nextRegistrations : [])
+        );
         setParticipants(
           (Array.isArray(nextParticipants) ? nextParticipants : []).slice().sort((a, b) =>
             a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
@@ -151,6 +186,35 @@ const EventRegistrationsPage = () => {
     };
   }, [actionMenuOpen]);
 
+  const handleDelete = async () => {
+    if (!eventId) return;
+    if (!window.confirm('Delete this event?')) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      await deleteEvent(Number(eventId));
+      navigate('/events');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to delete event');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!eventId || copying) return;
+    setCopying(true);
+    setMessage(null);
+    try {
+      const cloned = await copyEvent(Number(eventId));
+      navigate(`/events/${cloned.id}`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to copy event');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const filteredRegistrations = useMemo(() => {
     const normalizedQuery = normalizeSearch(query);
     return registrations.filter((registration) => {
@@ -159,14 +223,14 @@ const EventRegistrationsPage = () => {
         registration.deposit_due_at,
         registration.status
       );
-      const balanceState = computePaymentState(
-        registration.balance_paid_at,
-        registration.balance_due_at,
+      const mainInvoiceState = computePaymentState(
+        registration.main_invoice_paid_at,
+        registration.main_invoice_due_at,
         registration.status
       );
       if (statusFilter !== 'all' && registration.status !== statusFilter) return false;
       if (depositFilter !== 'all' && depositState !== depositFilter) return false;
-      if (balanceFilter !== 'all' && balanceState !== balanceFilter) return false;
+      if (mainInvoiceFilter !== 'all' && mainInvoiceState !== mainInvoiceFilter) return false;
       if (!normalizedQuery) return true;
       return [
         registration.participant_name,
@@ -177,7 +241,7 @@ const EventRegistrationsPage = () => {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedQuery));
     });
-  }, [balanceFilter, depositFilter, query, registrations, statusFilter]);
+  }, [depositFilter, mainInvoiceFilter, query, registrations, statusFilter]);
 
   const registeredParticipantIds = useMemo(
     () => new Set(registrations.map((registration) => registration.participant_id)),
@@ -185,7 +249,11 @@ const EventRegistrationsPage = () => {
   );
 
   const availableParticipants = useMemo(
-    () => participants.filter((participant) => !registeredParticipantIds.has(participant.id)),
+    () =>
+      participants.filter((participant) => {
+        const roles = Array.isArray(participant.roles) ? participant.roles : [];
+        return !registeredParticipantIds.has(participant.id) && !roles.includes('Staff');
+      }),
     [participants, registeredParticipantIds]
   );
 
@@ -195,13 +263,13 @@ const EventRegistrationsPage = () => {
         computePaymentState(registration.deposit_paid_at, registration.deposit_due_at, registration.status) ===
         'overdue'
     ).length;
-    const overdueBalances = registrations.filter(
+    const overdueMainInvoices = registrations.filter(
       (registration) =>
-        computePaymentState(registration.balance_paid_at, registration.balance_due_at, registration.status) ===
+        computePaymentState(registration.main_invoice_paid_at, registration.main_invoice_due_at, registration.status) ===
         'overdue'
     ).length;
-    const fullyPaid = registrations.filter((registration) => registration.status === 'fully_paid').length;
-    return { overdueDeposits, overdueBalances, fullyPaid };
+    const completed = registrations.filter((registration) => isCompletedStatus(registration.status)).length;
+    return { overdueDeposits, overdueMainInvoices, completed };
   }, [registrations]);
 
   const handleCreateRegistration = async (event: FormEvent<HTMLFormElement>) => {
@@ -220,18 +288,17 @@ const EventRegistrationsPage = () => {
         participant_id: participantID,
         status: createForm.status,
         source: createForm.source.trim(),
-        deposit_due_at: fromEventLocalInput(createForm.deposit_due_at),
-        balance_due_at: fromEventLocalInput(createForm.balance_due_at),
+        deposit_due_at: createForm.deposit_due_at,
+        main_invoice_due_at: createForm.main_invoice_due_at,
         tags: createForm.tags
           .split(',')
           .map((value) => value.trim())
           .filter(Boolean),
         internal_notes: createForm.internal_notes
       });
-      setRegistrations((prev) => [created, ...prev]);
+      setRegistrations((prev) => dedupeRegistrationsByParticipant([created, ...prev]));
       setCreateForm(createInitialFormState(eventData));
       setCreateFormOpen(false);
-      setMessage('Registration created');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create registration');
     } finally {
@@ -246,12 +313,14 @@ const EventRegistrationsPage = () => {
   return (
     <section className="stack">
       <header className="page-header">
-        <div>
-          <h2>{eventData.name} registrations</h2>
-          <p className="muted">
-            {eventData.location ? `${eventData.location} · ` : ''}
-            {formatEventLocal(eventData.starts_at, { dateStyle: 'medium', timeStyle: 'short' })}
-          </p>
+        <div className="event-schedule-headline-text">
+          <div className="event-header-top">
+            <h2 className="event-detail-title">{eventData.name}: Registrations</h2>
+          </div>
+          <p className="event-location">{eventData.location || 'Location TBD'}</p>
+          <div className="event-detail-header-badges">
+            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
+          </div>
         </div>
         <div className="event-schedule-actions" ref={actionMenuRef}>
           <button
@@ -312,7 +381,31 @@ const EventRegistrationsPage = () => {
                   navigate(`/events/${eventData.id}/comms`);
                 }}
               >
-                Communication
+                Communications
+              </button>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenuOpen(false);
+                  handleCopy();
+                }}
+                disabled={copying}
+              >
+                {copying ? 'Copying…' : 'Copy'}
+              </button>
+              <button
+                className="event-schedule-menu-item danger"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setActionMenuOpen(false);
+                  handleDelete();
+                }}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
               </button>
               <button
                 className="event-schedule-menu-item"
@@ -340,12 +433,12 @@ const EventRegistrationsPage = () => {
           <strong>{stats.overdueDeposits}</strong>
         </article>
         <article className="card registration-stat-card">
-          <span className="registration-stat-label">Balance overdue</span>
-          <strong>{stats.overdueBalances}</strong>
+          <span className="registration-stat-label">Main Invoice overdue</span>
+          <strong>{stats.overdueMainInvoices}</strong>
         </article>
         <article className="card registration-stat-card">
-          <span className="registration-stat-label">Fully paid</span>
-          <strong>{stats.fullyPaid}</strong>
+          <span className="registration-stat-label">Completed</span>
+          <strong>{stats.completed}</strong>
         </article>
       </section>
 
@@ -359,12 +452,10 @@ const EventRegistrationsPage = () => {
             <span>Status</span>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All</option>
-              <option value="applied">Applied</option>
               <option value="deposit_pending">Deposit pending</option>
               <option value="deposit_paid">Deposit paid</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="balance_pending">Balance pending</option>
-              <option value="fully_paid">Fully paid</option>
+              <option value="main_invoice_pending">Main Invoice pending</option>
+              <option value="completed">Completed</option>
               <option value="waitlisted">Waitlisted</option>
               <option value="cancelled">Cancelled</option>
               <option value="expired">Expired</option>
@@ -381,8 +472,8 @@ const EventRegistrationsPage = () => {
             </select>
           </label>
           <label className="form-field">
-            <span>Balance</span>
-            <select value={balanceFilter} onChange={(e) => setBalanceFilter(e.target.value as PaymentState)}>
+            <span>Main Invoice</span>
+            <select value={mainInvoiceFilter} onChange={(e) => setMainInvoiceFilter(e.target.value as PaymentState)}>
               <option value="all">All</option>
               <option value="pending">Pending</option>
               <option value="paid">Paid</option>
@@ -396,13 +487,13 @@ const EventRegistrationsPage = () => {
           <p className="muted">No registrations match the current filters.</p>
         ) : (
           <div className="registration-table-wrap">
-            <table className="table">
+            <table className="table registration-list-table">
               <thead>
                 <tr>
                   <th>Participant</th>
                   <th>Status</th>
                   <th>Deposit</th>
-                  <th>Balance</th>
+                  <th>Main Invoice</th>
                   <th>Registered</th>
                 </tr>
               </thead>
@@ -413,9 +504,9 @@ const EventRegistrationsPage = () => {
                     registration.deposit_due_at,
                     registration.status
                   );
-                  const balanceState = computePaymentState(
-                    registration.balance_paid_at,
-                    registration.balance_due_at,
+                  const mainInvoiceState = computePaymentState(
+                    registration.main_invoice_paid_at,
+                    registration.main_invoice_due_at,
                     registration.status
                   );
                   return (
@@ -451,14 +542,14 @@ const EventRegistrationsPage = () => {
                       <td>
                         <span
                           className={`badge ${
-                            balanceState === 'paid'
+                            mainInvoiceState === 'paid'
                               ? 'success'
-                              : balanceState === 'overdue'
+                              : mainInvoiceState === 'overdue'
                                 ? 'danger'
                                 : 'neutral'
                           }`}
                         >
-                          {balanceState}
+                          {mainInvoiceState}
                         </span>
                       </td>
                       <td>{formatEventLocal(registration.registered_at, { dateStyle: 'medium', timeStyle: 'short' })}</td>
@@ -492,7 +583,7 @@ const EventRegistrationsPage = () => {
           </div>
         </div>
 
-        {message && <p className="success-text">{message}</p>}
+        {message && <p className="error-text">{message}</p>}
         {error && <p className="error-text">{error}</p>}
 
         {createFormOpen ? (
@@ -541,17 +632,17 @@ const EventRegistrationsPage = () => {
                 <label className="form-field">
                   <span>Deposit due</span>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={createForm.deposit_due_at}
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, deposit_due_at: e.target.value }))}
                   />
                 </label>
                 <label className="form-field">
-                  <span>Balance due</span>
+                  <span>Main Invoice due</span>
                   <input
-                    type="datetime-local"
-                    value={createForm.balance_due_at}
-                    onChange={(e) => setCreateForm((prev) => ({ ...prev, balance_due_at: e.target.value }))}
+                    type="date"
+                    value={createForm.main_invoice_due_at}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, main_invoice_due_at: e.target.value }))}
                   />
                 </label>
                 <label className="form-field registration-create-span">

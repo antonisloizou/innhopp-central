@@ -93,7 +93,6 @@ const LogisticsMealDetailPage = () => {
         notes: form.notes.trim() || undefined
       });
       setMeal(updated);
-      setMessage('Meal updated');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to save meal');
     } finally {

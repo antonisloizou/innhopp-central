@@ -65,6 +65,17 @@ type Handler struct {
 
 const defaultPostLoginPath = "/events"
 
+func sanitizePostLoginPath(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "//") {
+		return ""
+	}
+	return trimmed
+}
+
 // NewHandler constructs an auth handler with OIDC configuration.
 func NewHandler(db *pgxpool.Pool, sessions *SessionManager, cfg Config) (*Handler, error) {
 	handler := &Handler{
@@ -113,7 +124,8 @@ func (h *Handler) beginLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, nonce, err := h.states.Create()
+	redirectPath := sanitizePostLoginPath(r.URL.Query().Get("redirect_to"))
+	state, nonce, err := h.states.Create(redirectPath)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create login state")
 		return
@@ -151,7 +163,7 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nonce, ok := h.states.Verify(state)
+	nonce, redirectPath, ok := h.states.Verify(state)
 	if !ok {
 		httpx.Error(w, http.StatusBadRequest, "invalid authorization state")
 		return
@@ -231,7 +243,7 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Roles:     finalRoles,
 		Token:     rawToken,
 	}
-	if redirectURL := h.postLoginRedirectURL(); redirectURL != "" {
+	if redirectURL := h.postLoginRedirectURL(redirectPath); redirectURL != "" {
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return
 	}
@@ -424,13 +436,16 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
-func (h *Handler) postLoginRedirectURL() string {
+func (h *Handler) postLoginRedirectURL(path string) string {
 	base := strings.TrimSpace(h.cfg.FrontendURL)
 	if base == "" {
 		return ""
 	}
-
-	return strings.TrimRight(base, "/") + defaultPostLoginPath
+	redirectPath := sanitizePostLoginPath(path)
+	if redirectPath == "" {
+		redirectPath = defaultPostLoginPath
+	}
+	return strings.TrimRight(base, "/") + redirectPath
 }
 
 func (h *Handler) exchangeCode(ctx context.Context, code string) (*tokenResponse, error) {

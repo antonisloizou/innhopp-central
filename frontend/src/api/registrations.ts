@@ -1,17 +1,15 @@
 import { apiRequest } from './client';
 
 export type RegistrationStatus =
-  | 'applied'
   | 'deposit_pending'
   | 'deposit_paid'
-  | 'confirmed'
-  | 'balance_pending'
-  | 'fully_paid'
+  | 'main_invoice_pending'
+  | 'completed'
   | 'waitlisted'
   | 'cancelled'
   | 'expired';
 
-export type RegistrationPaymentKind = 'deposit' | 'balance' | 'refund' | 'manual_adjustment';
+export type RegistrationPaymentKind = 'deposit' | 'main_invoice' | 'refund' | 'manual_adjustment';
 export type RegistrationPaymentStatus = 'pending' | 'paid' | 'failed' | 'waived' | 'refunded';
 export type RegistrationActivityType = 'note' | 'status_change' | 'payment_created' | 'payment_updated';
 
@@ -53,8 +51,8 @@ export interface Registration {
   registered_at: string;
   deposit_due_at?: string | null;
   deposit_paid_at?: string | null;
-  balance_due_at?: string | null;
-  balance_paid_at?: string | null;
+  main_invoice_due_at?: string | null;
+  main_invoice_paid_at?: string | null;
   cancelled_at?: string | null;
   expired_at?: string | null;
   waitlist_position?: number | null;
@@ -73,7 +71,7 @@ export interface CreateRegistrationPayload {
   source?: string;
   registered_at?: string;
   deposit_due_at?: string;
-  balance_due_at?: string;
+  main_invoice_due_at?: string;
   waitlist_position?: number;
   staff_owner_account_id?: number;
   tags?: string[];
@@ -83,7 +81,7 @@ export interface CreateRegistrationPayload {
 export interface UpdateRegistrationPayload {
   source?: string;
   deposit_due_at?: string;
-  balance_due_at?: string;
+  main_invoice_due_at?: string;
   waitlist_position?: number;
   staff_owner_account_id?: number;
   tags?: string[];
@@ -117,13 +115,14 @@ export interface PublicRegistrationEvent {
   name: string;
   location?: string | null;
   slots: number;
+  remaining_slots: number;
   starts_at: string;
   ends_at?: string | null;
   public_registration_slug: string;
   registration_open_at?: string | null;
-  balance_deadline?: string | null;
+  main_invoice_deadline?: string | null;
   deposit_amount?: string | null;
-  balance_amount?: string | null;
+  main_invoice_amount?: string | null;
   currency: string;
   minimum_registrations: number;
   commercial_status: string;
@@ -150,6 +149,9 @@ export interface PublicRegistrationPayload {
 
 export const listEventRegistrations = (eventId: number) =>
   apiRequest<Registration[]>(`/registrations/events/${eventId}`);
+
+export const listMyRegistrations = () =>
+  apiRequest<Registration[]>('/registrations/me');
 
 export const createEventRegistration = (eventId: number, payload: CreateRegistrationPayload) =>
   apiRequest<Registration>(`/registrations/events/${eventId}`, {
@@ -197,4 +199,9 @@ export const createPublicRegistration = (slug: string, payload: PublicRegistrati
   apiRequest<Registration>(`/registrations/public/events/${encodeURIComponent(slug)}/register`, {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+
+export const claimPublicRegistration = (slug: string) =>
+  apiRequest<Registration>(`/registrations/public/events/${encodeURIComponent(slug)}/claim`, {
+    method: 'POST'
   });

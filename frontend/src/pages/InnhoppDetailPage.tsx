@@ -222,8 +222,8 @@ const InnhoppDetailPage = () => {
     const fromFiles = Array.from(dt.files || []).filter((file) => file.type.startsWith('image/'));
     return fromItems.length ? fromItems : fromFiles;
   };
-  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
-  const saveButtonLabel = saving ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const saveButtonClass = 'primary';
+  const saveButtonLabel = saving ? 'Saving…' : 'Save';
   const buildSignature = useCallback(
     (formState: typeof form) => JSON.stringify(formState),
     [form]
@@ -679,12 +679,10 @@ const InnhoppDetailPage = () => {
       if (isCreateMode || !innhopp) {
         const created = await createInnhopp(Number(eventId), payload);
         setInnhopp(created);
-        setMessage('Innhopp created');
         navigate(`/events/${eventId}/innhopps/${created.id}`, { replace: true, state: {} });
       } else {
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
-        setMessage('Innhopp updated');
       }
       if (isCreateMode || imagesDirty) {
         setImagesDirty(false);
@@ -714,7 +712,6 @@ const InnhoppDetailPage = () => {
       const updated = await updateInnhopp(innhopp.id, payload);
       setInnhopp(updated);
       setForm((prev) => ({ ...prev, image_files: updated.image_files || nextImages }));
-      setMessage('Images saved');
       setSaved(true);
       setImagesDirty(false);
       setLastSavedSignature(buildSignature({ ...form, image_files: nextImages }));
@@ -757,13 +754,11 @@ const InnhoppDetailPage = () => {
       setShowNewAirfieldForm(false);
       setDraftAirfield({ name: '', elevation: 0, coordinates: '', description: '' });
       if (!innhopp) {
-        setMessage('Airfield created and assigned as takeoff');
       } else {
         const payload = buildPayload({ takeoff_airfield_id: created.id });
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
         setForm((prev) => ({ ...prev, takeoff_airfield_id: updated.takeoff_airfield_id || created.id }));
-        setMessage('Airfield created, attached, and innhopp saved');
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create airfield');
@@ -1066,7 +1061,7 @@ const InnhoppDetailPage = () => {
             </div>
           </div>
         <div className="form-actions innhopp-detail-save-actions">
-          <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+          <button type="submit" className={saveButtonClass} disabled={saving}>
             {saveButtonLabel}
           </button>
         </div>

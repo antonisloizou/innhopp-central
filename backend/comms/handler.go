@@ -32,6 +32,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/templates", h.listTemplates)
 	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Post("/templates", h.createTemplate)
+	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Put("/templates/{templateID}", h.updateTemplate)
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/events/{eventID}/audience-preview", h.audiencePreview)
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/events/{eventID}/campaigns", h.listEventCampaigns)
 	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Post("/campaigns", h.createCampaign)
@@ -51,23 +52,26 @@ type EmailTemplate struct {
 }
 
 type AudienceFilter struct {
-	Status       string `json:"status,omitempty"`
-	DepositState string `json:"deposit_state,omitempty"`
-	BalanceState string `json:"balance_state,omitempty"`
+	Status                  string   `json:"status,omitempty"`
+	DepositState            string   `json:"deposit_state,omitempty"`
+	MainInvoiceState        string   `json:"main_invoice_state,omitempty"`
+	Roles                   []string `json:"roles,omitempty"`
+	IncludedRegistrationIDs []int64  `json:"included_registration_ids,omitempty"`
+	ExcludedRegistrationIDs []int64  `json:"excluded_registration_ids,omitempty"`
 }
 
 type AudienceRecipient struct {
-	RegistrationID   int64      `json:"registration_id"`
-	ParticipantID    int64      `json:"participant_id"`
-	ParticipantName  string     `json:"participant_name"`
-	ParticipantEmail string     `json:"participant_email"`
-	Status           string     `json:"status"`
-	DepositDueAt     *time.Time `json:"deposit_due_at,omitempty"`
-	DepositPaidAt    *time.Time `json:"deposit_paid_at,omitempty"`
-	BalanceDueAt     *time.Time `json:"balance_due_at,omitempty"`
-	BalancePaidAt    *time.Time `json:"balance_paid_at,omitempty"`
-	DepositState     string     `json:"deposit_state"`
-	BalanceState     string     `json:"balance_state"`
+	RegistrationID    int64      `json:"registration_id"`
+	ParticipantID     int64      `json:"participant_id"`
+	ParticipantName   string     `json:"participant_name"`
+	ParticipantEmail  string     `json:"participant_email"`
+	Status            string     `json:"status"`
+	DepositDueAt      *time.Time `json:"deposit_due_at,omitempty"`
+	DepositPaidAt     *time.Time `json:"deposit_paid_at,omitempty"`
+	MainInvoiceDueAt  *time.Time `json:"main_invoice_due_at,omitempty"`
+	MainInvoicePaidAt *time.Time `json:"main_invoice_paid_at,omitempty"`
+	DepositState      string     `json:"deposit_state"`
+	MainInvoiceState  string     `json:"main_invoice_state"`
 }
 
 type AudiencePreviewResponse struct {
@@ -120,6 +124,18 @@ type campaignPayload struct {
 	Filter     AudienceFilter `json:"filter"`
 }
 
+func parseAudienceRegistrationIDs(values []string) []int64 {
+	ids := make([]int64, 0, len(values))
+	for _, value := range values {
+		id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || id <= 0 {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return normalizeAudienceRegistrationIDs(ids)
+}
+
 func currentAccountID(ctx context.Context) *int64 {
 	claims := auth.FromContext(ctx)
 	if claims == nil || claims.AccountID <= 0 {
@@ -136,37 +152,162 @@ func normalizeTemplateAudienceType(value string) string {
 	return strings.TrimSpace(strings.ToLower(value))
 }
 
-func normalizePaymentState(dueAt, paidAt *time.Time, registrationStatus string) string {
+func normalizePaymentState(paymentStatus string, dueAt, paidAt *time.Time, registrationStatus string) string {
+	if strings.EqualFold(strings.TrimSpace(paymentStatus), "waived") {
+		return "waived"
+	}
 	if paidAt != nil {
 		return "paid"
 	}
-	if dueAt == nil || registrationStatus == "cancelled" || registrationStatus == "expired" {
+	if dueAt == nil || registrationStatus == "cancelled" {
 		return "none"
 	}
-	if dueAt.Before(time.Now().UTC()) {
+	now := time.Now().UTC()
+	todayUTC := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	if dueAt.Before(todayUTC) {
 		return "overdue"
 	}
 	return "pending"
 }
 
+var allowedAudienceRoles = map[string]struct{}{
+	"Participant": {},
+	"Skydiver":    {},
+	"Staff":       {},
+	"Ground Crew": {},
+	"Jump Master": {},
+	"Jump Leader": {},
+	"Driver":      {},
+	"Pilot":       {},
+	"POC":         {},
+	"Photo":       {},
+}
+
+func canonicalAudienceRole(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.EqualFold(trimmed, "COP") {
+		trimmed = "POC"
+	}
+	for role := range allowedAudienceRoles {
+		if strings.EqualFold(trimmed, role) {
+			return role
+		}
+	}
+	return ""
+}
+
+func normalizeAudienceRoles(input []string) []string {
+	seen := make(map[string]struct{})
+	roles := make([]string, 0, len(input))
+	for _, value := range input {
+		canonical := canonicalAudienceRole(value)
+		if canonical == "" {
+			continue
+		}
+		if _, exists := seen[canonical]; exists {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		roles = append(roles, canonical)
+	}
+	return roles
+}
+
+func normalizeAudienceRegistrationIDs(input []int64) []int64 {
+	seen := make(map[int64]struct{}, len(input))
+	ids := make([]int64, 0, len(input))
+	for _, id := range input {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func hasRole(roles []string, target string) bool {
+	canonicalTarget := canonicalAudienceRole(target)
+	if canonicalTarget == "" {
+		return false
+	}
+	for _, role := range roles {
+		if canonicalAudienceRole(role) == canonicalTarget {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesAudienceRoleFilter(participantRoles []string, filterRoles []string) bool {
+	if len(filterRoles) == 0 {
+		return true
+	}
+	if hasRole(filterRoles, "Participant") && !hasRole(filterRoles, "Staff") && hasRole(participantRoles, "Staff") {
+		return false
+	}
+	for _, role := range filterRoles {
+		if !hasRole(participantRoles, role) {
+			return false
+		}
+	}
+	return true
+}
+
 func loadAudienceRecipients(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, eventID int64, filter AudienceFilter) ([]AudienceRecipient, error) {
+	filter.Roles = normalizeAudienceRoles(filter.Roles)
 	rows, err := q.Query(ctx, `
-		SELECT r.id,
-		       r.participant_id,
+		SELECT latest.id,
+		       latest.participant_id,
 		       COALESCE(p.full_name, ''),
 		       COALESCE(p.email, ''),
-		       r.status,
-		       r.deposit_due_at,
-		       r.deposit_paid_at,
-		       r.balance_due_at,
-		       r.balance_paid_at
-		FROM event_registrations r
-		JOIN participant_profiles p ON p.id = r.participant_id
-		WHERE r.event_id = $1
-		  AND COALESCE(p.email, '') <> ''
-		ORDER BY r.registered_at DESC, r.id DESC
+		       COALESCE(p.roles, ARRAY[]::TEXT[]),
+		       latest.status,
+		       latest.deposit_due_at,
+		       latest.deposit_paid_at,
+		       latest.main_invoice_due_at,
+		       latest.main_invoice_paid_at,
+		       COALESCE((
+		       	SELECT rp.status
+		       	FROM registration_payments rp
+		       	WHERE rp.registration_id = latest.id
+		       	  AND rp.kind = 'deposit'
+		       	ORDER BY rp.created_at DESC, rp.id DESC
+		       	LIMIT 1
+		       ), ''),
+		       COALESCE((
+		       	SELECT rp.status
+		       	FROM registration_payments rp
+		       	WHERE rp.registration_id = latest.id
+		       	  AND rp.kind = 'main_invoice'
+		       	ORDER BY rp.created_at DESC, rp.id DESC
+		       	LIMIT 1
+		       ), '')
+		FROM (
+			SELECT DISTINCT ON (r.participant_id)
+			       r.id,
+			       r.participant_id,
+			       r.status,
+			       r.deposit_due_at,
+			       r.deposit_paid_at,
+			       r.main_invoice_due_at,
+			       r.main_invoice_paid_at,
+			       r.registered_at
+			FROM event_registrations r
+			WHERE r.event_id = $1
+			ORDER BY r.participant_id, r.registered_at DESC, r.id DESC
+		) latest
+		JOIN participant_profiles p ON p.id = latest.participant_id
+		WHERE COALESCE(p.email, '') <> ''
+		ORDER BY latest.registered_at DESC, latest.id DESC
 	`, eventID)
 	if err != nil {
 		return nil, err
@@ -176,6 +317,95 @@ func loadAudienceRecipients(ctx context.Context, q interface {
 	recipients := make([]AudienceRecipient, 0)
 	for rows.Next() {
 		var recipient AudienceRecipient
+		var participantRoles []string
+		var depositPaymentStatus string
+		var mainInvoicePaymentStatus string
+		if err := rows.Scan(
+			&recipient.RegistrationID,
+			&recipient.ParticipantID,
+			&recipient.ParticipantName,
+			&recipient.ParticipantEmail,
+			&participantRoles,
+			&recipient.Status,
+			&recipient.DepositDueAt,
+			&recipient.DepositPaidAt,
+			&recipient.MainInvoiceDueAt,
+			&recipient.MainInvoicePaidAt,
+			&depositPaymentStatus,
+			&mainInvoicePaymentStatus,
+		); err != nil {
+			return nil, err
+		}
+		recipient.ParticipantEmail = strings.ToLower(strings.TrimSpace(recipient.ParticipantEmail))
+		recipient.DepositState = normalizePaymentState(depositPaymentStatus, recipient.DepositDueAt, recipient.DepositPaidAt, recipient.Status)
+		recipient.MainInvoiceState = normalizePaymentState(mainInvoicePaymentStatus, recipient.MainInvoiceDueAt, recipient.MainInvoicePaidAt, recipient.Status)
+		if filter.Status != "" && recipient.Status != filter.Status {
+			continue
+		}
+		if filter.DepositState != "" && recipient.DepositState != filter.DepositState {
+			continue
+		}
+		if filter.MainInvoiceState != "" && recipient.MainInvoiceState != filter.MainInvoiceState {
+			continue
+		}
+		if !matchesAudienceRoleFilter(participantRoles, filter.Roles) {
+			continue
+		}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
+func loadAudienceRecipientsByRegistrationIDs(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, eventID int64, registrationIDs []int64) ([]AudienceRecipient, error) {
+	registrationIDs = normalizeAudienceRegistrationIDs(registrationIDs)
+	if len(registrationIDs) == 0 {
+		return []AudienceRecipient{}, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT r.id,
+		       r.participant_id,
+		       COALESCE(p.full_name, ''),
+		       COALESCE(p.email, ''),
+		       r.status,
+		       r.deposit_due_at,
+		       r.deposit_paid_at,
+		       r.main_invoice_due_at,
+		       r.main_invoice_paid_at,
+		       COALESCE((
+		       	SELECT rp.status
+		       	FROM registration_payments rp
+		       	WHERE rp.registration_id = r.id
+		       	  AND rp.kind = 'deposit'
+		       	ORDER BY rp.created_at DESC, rp.id DESC
+		       	LIMIT 1
+		       ), ''),
+		       COALESCE((
+		       	SELECT rp.status
+		       	FROM registration_payments rp
+		       	WHERE rp.registration_id = r.id
+		       	  AND rp.kind = 'main_invoice'
+		       	ORDER BY rp.created_at DESC, rp.id DESC
+		       	LIMIT 1
+		       ), '')
+		FROM event_registrations r
+		JOIN participant_profiles p ON p.id = r.participant_id
+		WHERE r.event_id = $1
+		  AND r.id = ANY($2)
+		  AND COALESCE(p.email, '') <> ''
+		ORDER BY r.registered_at DESC, r.id DESC
+	`, eventID, registrationIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := make([]AudienceRecipient, 0, len(registrationIDs))
+	for rows.Next() {
+		var recipient AudienceRecipient
+		var depositPaymentStatus string
+		var mainInvoicePaymentStatus string
 		if err := rows.Scan(
 			&recipient.RegistrationID,
 			&recipient.ParticipantID,
@@ -184,26 +414,58 @@ func loadAudienceRecipients(ctx context.Context, q interface {
 			&recipient.Status,
 			&recipient.DepositDueAt,
 			&recipient.DepositPaidAt,
-			&recipient.BalanceDueAt,
-			&recipient.BalancePaidAt,
+			&recipient.MainInvoiceDueAt,
+			&recipient.MainInvoicePaidAt,
+			&depositPaymentStatus,
+			&mainInvoicePaymentStatus,
 		); err != nil {
 			return nil, err
 		}
 		recipient.ParticipantEmail = strings.ToLower(strings.TrimSpace(recipient.ParticipantEmail))
-		recipient.DepositState = normalizePaymentState(recipient.DepositDueAt, recipient.DepositPaidAt, recipient.Status)
-		recipient.BalanceState = normalizePaymentState(recipient.BalanceDueAt, recipient.BalancePaidAt, recipient.Status)
-		if filter.Status != "" && recipient.Status != filter.Status {
-			continue
-		}
-		if filter.DepositState != "" && recipient.DepositState != filter.DepositState {
-			continue
-		}
-		if filter.BalanceState != "" && recipient.BalanceState != filter.BalanceState {
-			continue
-		}
+		recipient.DepositState = normalizePaymentState(depositPaymentStatus, recipient.DepositDueAt, recipient.DepositPaidAt, recipient.Status)
+		recipient.MainInvoiceState = normalizePaymentState(mainInvoicePaymentStatus, recipient.MainInvoiceDueAt, recipient.MainInvoicePaidAt, recipient.Status)
 		recipients = append(recipients, recipient)
 	}
 	return recipients, rows.Err()
+}
+
+func resolveAudienceRecipients(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, eventID int64, filter AudienceFilter) ([]AudienceRecipient, error) {
+	baseRecipients, err := loadAudienceRecipients(ctx, q, eventID, filter)
+	if err != nil {
+		return nil, err
+	}
+	includedRecipients, err := loadAudienceRecipientsByRegistrationIDs(ctx, q, eventID, filter.IncludedRegistrationIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	excludedIDs := make(map[int64]struct{}, len(filter.ExcludedRegistrationIDs))
+	for _, id := range normalizeAudienceRegistrationIDs(filter.ExcludedRegistrationIDs) {
+		excludedIDs[id] = struct{}{}
+	}
+
+	merged := make([]AudienceRecipient, 0, len(baseRecipients)+len(includedRecipients))
+	seen := make(map[int64]struct{}, len(baseRecipients)+len(includedRecipients))
+	appendRecipient := func(recipient AudienceRecipient) {
+		if _, excluded := excludedIDs[recipient.RegistrationID]; excluded {
+			return
+		}
+		if _, exists := seen[recipient.RegistrationID]; exists {
+			return
+		}
+		seen[recipient.RegistrationID] = struct{}{}
+		merged = append(merged, recipient)
+	}
+
+	for _, recipient := range baseRecipients {
+		appendRecipient(recipient)
+	}
+	for _, recipient := range includedRecipients {
+		appendRecipient(recipient)
+	}
+	return merged, nil
 }
 
 func renderTimestamp(value *time.Time) string {
@@ -211,6 +473,13 @@ func renderTimestamp(value *time.Time) string {
 		return ""
 	}
 	return value.UTC().Format("2006-01-02 15:04 UTC")
+}
+
+func renderDate(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format("2006-01-02")
 }
 
 func renderMoney(value string, currency string) string {
@@ -261,28 +530,28 @@ func loadEventMetadata(ctx context.Context, q interface {
 	var name string
 	var location string
 	var startsAt time.Time
-	var balanceDeadline *time.Time
+	var mainInvoiceDeadline *time.Time
 	var depositAmount string
-	var balanceAmount string
+	var mainInvoiceAmount string
 	var currency string
 	var slug string
 	if err := q.QueryRow(ctx, `
 		SELECT name,
 		       COALESCE(location, ''),
 		       starts_at,
-		       balance_deadline,
+		       main_invoice_deadline,
 		       COALESCE(deposit_amount::TEXT, ''),
-		       COALESCE(balance_amount::TEXT, ''),
+		       COALESCE(main_invoice_amount::TEXT, ''),
 		       COALESCE(currency, 'EUR'),
 		       COALESCE(public_registration_slug, '')
 		FROM events
 		WHERE id = $1
-	`, eventID).Scan(&name, &location, &startsAt, &balanceDeadline, &depositAmount, &balanceAmount, &currency, &slug); err != nil {
+	`, eventID).Scan(&name, &location, &startsAt, &mainInvoiceDeadline, &depositAmount, &mainInvoiceAmount, &currency, &slug); err != nil {
 		return nil, err
 	}
 	totalAmount := ""
-	if depositAmount != "" || balanceAmount != "" {
-		totalAmount = renderMoney(strings.TrimSpace(fmt.Sprintf("%g", parseFloat(depositAmount)+parseFloat(balanceAmount))), currency)
+	if depositAmount != "" || mainInvoiceAmount != "" {
+		totalAmount = renderMoney(strings.TrimSpace(fmt.Sprintf("%g", parseFloat(depositAmount)+parseFloat(mainInvoiceAmount))), currency)
 	}
 	publicLink := ""
 	if strings.TrimSpace(slug) != "" {
@@ -292,9 +561,9 @@ func loadEventMetadata(ctx context.Context, q interface {
 		"event_name":               name,
 		"event_location":           location,
 		"event_starts_at":          startsAt.UTC().Format("2006-01-02 15:04 UTC"),
-		"balance_deadline":         renderTimestamp(balanceDeadline),
+		"main_invoice_deadline":    renderTimestamp(mainInvoiceDeadline),
 		"deposit_amount":           renderMoney(depositAmount, currency),
-		"balance_amount":           renderMoney(balanceAmount, currency),
+		"main_invoice_amount":      renderMoney(mainInvoiceAmount, currency),
 		"total_amount":             totalAmount,
 		"currency":                 strings.ToUpper(strings.TrimSpace(currency)),
 		"public_registration_link": publicLink,
@@ -462,6 +731,62 @@ func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusCreated, template)
 }
 
+func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request) {
+	templateID, err := strconv.ParseInt(chi.URLParam(r, "templateID"), 10, 64)
+	if err != nil || templateID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid template id")
+		return
+	}
+	var payload templatePayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(payload.Key))
+	name := strings.TrimSpace(payload.Name)
+	subject := strings.TrimSpace(payload.SubjectTemplate)
+	body := strings.TrimSpace(payload.BodyTemplate)
+	if key == "" || name == "" || subject == "" || body == "" {
+		httpx.Error(w, http.StatusBadRequest, "key, name, subject_template, and body_template are required")
+		return
+	}
+	row := h.db.QueryRow(r.Context(), `
+		UPDATE email_templates
+		SET key = $2,
+		    name = $3,
+		    subject_template = $4,
+		    body_template = $5,
+		    audience_type = $6,
+		    enabled = $7
+		WHERE id = $1
+		RETURNING id, key, name, subject_template, body_template, audience_type, enabled, created_at
+	`, templateID, key, name, subject, body, normalizeTemplateAudienceType(payload.AudienceType), payload.Enabled)
+	var template EmailTemplate
+	if err := row.Scan(
+		&template.ID,
+		&template.Key,
+		&template.Name,
+		&template.SubjectTemplate,
+		&template.BodyTemplate,
+		&template.AudienceType,
+		&template.Enabled,
+		&template.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "template not found")
+			return
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			httpx.Error(w, http.StatusConflict, "template key already exists")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "failed to update template")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, template)
+}
+
 func (h *Handler) audiencePreview(w http.ResponseWriter, r *http.Request) {
 	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
 	if err != nil || eventID <= 0 {
@@ -469,11 +794,14 @@ func (h *Handler) audiencePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := AudienceFilter{
-		Status:       strings.TrimSpace(r.URL.Query().Get("status")),
-		DepositState: strings.TrimSpace(r.URL.Query().Get("deposit_state")),
-		BalanceState: strings.TrimSpace(r.URL.Query().Get("balance_state")),
+		Status:                  strings.TrimSpace(r.URL.Query().Get("status")),
+		DepositState:            strings.TrimSpace(r.URL.Query().Get("deposit_state")),
+		MainInvoiceState:        strings.TrimSpace(r.URL.Query().Get("main_invoice_state")),
+		Roles:                   r.URL.Query()["role"],
+		IncludedRegistrationIDs: parseAudienceRegistrationIDs(r.URL.Query()["included_registration_id"]),
+		ExcludedRegistrationIDs: parseAudienceRegistrationIDs(r.URL.Query()["excluded_registration_id"]),
 	}
-	recipients, err := loadAudienceRecipients(r.Context(), h.db, eventID, filter)
+	recipients, err := resolveAudienceRecipients(r.Context(), h.db, eventID, filter)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load audience preview")
 		return
@@ -563,7 +891,9 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recipients, err := loadAudienceRecipients(ctx, tx, payload.EventID, payload.Filter)
+	payload.Filter.IncludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.IncludedRegistrationIDs)
+	payload.Filter.ExcludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.ExcludedRegistrationIDs)
+	recipients, err := resolveAudienceRecipients(ctx, tx, payload.EventID, payload.Filter)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load campaign audience")
 		return
@@ -596,15 +926,15 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 
 	for _, recipient := range recipients {
 		replacements := map[string]string{
-			"participant_name":    recipient.ParticipantName,
-			"participant_email":   recipient.ParticipantEmail,
-			"registration_status": recipient.Status,
-			"deposit_due_at":      renderTimestamp(recipient.DepositDueAt),
-			"deposit_paid_at":     renderTimestamp(recipient.DepositPaidAt),
-			"balance_due_at":      renderTimestamp(recipient.BalanceDueAt),
-			"balance_paid_at":     renderTimestamp(recipient.BalancePaidAt),
-			"deposit_state":       recipient.DepositState,
-			"balance_state":       recipient.BalanceState,
+			"participant_name":     recipient.ParticipantName,
+			"participant_email":    recipient.ParticipantEmail,
+			"registration_status":  recipient.Status,
+			"deposit_due_at":       renderDate(recipient.DepositDueAt),
+			"deposit_paid_at":      renderDate(recipient.DepositPaidAt),
+			"main_invoice_due_at":  renderDate(recipient.MainInvoiceDueAt),
+			"main_invoice_paid_at": renderDate(recipient.MainInvoicePaidAt),
+			"deposit_state":        recipient.DepositState,
+			"main_invoice_state":   recipient.MainInvoiceState,
 		}
 		for key, value := range eventMeta {
 			replacements[key] = value

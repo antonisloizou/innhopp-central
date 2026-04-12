@@ -46,7 +46,6 @@ function bindCreateForm() {
       createForm.reset();
       renderParticipants(createForm, []);
       clearInnhopps(createForm);
-      showMessage("success", `Created “${created.name}”.`);
     } catch (error) {
       console.error("Failed to create event", error);
       showMessage("error", error.message || "Could not create event.");
@@ -80,7 +79,6 @@ function bindEditForm() {
       const updated = await requestJSON(`/api/events/events/${eventId}`, { method: "PUT", body: payload });
       upsertEvent(updated);
       selectEvent(updated.id);
-      showMessage("success", `Saved changes to “${updated.name}”.`);
     } catch (error) {
       console.error("Failed to update event", error);
       showMessage("error", error.message || "Could not update event.");
@@ -111,7 +109,6 @@ function bindEditForm() {
         clearInnhopps(editForm);
         renderEventsList();
         manageHint.textContent = "Select an event from the list to review or update it.";
-        showMessage("success", "Event deleted.");
       } catch (error) {
         console.error("Failed to delete event", error);
         showMessage("error", error.message || "Could not delete event.");

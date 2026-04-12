@@ -16,6 +16,7 @@ import (
 	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/registrations"
 )
 
 // Handler exposes participant profile endpoints.
@@ -324,6 +325,24 @@ func nullableAccountID(accountID int64) any {
 		return nil
 	}
 	return accountID
+}
+
+func hasRoleIgnoreCase(roles []string, expected string) bool {
+	for _, role := range roles {
+		if strings.EqualFold(strings.TrimSpace(role), expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func currentAccountID(ctx context.Context) *int64 {
+	claims := auth.FromContext(ctx)
+	if claims == nil || claims.AccountID <= 0 {
+		return nil
+	}
+	accountID := claims.AccountID
+	return &accountID
 }
 
 func canManageAccountRoles(ctx context.Context) bool {
@@ -669,6 +688,12 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if hasRoleIgnoreCase(roles, "Staff") {
+		if err := registrations.EnsureStaffParticipantRegistrations(r.Context(), h.db, profile.ID, currentAccountID(r.Context())); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync staff registrations")
+			return
+		}
+	}
 	if err := h.enrichAccountRoles(r.Context(), profile); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load account roles")
 		return
@@ -858,6 +883,12 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusInternalServerError, "failed to save account roles")
 			return
 		}
+		if hasRoleIgnoreCase(roles, "Staff") {
+			if err := registrations.EnsureStaffParticipantRegistrations(r.Context(), h.db, profile.ID, currentAccountID(r.Context())); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to sync staff registrations")
+				return
+			}
+		}
 		if err := h.enrichAccountRoles(r.Context(), profile); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to load account roles")
 			return
@@ -950,6 +981,12 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 	if err := h.syncAccountRoles(r.Context(), existingID, email, accountRoles); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to save account roles")
 		return
+	}
+	if hasRoleIgnoreCase(roles, "Staff") {
+		if err := registrations.EnsureStaffParticipantRegistrations(r.Context(), h.db, existingID, currentAccountID(r.Context())); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync staff registrations")
+			return
+		}
 	}
 
 	profile, loadErr := h.loadProfileByID(r.Context(), existingID)
@@ -1062,6 +1099,12 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	if canManageAccountRoles(r.Context()) {
 		if err := h.syncAccountRoles(r.Context(), profileID, email, payload.AccountRoles); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to update account roles")
+			return
+		}
+	}
+	if hasRoleIgnoreCase(roles, "Staff") {
+		if err := registrations.EnsureStaffParticipantRegistrations(r.Context(), h.db, profileID, currentAccountID(r.Context())); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync staff registrations")
 			return
 		}
 	}

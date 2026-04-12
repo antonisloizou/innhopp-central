@@ -81,7 +81,6 @@ const AirfieldDetailPage = () => {
         coordinates: updated.coordinates,
         description: updated.description || ''
       });
-      setMessage('Airfield updated');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update airfield');
     } finally {

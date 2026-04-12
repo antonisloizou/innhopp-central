@@ -14,7 +14,10 @@ export interface EmailTemplate {
 export interface AudienceFilter {
   status?: string;
   deposit_state?: string;
-  balance_state?: string;
+  main_invoice_state?: string;
+  roles?: string[];
+  included_registration_ids?: number[];
+  excluded_registration_ids?: number[];
 }
 
 export interface AudienceRecipient {
@@ -25,10 +28,10 @@ export interface AudienceRecipient {
   status: string;
   deposit_due_at?: string | null;
   deposit_paid_at?: string | null;
-  balance_due_at?: string | null;
-  balance_paid_at?: string | null;
+  main_invoice_due_at?: string | null;
+  main_invoice_paid_at?: string | null;
   deposit_state: string;
-  balance_state: string;
+  main_invoice_state: string;
 }
 
 export interface AudiencePreviewResponse {
@@ -74,6 +77,8 @@ export interface CreateTemplatePayload {
   enabled?: boolean;
 }
 
+export interface UpdateTemplatePayload extends CreateTemplatePayload {}
+
 export interface CreateCampaignPayload {
   event_id: number;
   template_id: number;
@@ -89,11 +94,24 @@ export const createEmailTemplate = (payload: CreateTemplatePayload) =>
     body: JSON.stringify(payload)
   });
 
+export const updateEmailTemplate = (templateId: number, payload: UpdateTemplatePayload) =>
+  apiRequest<EmailTemplate>(`/comms/templates/${templateId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload)
+  });
+
 export const getAudiencePreview = (eventId: number, filter: AudienceFilter) => {
   const params = new URLSearchParams();
   if (filter.status) params.set('status', filter.status);
   if (filter.deposit_state) params.set('deposit_state', filter.deposit_state);
-  if (filter.balance_state) params.set('balance_state', filter.balance_state);
+  if (filter.main_invoice_state) params.set('main_invoice_state', filter.main_invoice_state);
+  (filter.roles || []).forEach((role) => params.append('role', role));
+  (filter.included_registration_ids || []).forEach((id) =>
+    params.append('included_registration_id', String(id))
+  );
+  (filter.excluded_registration_ids || []).forEach((id) =>
+    params.append('excluded_registration_id', String(id))
+  );
   const query = params.toString();
   return apiRequest<AudiencePreviewResponse>(`/comms/events/${eventId}/audience-preview${query ? `?${query}` : ''}`);
 };

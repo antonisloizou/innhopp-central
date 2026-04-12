@@ -299,9 +299,8 @@ const EventCalendarPage = () => {
               >
                 <article className="card event-summary-card">
                   {(() => {
-                    const nonStaffCount = countNonStaff(event.participant_ids);
                     const slotCount = event.slots ?? 0;
-                    const remaining = Math.max(slotCount - nonStaffCount, 0);
+                    const remaining = Math.max(event.remaining_slots ?? 0, 0);
                     const isFull = remaining === 0;
                     const past = isPastEvent(event);
                     return (
@@ -333,7 +332,7 @@ const EventCalendarPage = () => {
                           </div>
                           <div>
                             <dt>Participants</dt>
-                            <dd>{countNonStaff(event.participant_ids)}</dd>
+                            <dd>{Math.max(slotCount - remaining, 0)}</dd>
                           </div>
                           <div>
                             <dt>INNHOPPS</dt>

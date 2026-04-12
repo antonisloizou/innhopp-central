@@ -31,7 +31,6 @@ const AirfieldCreatePage = () => {
         description: form.description?.trim() || undefined
       };
       await createAirfield(payload);
-      setMessage('Airfield created');
       navigate(-1);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create airfield');

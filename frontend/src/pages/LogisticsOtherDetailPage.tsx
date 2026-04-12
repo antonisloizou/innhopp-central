@@ -26,8 +26,8 @@ const LogisticsOtherDetailPage = () => {
   const [copying, setCopying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
-  const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const saveButtonClass = 'primary';
+  const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
   const missingName = !form.name.trim();
   const complete = hasText(form.name) && hasText(form.coordinates) && hasText(form.scheduled_at);
@@ -80,7 +80,6 @@ const LogisticsOtherDetailPage = () => {
     setSaved(false);
     try {
       await updateOther(Number(otherId), buildPayload());
-      setMessage('Entry updated');
       setSaved(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update entry');

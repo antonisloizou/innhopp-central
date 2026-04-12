@@ -60,7 +60,12 @@ func main() {
 	if err := registrations.BackfillEventRosterSync(backfillCtx, pool); err != nil {
 		log.Printf("event/registration sync backfill failed: %v", err)
 	}
+	if err := registrations.BackfillStaffRegistrations(backfillCtx, pool); err != nil {
+		log.Printf("staff registration backfill failed: %v", err)
+	}
 	cancelBackfill()
+	runRegistrationExpirySweep(pool)
+	go startRegistrationExpiryWorker(pool)
 
 	sessionSecret := os.Getenv("SESSION_SECRET")
 	if sessionSecret == "" {
@@ -168,6 +173,32 @@ func logMissingOIDCConfig(cfg auth.Config) {
 	}
 }
 
+func runRegistrationExpirySweep(pool *pgxpool.Pool) {
+	sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rows, err := registrations.ExpireOverdueRegistrations(sweepCtx, pool)
+	if err != nil {
+		log.Printf("registration expiry sweep failed: %v", err)
+		return
+	}
+	if rows > 0 {
+		log.Printf("registration expiry sweep marked %d registrations as expired", rows)
+	}
+}
+
+func startRegistrationExpiryWorker(pool *pgxpool.Pool) {
+	for {
+		now := time.Now().UTC()
+		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 1, 0, 0, time.UTC)
+		if !now.Before(next) {
+			next = next.Add(24 * time.Hour)
+		}
+		timer := time.NewTimer(time.Until(next))
+		<-timer.C
+		runRegistrationExpirySweep(pool)
+	}
+}
+
 func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS seasons (
@@ -193,12 +224,38 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS public_registration_slug TEXT`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS public_registration_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS registration_open_at TIMESTAMPTZ`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS balance_deadline TIMESTAMPTZ`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS main_invoice_deadline TIMESTAMPTZ`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS deposit_amount NUMERIC(12,2)`,
-		`ALTER TABLE events ADD COLUMN IF NOT EXISTS balance_amount NUMERIC(12,2)`,
+		`ALTER TABLE events ADD COLUMN IF NOT EXISTS main_invoice_amount NUMERIC(12,2)`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS minimum_deposit_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE events ADD COLUMN IF NOT EXISTS commercial_status TEXT NOT NULL DEFAULT 'draft'`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'balance_deadline'
+			) THEN
+				UPDATE events
+				SET main_invoice_deadline = COALESCE(main_invoice_deadline, balance_deadline)
+				WHERE balance_deadline IS NOT NULL;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'events' AND column_name = 'balance_amount'
+			) THEN
+				UPDATE events
+				SET main_invoice_amount = COALESCE(main_invoice_amount, balance_amount)
+				WHERE balance_amount IS NOT NULL;
+			END IF;
+		END $$`,
+		`ALTER TABLE events DROP COLUMN IF EXISTS balance_deadline`,
+		`ALTER TABLE events DROP COLUMN IF EXISTS balance_amount`,
 		`ALTER TABLE events DROP COLUMN IF EXISTS deposit_deadline`,
 		`ALTER TABLE events DROP COLUMN IF EXISTS registration_close_at`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS events_public_registration_slug_idx
@@ -542,10 +599,10 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             status TEXT NOT NULL DEFAULT 'deposit_pending',
             source TEXT,
             registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            deposit_due_at TIMESTAMPTZ,
-            deposit_paid_at TIMESTAMPTZ,
-            balance_due_at TIMESTAMPTZ,
-            balance_paid_at TIMESTAMPTZ,
+            deposit_due_at DATE,
+            deposit_paid_at DATE,
+            main_invoice_due_at DATE,
+            main_invoice_paid_at DATE,
             cancelled_at TIMESTAMPTZ,
             expired_at TIMESTAMPTZ,
             waitlist_position INTEGER,
@@ -558,10 +615,10 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'deposit_pending'`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS source TEXT`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
-		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_due_at TIMESTAMPTZ`,
-		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_paid_at TIMESTAMPTZ`,
-		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS balance_due_at TIMESTAMPTZ`,
-		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS balance_paid_at TIMESTAMPTZ`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_due_at DATE`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS deposit_paid_at DATE`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS main_invoice_due_at DATE`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS main_invoice_paid_at DATE`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS waitlist_position INTEGER`,
@@ -570,6 +627,103 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS internal_notes TEXT`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'event_registrations'
+				  AND column_name = 'deposit_due_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE event_registrations
+				ALTER COLUMN deposit_due_at TYPE DATE
+				USING deposit_due_at::date;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'event_registrations'
+				  AND column_name = 'deposit_paid_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE event_registrations
+				ALTER COLUMN deposit_paid_at TYPE DATE
+				USING deposit_paid_at::date;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'event_registrations'
+				  AND column_name = 'main_invoice_paid_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE event_registrations
+				ALTER COLUMN main_invoice_paid_at TYPE DATE
+				USING main_invoice_paid_at::date;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'event_registrations'
+				  AND column_name = 'main_invoice_due_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE event_registrations
+				ALTER COLUMN main_invoice_due_at TYPE DATE
+				USING main_invoice_due_at::date;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'event_registrations' AND column_name = 'balance_due_at'
+			) AND EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'event_registrations' AND column_name = 'balance_paid_at'
+			) THEN
+				UPDATE event_registrations
+				SET main_invoice_due_at = COALESCE(main_invoice_due_at, balance_due_at),
+				    main_invoice_paid_at = COALESCE(main_invoice_paid_at, balance_paid_at)
+				WHERE balance_due_at IS NOT NULL OR balance_paid_at IS NOT NULL;
+			ELSIF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'event_registrations' AND column_name = 'balance_due_at'
+			) THEN
+				UPDATE event_registrations
+				SET main_invoice_due_at = COALESCE(main_invoice_due_at, balance_due_at)
+				WHERE balance_due_at IS NOT NULL;
+			ELSIF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'event_registrations' AND column_name = 'balance_paid_at'
+			) THEN
+				UPDATE event_registrations
+				SET main_invoice_paid_at = COALESCE(main_invoice_paid_at, balance_paid_at)
+				WHERE balance_paid_at IS NOT NULL;
+			END IF;
+		END $$`,
+		`ALTER TABLE event_registrations DROP COLUMN IF EXISTS balance_due_at`,
+		`ALTER TABLE event_registrations DROP COLUMN IF EXISTS balance_paid_at`,
+		`UPDATE event_registrations SET status = 'main_invoice_pending' WHERE status = 'balance_pending'`,
+		`UPDATE event_registrations SET status = 'completed' WHERE status = 'fully_paid'`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS event_registrations_active_participant_idx
             ON event_registrations (event_id, participant_id)
             WHERE cancelled_at IS NULL AND expired_at IS NULL`,
@@ -580,8 +734,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             amount NUMERIC(12,2) NOT NULL DEFAULT 0,
             currency TEXT NOT NULL DEFAULT 'EUR',
             status TEXT NOT NULL DEFAULT 'pending',
-            due_at TIMESTAMPTZ,
-            paid_at TIMESTAMPTZ,
+            due_at DATE,
+            paid_at DATE,
             provider TEXT,
             provider_ref TEXT,
             recorded_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
@@ -592,13 +746,64 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) NOT NULL DEFAULT 0`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'EUR'`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'`,
-		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS due_at TIMESTAMPTZ`,
-		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS due_at DATE`,
+		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS paid_at DATE`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'registration_payments'
+				  AND column_name = 'due_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE registration_payments
+				ALTER COLUMN due_at TYPE DATE
+				USING due_at::date;
+			END IF;
+		END $$`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1
+				FROM information_schema.columns
+				WHERE table_schema = 'public'
+				  AND table_name = 'registration_payments'
+				  AND column_name = 'paid_at'
+				  AND data_type <> 'date'
+			) THEN
+				ALTER TABLE registration_payments
+				ALTER COLUMN paid_at TYPE DATE
+				USING paid_at::date;
+			END IF;
+		END $$`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS provider TEXT`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS provider_ref TEXT`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS recorded_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE registration_payments ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`UPDATE registration_payments SET kind = 'main_invoice' WHERE kind = 'balance'`,
+		`UPDATE registration_payments
+		 SET paid_at = COALESCE(paid_at, due_at, created_at::date, CURRENT_DATE)
+		 WHERE status IN ('paid', 'waived') AND paid_at IS NULL`,
+		`WITH payment_markers AS (
+			SELECT registration_id,
+			       MAX(COALESCE(paid_at, CURRENT_DATE)) FILTER (WHERE kind = 'deposit' AND status IN ('paid', 'waived')) AS deposit_paid_at,
+			       MAX(COALESCE(paid_at, CURRENT_DATE)) FILTER (WHERE kind = 'main_invoice' AND status IN ('paid', 'waived')) AS main_invoice_paid_at
+			FROM registration_payments
+			GROUP BY registration_id
+		)
+		UPDATE event_registrations r
+		SET deposit_paid_at = pm.deposit_paid_at,
+		    main_invoice_paid_at = pm.main_invoice_paid_at,
+		    updated_at = NOW()
+		FROM payment_markers pm
+		WHERE r.id = pm.registration_id
+		  AND (
+			r.deposit_paid_at IS DISTINCT FROM pm.deposit_paid_at
+			OR r.main_invoice_paid_at IS DISTINCT FROM pm.main_invoice_paid_at
+		  )`,
 		`CREATE TABLE IF NOT EXISTS registration_activity (
             id SERIAL PRIMARY KEY,
             registration_id INTEGER NOT NULL REFERENCES event_registrations(id) ON DELETE CASCADE,

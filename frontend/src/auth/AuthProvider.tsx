@@ -20,7 +20,7 @@ type AuthContextValue = {
   user: AuthSession | null;
   isLoading: boolean;
   refreshSession: () => Promise<void>;
-  startLogin: () => Promise<void>;
+  startLogin: (redirectTo?: string) => Promise<void>;
   impersonateParticipant: (participantId: number) => Promise<void>;
   impersonateNewUser: () => Promise<void>;
   stopImpersonating: () => Promise<void>;
@@ -60,8 +60,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void loadSession();
   }, []);
 
-  const startLogin = useCallback(async () => {
-    const response = await apiRequest<LoginResponse>('/auth/login');
+  const startLogin = useCallback(async (redirectTo?: string) => {
+    const redirectParam = typeof redirectTo === 'string' && redirectTo.trim()
+      ? `?redirect_to=${encodeURIComponent(redirectTo.trim())}`
+      : '';
+    const response = await apiRequest<LoginResponse>(`/auth/login${redirectParam}`);
     window.location.assign(response.authorization_url);
   }, []);
 

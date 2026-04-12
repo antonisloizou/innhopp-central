@@ -27,8 +27,8 @@ const AccommodationDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
-  const saveButtonLabel = submitting ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const saveButtonClass = 'primary';
+  const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
   const missingName = !form.name.trim();
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
@@ -82,7 +82,6 @@ const AccommodationDetailPage = () => {
         notes: form.notes.trim() || undefined
       });
       setSaved(true);
-      setMessage('Accommodation updated');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update accommodation');
     } finally {
@@ -273,7 +272,7 @@ const AccommodationDetailPage = () => {
             />
           </label>
           <div className="form-actions">
-            <button type="submit" className={saveButtonClass} disabled={submitting || saved}>
+            <button type="submit" className={saveButtonClass} disabled={submitting}>
               {saveButtonLabel}
             </button>
             {message && <span className="muted">{message}</span>}

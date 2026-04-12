@@ -32,7 +32,10 @@ import { roleOptions } from '../utils/roles';
 import { formatMetersWithFeet } from '../utils/units';
 import {
   formatEventLocal,
+  formatEventLocalDate,
   formatEventLocalDateInput,
+  getEventLocalDateKey,
+  getEventLocalDateKeyFromDate,
   formatEventLocalInputFromDate,
   formatEventLocalPickerDateTime,
   fromEventLocalDateInput,
@@ -159,7 +162,13 @@ const formatDateTime24h = (value?: string | null) => {
 };
 
 const badgeClassForRegistrationStatus = (status?: string | null) => {
-  if (status === 'fully_paid' || status === 'confirmed' || status === 'deposit_paid') return 'badge success';
+  if (status === 'completed' || status === 'fully_paid') {
+    return 'badge registration-status-badge registration-status-badge-completed';
+  }
+  if (status === 'deposit_paid') return 'badge registration-status-badge registration-status-badge-deposit-paid';
+  if (status === 'deposit_pending' || status === 'main_invoice_pending') {
+    return 'badge registration-status-badge registration-status-badge-pending';
+  }
   if (status === 'cancelled' || status === 'expired') return 'badge danger';
   return 'badge neutral';
 };
@@ -177,8 +186,8 @@ const computePaymentState = (
 ): 'paid' | 'pending' | 'overdue' | 'none' => {
   if (paidAt) return 'paid';
   if (!dueAt) return 'none';
-  if (registrationStatus === 'cancelled' || registrationStatus === 'expired') return 'none';
-  return new Date(dueAt).getTime() < Date.now() ? 'overdue' : 'pending';
+  if (registrationStatus === 'cancelled') return 'none';
+  return getEventLocalDateKey(dueAt) < getEventLocalDateKeyFromDate(new Date()) ? 'overdue' : 'pending';
 };
 
 const emptyLandingArea = (): LandingAreaForm => ({
@@ -285,9 +294,9 @@ const EventDetailPage = () => {
     public_registration_slug: '',
     public_registration_enabled: false,
     registration_open_at: '',
-    balance_deadline: '',
+    main_invoice_deadline: '',
     deposit_amount: '',
-    balance_amount: '',
+    main_invoice_amount: '',
     currency: 'EUR',
     minimum_deposit_count: '',
     commercial_status: 'draft' as EventCommercialStatus
@@ -328,8 +337,8 @@ const EventDetailPage = () => {
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
-  const saveButtonClass = `primary ${saved ? 'saved' : ''}`;
-  const saveButtonLabel = saving ? 'Saving…' : saved ? 'Saved' : 'Save';
+  const saveButtonClass = 'primary';
+  const saveButtonLabel = saving ? 'Saving…' : 'Save';
   const buildSignature = useCallback(
     (
       formState: typeof eventForm,
@@ -360,10 +369,10 @@ const currentSignature = useMemo(
   const [copiedPublicLink, setCopiedPublicLink] = useState(false);
   const totalRegistrationAmount = useMemo(() => {
     const deposit = Number(eventForm.deposit_amount || 0);
-    const balance = Number(eventForm.balance_amount || 0);
-    const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(balance) ? balance : 0);
+    const mainInvoice = Number(eventForm.main_invoice_amount || 0);
+    const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(mainInvoice) ? mainInvoice : 0);
     return total.toFixed(2);
-  }, [eventForm.deposit_amount, eventForm.balance_amount]);
+  }, [eventForm.deposit_amount, eventForm.main_invoice_amount]);
   const registrationsByParticipantId = useMemo(() => {
     const next = new Map<number, Registration>();
     registrations.forEach((registration) => {
@@ -793,11 +802,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           public_registration_slug: event.public_registration_slug || '',
           public_registration_enabled: !!event.public_registration_enabled,
           registration_open_at: toInputDateTime(event.registration_open_at),
-          balance_deadline: toInputDateTime(event.balance_deadline),
+          main_invoice_deadline: toInputDateTime(event.main_invoice_deadline),
           deposit_amount:
             typeof event.deposit_amount === 'number' ? String(event.deposit_amount) : '',
-          balance_amount:
-            typeof event.balance_amount === 'number' ? String(event.balance_amount) : '',
+          main_invoice_amount:
+            typeof event.main_invoice_amount === 'number' ? String(event.main_invoice_amount) : '',
           currency: event.currency || 'EUR',
           minimum_deposit_count:
             typeof event.minimum_deposit_count === 'number' && event.minimum_deposit_count > 0
@@ -977,9 +986,9 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       registration.deposit_due_at,
       registration.status
     );
-    const balanceState = computePaymentState(
-      registration.balance_paid_at,
-      registration.balance_due_at,
+    const mainInvoiceState = computePaymentState(
+      registration.main_invoice_paid_at,
+      registration.main_invoice_due_at,
       registration.status
     );
     return (
@@ -989,12 +998,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             {registration.status.replace(/_/g, ' ')}
           </span>
           <span className={badgeClassForPaymentState(depositState)}>Deposit {depositState}</span>
-          <span className={badgeClassForPaymentState(balanceState)}>Balance {balanceState}</span>
+          <span className={badgeClassForPaymentState(mainInvoiceState)}>Main Invoice {mainInvoiceState}</span>
         </div>
         <div className="event-detail-registration-meta">
           <span>Registered {formatDateTime24h(registration.registered_at) || 'Unknown'}</span>
-          {registration.deposit_due_at && <span>Deposit due {formatDateTime24h(registration.deposit_due_at)}</span>}
-          {registration.balance_due_at && <span>Balance due {formatDateTime24h(registration.balance_due_at)}</span>}
+          {registration.deposit_due_at && <span>Deposit due {formatEventLocalDate(registration.deposit_due_at)}</span>}
+          {registration.main_invoice_due_at && <span>Main Invoice due {formatEventLocalDate(registration.main_invoice_due_at)}</span>}
         </div>
         <Link
           to={`/registrations/${registration.id}`}
@@ -1090,13 +1099,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         registration_open_at: eventForm.registration_open_at
           ? fromEventLocalInput(eventForm.registration_open_at)
           : undefined,
-        balance_deadline: eventForm.balance_deadline
-          ? fromEventLocalInput(eventForm.balance_deadline)
+        main_invoice_deadline: eventForm.main_invoice_deadline
+          ? fromEventLocalInput(eventForm.main_invoice_deadline)
           : undefined,
         deposit_amount:
           eventForm.deposit_amount !== '' ? Number(eventForm.deposit_amount) : undefined,
-        balance_amount:
-          eventForm.balance_amount !== '' ? Number(eventForm.balance_amount) : undefined,
+        main_invoice_amount:
+          eventForm.main_invoice_amount !== '' ? Number(eventForm.main_invoice_amount) : undefined,
         currency: eventForm.currency.trim().toUpperCase() || 'EUR',
         minimum_deposit_count:
           eventForm.minimum_deposit_count !== '' ? Number(eventForm.minimum_deposit_count) : 0,
@@ -1145,7 +1154,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setParticipantIds(normalizedParticipants);
       setAirfieldIds(normalizedAirfields);
       setInnhopps(normalizedInnhopps);
-      setMessage('Event updated');
       setLastSavedSignature(buildSignature(eventForm, normalizedParticipants, normalizedAirfields, normalizedInnhopps));
       setSaved(true);
     } catch (err) {
@@ -1180,13 +1188,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         registration_open_at: eventForm.registration_open_at
           ? fromEventLocalInput(eventForm.registration_open_at)
           : undefined,
-        balance_deadline: eventForm.balance_deadline
-          ? fromEventLocalInput(eventForm.balance_deadline)
+        main_invoice_deadline: eventForm.main_invoice_deadline
+          ? fromEventLocalInput(eventForm.main_invoice_deadline)
           : undefined,
         deposit_amount:
           eventForm.deposit_amount !== '' ? Number(eventForm.deposit_amount) : undefined,
-        balance_amount:
-          eventForm.balance_amount !== '' ? Number(eventForm.balance_amount) : undefined,
+        main_invoice_amount:
+          eventForm.main_invoice_amount !== '' ? Number(eventForm.main_invoice_amount) : undefined,
         currency: eventForm.currency.trim().toUpperCase() || 'EUR',
         minimum_deposit_count:
           eventForm.minimum_deposit_count !== '' ? Number(eventForm.minimum_deposit_count) : 0,
@@ -1195,7 +1203,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       const nextRegistrations = await listEventRegistrations(eventData.id);
       setEventData(updated);
       setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
-      setMessage('Registration settings updated');
       setLastSavedSignature(buildSignature(eventForm, participantIds, airfieldIds, innhopps));
       setSaved(true);
     } catch (err) {
@@ -1305,7 +1312,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       }));
       setTakeoffFormMode((prev) => ({ ...prev, [index]: 'existing' }));
       await persistEvent(participantIds, updatedAirfieldIds, nextInnhopps);
-      setMessage('Airfield added as takeoff and saved to event.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add airfield');
     } finally {
@@ -1374,7 +1380,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         roles: ['Participant', 'Staff']
       });
       setShowStaffForm(false);
-      setMessage('Staff participant added and saved to event.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add staff participant');
     } finally {
@@ -1414,7 +1419,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         roles: ['Participant', 'Skydiver']
       });
       setShowParticipantForm(false);
-      setMessage('Participant added. Save to persist with event.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add participant');
     } finally {
@@ -1525,7 +1529,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setAirfieldForm({ name: '', elevation: '', coordinates: '', description: '' });
       setShowAirfieldForm(false);
       await persistEvent(participantIds, airfieldIds.includes(created.id) ? airfieldIds : [...airfieldIds, created.id]);
-      setMessage('Airfield added and saved to event.');
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add airfield');
     } finally {
@@ -1578,31 +1581,26 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   return (
     <section {...editGuardProps}>
       <header className="page-header">
-        <div>
+        <div className="event-schedule-headline-text">
           <div className="event-header-top">
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 className="event-detail-title">{eventData.name}</h2>
+              <h2 className="event-detail-title">{eventData.name}: Details</h2>
             </DetailPageLockTitle>
-            <div className="event-detail-header-badges">
-              <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-              {!pastEvent &&
-                (() => {
-                  const totalSlots = eventData.slots ?? 0;
-                  const nonStaffCount = participantIds.reduce((acc, id) => {
-                    const roles = participants.find((p) => p.id === id)?.roles || [];
-                    return roles.includes('Staff') ? acc : acc + 1;
-                  }, 0);
-                  const remaining = Math.max(totalSlots - nonStaffCount, 0);
-                  const isFull = remaining === 0;
-                  return (
-                    <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                      {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                    </span>
-                  );
-                })()}
-            </div>
           </div>
           <p className="event-location">{eventData.location || 'Location TBD'}</p>
+          <div className="event-detail-header-badges">
+            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
+            {!pastEvent &&
+              (() => {
+                const remaining = Math.max(eventData.remaining_slots ?? 0, 0);
+                const isFull = remaining === 0;
+                return (
+                  <span className={`badge ${isFull ? 'danger' : 'success'}`}>
+                    {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                  </span>
+                );
+              })()}
+          </div>
         </div>
         <div className="event-schedule-actions" ref={actionMenuRef}>
           <button
@@ -1663,7 +1661,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   navigate(`/events/${eventData.id}/comms`);
                 }}
               >
-                Communication
+                Communications
               </button>
               <button
                 className="event-schedule-menu-item"
@@ -1837,7 +1835,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               <div aria-hidden="true" className="event-detail-details-col-6-7" />
             </div>
             <div className="form-actions">
-              <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+              <button type="submit" className={saveButtonClass} disabled={saving}>
                 {saveButtonLabel}
               </button>
               {message && <span className="muted">{message}</span>}
@@ -1951,26 +1949,26 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </label>
 
               <label className="form-field registration-settings-field">
-                <span>Balance amount</span>
+                <span>Main Invoice amount</span>
                 <input
                   type="number"
                   min={0}
                   step="0.01"
-                  value={eventForm.balance_amount}
+                  value={eventForm.main_invoice_amount}
                   onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, balance_amount: e.target.value }))
+                    setEventForm((prev) => ({ ...prev, main_invoice_amount: e.target.value }))
                   }
                   placeholder="0.00"
                 />
               </label>
 
               <label className="form-field registration-settings-field">
-                <span>Balance deadline</span>
+                <span>Main Invoice deadline</span>
                 <input
                   type="datetime-local"
-                  value={eventForm.balance_deadline}
+                  value={eventForm.main_invoice_deadline}
                   onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, balance_deadline: e.target.value }))
+                    setEventForm((prev) => ({ ...prev, main_invoice_deadline: e.target.value }))
                   }
                 />
               </label>
@@ -2046,7 +2044,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </div>
             </div>
             <div className="form-actions">
-              <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+              <button type="submit" className={saveButtonClass} disabled={saving}>
                 {saveButtonLabel}
               </button>
               {message && <span className="muted">{message}</span>}
@@ -2334,7 +2332,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             <button type="button" className="primary" onClick={handleAddRow} disabled={saving}>
               Create new Innhopp
             </button>
-            <button type="submit" className={saveButtonClass} disabled={saving || saved}>
+            <button type="submit" className={saveButtonClass} disabled={saving}>
               {saveButtonLabel}
             </button>
             {message && <span className="muted">{message}</span>}
@@ -2449,7 +2447,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               Add
             </button>
-            <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+            <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
               {saveButtonLabel}
             </button>
           </div>
@@ -2670,7 +2668,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <button type="button" className="primary" onClick={handleAssignParticipant} disabled={!selectedParticipantId}>
                   Add
                 </button>
-                <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+                <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
                   {saveButtonLabel}
                 </button>
               </div>
@@ -2899,7 +2897,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               type="button"
               className={saveButtonClass}
               onClick={handleSaveAll}
-              disabled={saving || saved}
+              disabled={saving}
             >
               {saveButtonLabel}
             </button>
@@ -3244,7 +3242,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </div>
             )}
             <div className="form-actions event-detail-save-actions">
-              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
                 {saveButtonLabel}
               </button>
             </div>
@@ -3454,7 +3452,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </div>
         )}
         <div className="form-actions event-detail-save-actions">
-          <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+          <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
             {saveButtonLabel}
           </button>
         </div>
@@ -3661,7 +3659,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </div>
             )}
             <div className="form-actions event-detail-save-actions">
-              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
                 {saveButtonLabel}
               </button>
             </div>
@@ -3898,7 +3896,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               </div>
             )}
             <div className="form-actions event-detail-save-actions">
-              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving || saved}>
+              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
                 {saveButtonLabel}
               </button>
             </div>

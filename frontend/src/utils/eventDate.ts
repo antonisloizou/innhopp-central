@@ -91,6 +91,9 @@ export const formatEventLocalDateInput = (value?: string | null): string => {
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 };
 
+export const formatEventLocalDateInputFromDate = (date: Date): string =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
 export const toEventLocalInput = (value?: string | null): string => {
   const date = parseEventLocal(value);
   if (!date) return '';
@@ -141,3 +144,6 @@ export const getEventLocalDateKey = (value?: string | null): string => {
   if (!date) return '';
   return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
 };
+
+export const getEventLocalDateKeyFromDate = (date: Date): string =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;

@@ -219,7 +219,6 @@ const LogisticsGroundCrewCreatePage = () => {
         payload.vehicle_ids = [...vehicleIds];
       }
       const created = await createGroundCrew(payload);
-      setMessage('Ground crew entry created');
       if (created?.id && selectedEventId) {
         try {
           sessionStorage.setItem(`event-schedule-highlight:${selectedEventId}`, `gc-${created.id}`);

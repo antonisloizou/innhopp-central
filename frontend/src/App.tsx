@@ -40,6 +40,7 @@ import PublicEventRegistrationPage from './pages/PublicEventRegistrationPage';
 import EventRegistrationsPage from './pages/EventRegistrationsPage';
 import RegistrationDetailPage from './pages/RegistrationDetailPage';
 import EventCommsPage from './pages/EventCommsPage';
+import CommunicationsPage from './pages/CommunicationsPage';
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -50,6 +51,7 @@ const App = () => (
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/events" replace />} />
           <Route path="events" element={<EventCalendarPage />} />
+          <Route path="communications" element={<ParticipantRouteGuard><CommunicationsPage /></ParticipantRouteGuard>} />
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
