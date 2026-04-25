@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { copyEvent, deleteEvent, Event, getEvent } from '../api/events';
 import { listParticipantProfiles, ParticipantProfile } from '../api/participants';
 import { createEventRegistration, listEventRegistrations, Registration, RegistrationStatus } from '../api/registrations';
+import EventGearMenu from '../components/EventGearMenu';
 import {
   formatEventLocalDateInputFromDate,
   formatEventLocal,
@@ -119,10 +120,8 @@ const EventRegistrationsPage = () => {
   const [depositFilter, setDepositFilter] = useState<PaymentState>('all');
   const [mainInvoiceFilter, setMainInvoiceFilter] = useState<PaymentState>('all');
   const [query, setQuery] = useState('');
-  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [createFormOpen, setCreateFormOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateRegistrationFormState>(createInitialFormState());
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,28 +162,6 @@ const EventRegistrationsPage = () => {
       cancelled = true;
     };
   }, [eventId]);
-
-  useEffect(() => {
-    if (!actionMenuOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!actionMenuRef.current || !target) return;
-      if (!actionMenuRef.current.contains(target)) {
-        setActionMenuOpen(false);
-      }
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setActionMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleEscape);
-    };
-  }, [actionMenuOpen]);
 
   const handleDelete = async () => {
     if (!eventId) return;
@@ -322,105 +299,15 @@ const EventRegistrationsPage = () => {
             <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
           </div>
         </div>
-        <div className="event-schedule-actions" ref={actionMenuRef}>
-          <button
-            className="ghost event-schedule-gear"
-            type="button"
-            aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
-            aria-expanded={actionMenuOpen}
-            aria-controls="event-registrations-actions-menu"
-            onClick={() => setActionMenuOpen((open) => !open)}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path
-                d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
-              />
-            </svg>
-          </button>
-          {actionMenuOpen && (
-            <div className="event-schedule-menu" id="event-registrations-actions-menu" role="menu">
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  navigate(`/events/${eventData.id}/details`);
-                }}
-              >
-                Details
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  navigate(`/events/${eventData.id}`);
-                }}
-              >
-                Schedule
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  navigate(`/manifests?eventId=${eventData.id}`);
-                }}
-              >
-                Manifest
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  navigate(`/events/${eventData.id}/comms`);
-                }}
-              >
-                Communications
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  handleCopy();
-                }}
-                disabled={copying}
-              >
-                {copying ? 'Copying…' : 'Copy'}
-              </button>
-              <button
-                className="event-schedule-menu-item danger"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  handleDelete();
-                }}
-                disabled={deleting}
-              >
-                {deleting ? 'Deleting…' : 'Delete'}
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setActionMenuOpen(false);
-                  navigate('/events');
-                }}
-              >
-                Back
-              </button>
-            </div>
-          )}
-        </div>
+        <EventGearMenu
+          eventId={eventData.id}
+          currentPage="registrations"
+          copying={copying}
+          deleting={deleting}
+          menuId="event-registrations-actions-menu"
+          onCopy={handleCopy}
+          onDelete={handleDelete}
+        />
       </header>
 
       <section className="registration-stats-grid">

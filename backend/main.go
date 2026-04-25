@@ -131,7 +131,7 @@ func main() {
 	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
-	router.Mount("/api/comms", comms.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/comms", comms.NewHandler(pool, authConfig.FrontendURL).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))

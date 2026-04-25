@@ -35,6 +35,7 @@ import { listAirfields, Airfield } from '../api/airfields';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { formatMetersWithFeet } from '../utils/units';
+import EventGearMenu from '../components/EventGearMenu';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
 import {
   formatEventLocal,
@@ -199,9 +200,7 @@ const EventSchedulePage = () => {
   const [dragging, setDragging] = useState<{ id: string; dayKey: string } | null>(null);
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
   const [dragHoverIndex, setDragHoverIndex] = useState<number | null>(null);
-  const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [savingDrag, setSavingDrag] = useState(false);
-  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const dragGhostTimeRef = useRef<HTMLElement | null>(null);
   const pointerDragRef = useRef<{
@@ -1206,30 +1205,6 @@ const EventSchedulePage = () => {
     }
   }, [timePicker]);
 
-  useEffect(() => {
-    if (!actionMenuOpen) return;
-    const handlePointer = (event: globalThis.MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-      if (!actionMenuRef.current || !target) return;
-      if (!actionMenuRef.current.contains(target)) {
-        setActionMenuOpen(false);
-      }
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setActionMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handlePointer);
-    document.addEventListener('touchstart', handlePointer);
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handlePointer);
-      document.removeEventListener('touchstart', handlePointer);
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [actionMenuOpen]);
-
   // Update expanded map when buckets change
   useEffect(() => {
     if (dayBuckets.length === 0) return;
@@ -1654,105 +1629,15 @@ const EventSchedulePage = () => {
           </div>
         </div>
         {!participantOnly && (
-          <div className="event-schedule-actions" ref={actionMenuRef}>
-              <button
-                className="ghost event-schedule-gear"
-                type="button"
-                aria-label={actionMenuOpen ? 'Close actions menu' : 'Open actions menu'}
-                aria-expanded={actionMenuOpen}
-                aria-controls="event-schedule-actions-menu"
-                onClick={() => setActionMenuOpen((open) => !open)}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path
-                    d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"
-                  />
-                </svg>
-              </button>
-              {actionMenuOpen && (
-              <div className="event-schedule-menu" id="event-schedule-actions-menu" role="menu">
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    navigate(`/events/${eventData.id}/details`);
-                  }}
-                >
-                  Details
-                </button>
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    navigate(`/events/${eventData.id}/registrations`);
-                  }}
-                >
-                  Registrations
-                </button>
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    navigate(`/manifests?eventId=${eventData.id}`);
-                  }}
-                >
-                  Manifest
-                </button>
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    navigate(`/events/${eventData.id}/comms`);
-                  }}
-                >
-                  Communications
-                </button>
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    handleCopy();
-                  }}
-                  disabled={copying}
-                >
-                  {copying ? 'Copying…' : 'Copy'}
-                </button>
-                <button
-                  className="event-schedule-menu-item danger"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    handleDelete();
-                  }}
-                  disabled={deleting}
-                >
-                  {deleting ? 'Deleting…' : 'Delete'}
-                </button>
-                <button
-                  className="event-schedule-menu-item"
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionMenuOpen(false);
-                    navigate('/events');
-                  }}
-                >
-                  Back
-                </button>
-              </div>
-              )}
-          </div>
+          <EventGearMenu
+            eventId={eventData.id}
+            currentPage="schedule"
+            copying={copying}
+            deleting={deleting}
+            menuId="event-schedule-actions-menu"
+            onCopy={handleCopy}
+            onDelete={handleDelete}
+          />
         )}
       </header>
       {message && <p className="error-text">{message}</p>}

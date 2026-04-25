@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,11 +22,15 @@ import (
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db          *pgxpool.Pool
+	frontendURL string
 }
 
-func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *pgxpool.Pool, frontendURL string) *Handler {
+	return &Handler{
+		db:          db,
+		frontendURL: strings.TrimSpace(frontendURL),
+	}
 }
 
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
@@ -501,6 +506,19 @@ func renderTemplate(text string, replacements map[string]string) string {
 	return rendered
 }
 
+func buildEventScheduleLink(frontendURL string, eventID int64) string {
+	path := fmt.Sprintf("/events/%d", eventID)
+	base := strings.TrimRight(strings.TrimSpace(frontendURL), "/")
+	if base == "" {
+		return path
+	}
+	return base + path
+}
+
+func renderEventNameLink(eventName, scheduleLink string) string {
+	return fmt.Sprintf(`<a href="%s">%s</a>`, html.EscapeString(scheduleLink), html.EscapeString(eventName))
+}
+
 func loadTemplate(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, templateID int64) (*EmailTemplate, error) {
@@ -923,6 +941,9 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load event metadata")
 		return
 	}
+	eventName := eventMeta["event_name"]
+	eventScheduleLink := buildEventScheduleLink(h.frontendURL, payload.EventID)
+	eventNameLink := renderEventNameLink(eventName, eventScheduleLink)
 
 	for _, recipient := range recipients {
 		replacements := map[string]string{
@@ -940,7 +961,12 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 			replacements[key] = value
 		}
 		subject := renderTemplate(template.SubjectTemplate, replacements)
-		body := renderTemplate(template.BodyTemplate, replacements)
+		bodyReplacements := make(map[string]string, len(replacements))
+		for key, value := range replacements {
+			bodyReplacements[key] = value
+		}
+		bodyReplacements["event_name"] = eventNameLink
+		body := renderTemplate(template.BodyTemplate, bodyReplacements)
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO email_deliveries (campaign_id, registration_id, email, subject, body, status, sent_at)
 			VALUES ($1, $2, $3, $4, $5, 'sent', NOW())
