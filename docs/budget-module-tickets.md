@@ -29,6 +29,7 @@
 **Owner**: Backend  
 **Depends on**: None
 
+
 **Description**
 Add new database tables for event budgets, sections, line items, assumptions, and scenarios.
 
