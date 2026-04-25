@@ -6,3 +6,4 @@ frontend/.env
 frontend/dist
 /.gocache
 backend/.env
+frontend/.env

@@ -221,7 +221,7 @@ const iconNameByType: Record<StopVisualType, string> = {
   generic: 'location_on'
 };
 
-type RouteMapOverlay = 'satellite' | 'roadmap';
+type RouteMapOverlay = 'hybrid' | 'roadmap';
 
 const renderPreviewIcon = (type: StopVisualType) => <span className="material-symbols-outlined">{iconNameByType[type]}</span>;
 
@@ -266,7 +266,7 @@ const EventRoutePlannerPage = () => {
   const mapPolylineRef = useRef<any | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
-  const [mapOverlay, setMapOverlay] = useState<RouteMapOverlay>('satellite');
+  const [mapOverlay, setMapOverlay] = useState<RouteMapOverlay>('hybrid');
 
   const resolveLocationStop = useCallback(
     (name: string | null | undefined) => {
@@ -980,13 +980,13 @@ const EventRoutePlannerPage = () => {
                   <button
                     type="button"
                     className="ghost event-route-preview-overlay-button"
-                    onClick={() => setMapOverlay((current) => (current === 'satellite' ? 'roadmap' : 'satellite'))}
-                    aria-label={`Switch to ${mapOverlay === 'satellite' ? 'road map' : 'satellite'} overlay`}
+                    onClick={() => setMapOverlay((current) => (current === 'hybrid' ? 'roadmap' : 'hybrid'))}
+                    aria-label={`Switch to ${mapOverlay === 'hybrid' ? 'road map' : 'satellite'} overlay`}
                   >
                     <span className="event-route-preview-button-label">
-                      <span>{mapOverlay === 'satellite' ? 'Road Map' : 'Satellite'}</span>
+                      <span>{mapOverlay === 'hybrid' ? 'Road Map' : 'Satellite'}</span>
                       <span className="material-symbols-outlined" aria-hidden="true">
-                        {mapOverlay === 'satellite' ? 'map' : 'satellite'}
+                        {mapOverlay === 'hybrid' ? 'map' : 'satellite'}
                       </span>
                     </span>
                   </button>
