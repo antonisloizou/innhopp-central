@@ -54,6 +54,7 @@ jobs:
           file: ./frontend/Dockerfile
           build-args: |
             VITE_API_BASE_URL=/api
+            VITE_GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
           push: true
           tags: |
             ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ steps.vars.outputs.sha_tag }}
