@@ -7,6 +7,9 @@
 - Budget is app-native and event-scoped.
 
 ## Business Rules
+- Currency baseline:
+- `base_currency` default is `EUR`.
+- Summary/KPIs/charts use EUR as canonical display currency.
 - Event planning baseline:
 - `planned_load_count` default is `2`.
 - `confirm_load_count` default is `1`.
@@ -41,6 +44,7 @@ Add new database tables for event budgets, sections, line items, assumptions, an
 - `budget_line_items`
 - `budget_assumptions`
 - `budget_scenarios`
+- In `event_budgets`, set `base_currency` default to `EUR`.
 - Add unique constraint: one active budget per event in V1.
 - Seed default sections on budget creation.
 
@@ -80,6 +84,7 @@ Create typed models and DB access methods for budgets and children entities.
 
 **Implementation**
 - Add domain structs and repository methods under `backend` budget package.
+- Ensure `event_budgets.base_currency` is persisted and defaults to `EUR` when omitted.
 - Include CRUD for:
 - budget
 - sections (incl. reorder)
@@ -162,6 +167,7 @@ Expose budget APIs required by frontend.
 - `optional_tip_percent` >= 0
 - `cost_drift_percent` >= 0
 - counts and price non-negative
+- Validate `base_currency` as non-empty ISO currency code; default to `EUR`.
 
 **Acceptance Criteria**
 - Endpoints return typed JSON payloads used directly by frontend.
@@ -201,6 +207,7 @@ Create budget API client and TS types.
 - budget entities
 - assumptions
 - summary payload (includes confirm/worst/planned scenarios and margin curve)
+- Include explicit `base_currency` in budget and summary response types (EUR default).
 - Add client methods for all V1 endpoints.
 
 **Acceptance Criteria**
@@ -260,6 +267,7 @@ Implement a single budget workspace with:
 - User can edit line items and assumptions and see updated summary.
 - Optional tip is displayed separately from base target.
 - Worst-case status is visually obvious.
+- Monetary values are displayed in EUR by default.
 
 ---
 

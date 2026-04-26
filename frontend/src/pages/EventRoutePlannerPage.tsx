@@ -267,6 +267,7 @@ const EventRoutePlannerPage = () => {
   const [mapError, setMapError] = useState<string | null>(null);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [mapOverlay, setMapOverlay] = useState<RouteMapOverlay>('hybrid');
+  const mapOverlayRef = useRef<RouteMapOverlay>('hybrid');
 
   const resolveLocationStop = useCallback(
     (name: string | null | undefined) => {
@@ -718,6 +719,11 @@ const EventRoutePlannerPage = () => {
   }, []);
 
   useEffect(() => {
+    mapOverlayRef.current = mapOverlay;
+    mapInstanceRef.current?.setMapTypeId(mapOverlay);
+  }, [mapOverlay]);
+
+  useEffect(() => {
     if (previewGeometry.length === 0) {
       setMapError(null);
       mapMarkersRef.current.forEach((marker) => {
@@ -752,7 +758,7 @@ const EventRoutePlannerPage = () => {
         if (!mapInstanceRef.current || mapContainerRef.current !== mapRef.current) {
           mapInstanceRef.current = new maps.Map(mapRef.current, {
             mapId: 'DEMO_MAP_ID',
-            mapTypeId: mapOverlay,
+            mapTypeId: mapOverlayRef.current,
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: false,
@@ -763,7 +769,6 @@ const EventRoutePlannerPage = () => {
         }
 
         const map = mapInstanceRef.current;
-        map.setMapTypeId(mapOverlay);
         mapMarkersRef.current.forEach((marker) => {
           if ('setMap' in marker && typeof marker.setMap === 'function') {
             marker.setMap(null);
@@ -834,7 +839,7 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [mapOverlay, previewGeometry]);
+  }, [previewGeometry]);
 
   const toggleEntry = (entry: RoutePlannerEntry) => {
     if (entry.disabled) return;
