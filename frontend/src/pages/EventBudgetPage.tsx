@@ -35,7 +35,7 @@ const parameterLabels: Record<string, string> = {
   full_load_size: 'Full load size',
   crew_on_load_count: 'Crew on load',
   confirm_load_count: 'Confirm load count',
-  planned_load_count: 'Planned load count',
+  full_load_count: 'Full load count',
   aircraft_price_per_minute: 'Aircraft rate per min',
   aircraft_cruising_speed_kmh: 'Aircraft speed km/h',
   target_markup_percent: 'Target markup %',
@@ -816,8 +816,8 @@ const EventBudgetPage = () => {
                     <strong>{formatMoney(summary.scenarios?.worst_case_gate?.revenue || 0)}</strong>
                   </div>
                   <div className="budget-kpi-split-item">
-                    <span className="field-label">Planned</span>
-                    <strong>{formatMoney(summary.scenarios?.planned_capacity_case?.revenue || 0)}</strong>
+                    <span className="field-label">Full</span>
+                    <strong>{formatMoney(summary.scenarios?.full_capacity_case?.revenue || 0)}</strong>
                   </div>
                 </div>
                 <span className="field-label budget-kpi-section-subtitle budget-kpi-inline-label">
@@ -831,7 +831,7 @@ const EventBudgetPage = () => {
                     <strong>{formatMoney(summary.scenarios?.worst_case_gate?.revenue_with_tip || 0)}</strong>
                   </div>
                   <div className="budget-kpi-split-item">
-                    <strong>{formatMoney(summary.scenarios?.planned_capacity_case?.revenue_with_tip || 0)}</strong>
+                    <strong>{formatMoney(summary.scenarios?.full_capacity_case?.revenue_with_tip || 0)}</strong>
                   </div>
                 </div>
               </div>
@@ -847,8 +847,8 @@ const EventBudgetPage = () => {
                     <strong>{formatMoney(summary.scenarios?.worst_case_gate?.margin_without_tip || 0)}</strong>
                   </div>
                   <div className="budget-kpi-split-item">
-                    <span className="field-label">Planned</span>
-                    <strong>{formatMoney(summary.scenarios?.planned_capacity_case?.margin_without_tip || 0)}</strong>
+                    <span className="field-label">Full</span>
+                    <strong>{formatMoney(summary.scenarios?.full_capacity_case?.margin_without_tip || 0)}</strong>
                   </div>
                 </div>
                 <div className="budget-kpi-split">
@@ -873,10 +873,10 @@ const EventBudgetPage = () => {
                   <div className="budget-kpi-split-item">
                     <span
                       className={`badge ${
-                        (summary.scenarios?.planned_capacity_case?.margin_without_tip || 0) >= 0 ? 'success' : 'danger'
+                        (summary.scenarios?.full_capacity_case?.margin_without_tip || 0) >= 0 ? 'success' : 'danger'
                       }`}
                     >
-                      {(summary.scenarios?.planned_capacity_case?.margin_without_tip || 0) >= 0 ? 'Green' : 'Red'}
+                      {(summary.scenarios?.full_capacity_case?.margin_without_tip || 0) >= 0 ? 'Green' : 'Red'}
                     </span>
                   </div>
                 </div>
@@ -1259,7 +1259,7 @@ const EventBudgetPage = () => {
             <>
             <form onSubmit={onSaveParameters} className="form-grid budget-assumptions-grid">
               <div className="budget-assumptions-row">
-                {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'planned_load_count'].map(
+                {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count'].map(
                   renderNumericParameterField
                 )}
               </div>

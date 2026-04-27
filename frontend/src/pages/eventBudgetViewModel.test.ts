@@ -60,8 +60,8 @@ const makeSummary = (overrides?: Partial<BudgetSummary>): BudgetSummary => ({
       margin_with_tip: 3388,
       status: 'green'
     },
-    planned_capacity_case: {
-      name: 'Planned',
+    full_capacity_case: {
+      name: 'Full',
       participants: 24,
       expected_cost: 800,
       cost_with_drift: 824,

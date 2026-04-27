@@ -1,6 +1,6 @@
 import { BudgetSummary } from '../api/budgets';
 
-export type ScenarioKey = 'confirm_case' | 'worst_case_gate' | 'planned_capacity_case';
+export type ScenarioKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
 
 export type ScenarioBar = {
   key: ScenarioKey;
@@ -59,7 +59,7 @@ export type MarginCurveModel = {
 const scenarioSpecs: Array<{ key: ScenarioKey; label: string }> = [
   { key: 'confirm_case', label: 'Confirm' },
   { key: 'worst_case_gate', label: 'Worst' },
-  { key: 'planned_capacity_case', label: 'Planned' }
+  { key: 'full_capacity_case', label: 'Full' }
 ];
 
 export const buildScenarioBars = (summary: BudgetSummary | null): ScenarioBar[] => {
@@ -152,14 +152,14 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
   const participants = sourceCurvePoints.map((point) => point.participants);
   const margins = sourceCurvePoints.map((point) => point.margin);
   const confirmParticipants = summary?.scenarios?.confirm_case?.participants;
-  const plannedParticipants = summary?.scenarios?.planned_capacity_case?.participants;
+  const fullParticipants = summary?.scenarios?.full_capacity_case?.participants;
   const minParticipants = Math.max(
     0,
     typeof confirmParticipants === 'number' ? confirmParticipants - 1 : Math.min(...participants)
   );
   const maxParticipants = Math.max(
     minParticipants + 1,
-    typeof plannedParticipants === 'number' ? plannedParticipants + 1 : Math.max(...participants)
+    typeof fullParticipants === 'number' ? fullParticipants + 1 : Math.max(...participants)
   );
   const yMin = Math.min(...margins);
   const yMax = Math.max(...margins);
