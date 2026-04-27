@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/auth"
+	"github.com/innhopp/central/backend/budgets"
 	"github.com/innhopp/central/backend/comms"
 	"github.com/innhopp/central/backend/events"
 	"github.com/innhopp/central/backend/innhopps"
@@ -88,6 +89,7 @@ func main() {
 		DevAllowAll:  strings.EqualFold(os.Getenv("DEV_ALLOW_ALL"), "true"),
 	}
 	logMissingOIDCConfig(authConfig)
+	budgetsV1Enabled := !strings.EqualFold(strings.TrimSpace(os.Getenv("BUDGETS_V1")), "false")
 
 	authHandler, err := auth.NewHandler(pool, sessionManager, authConfig)
 	if err != nil {
@@ -128,6 +130,9 @@ func main() {
 	})
 
 	router.Mount("/api/auth", authHandler.Routes())
+	if budgetsV1Enabled {
+		router.Mount("/api/events/{eventID}/budget", budgets.NewHandler(pool).EventBudgetRoutes(enforcer))
+	}
 	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
@@ -135,6 +140,9 @@ func main() {
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))
+	if budgetsV1Enabled {
+		router.Mount("/api/budgets", budgets.NewHandler(pool).Routes(enforcer))
+	}
 
 	addr := ":8080"
 	if port := os.Getenv("PORT"); port != "" {
@@ -573,6 +581,90 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE logistics_ground_crew_vehicles ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE logistics_ground_crew_vehicles ADD COLUMN IF NOT EXISTS event_vehicle_id INTEGER REFERENCES logistics_event_vehicles(id) ON DELETE SET NULL`,
+		`CREATE TABLE IF NOT EXISTS event_budgets (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            base_currency TEXT NOT NULL DEFAULT 'EUR',
+            aircraft_currency TEXT NOT NULL DEFAULT 'EUR',
+            status TEXT NOT NULL DEFAULT 'draft',
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS base_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS aircraft_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS budget_sections (
+            id SERIAL PRIMARY KEY,
+            budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (budget_id, code)
+        )`,
+		`CREATE TABLE IF NOT EXISTS budget_line_items (
+            id SERIAL PRIMARY KEY,
+            budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
+            section_id INTEGER NOT NULL REFERENCES budget_sections(id) ON DELETE CASCADE,
+            innhopp_id INTEGER,
+            name TEXT NOT NULL,
+            service_date DATE,
+            location_label TEXT,
+            quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+            unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+            cost_currency TEXT NOT NULL DEFAULT 'EUR',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS service_date DATE`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS location_label TEXT`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS innhopp_id INTEGER`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS quantity NUMERIC(12,3) NOT NULL DEFAULT 1`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS cost_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE budget_line_items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS budget_currencies (
+            id SERIAL PRIMARY KEY,
+            budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
+            currency_code TEXT NOT NULL,
+            rate_to_base NUMERIC(16,6) NOT NULL DEFAULT 1,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (budget_id, currency_code)
+        )`,
+		`CREATE TABLE IF NOT EXISTS budget_assumptions (
+            id SERIAL PRIMARY KEY,
+            budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
+            key TEXT NOT NULL,
+            value_num NUMERIC(16,4),
+            value_text TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (budget_id, key)
+        )`,
+		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS value_num NUMERIC(16,4)`,
+		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS value_text TEXT`,
+		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`DELETE FROM budget_assumptions WHERE key = 'aircraft_load_count'`,
+		`CREATE TABLE IF NOT EXISTS budget_scenarios (
+            id SERIAL PRIMARY KEY,
+            budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            inputs_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            results_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            is_baseline BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS inputs_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS results_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT FALSE`,
 		`CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             subject TEXT NOT NULL UNIQUE,

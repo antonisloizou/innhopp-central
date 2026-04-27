@@ -5,6 +5,7 @@ This Go service provides the core REST API for the Innhopp Central platform. It 
 ## Features
 
 - Modular HTTP routing for authentication, event operations, participant management, crew RBAC, and logistics.
+- Budget module for event-level cost/revenue planning, parameters, scenario gating, and line-item editing.
 - Automatic bootstrapping of the core PostgreSQL schema for seasons, events, manifests, participant profiles, registrations, payment records, crew assignments, and gear assets.
 - JSON APIs for managing seasons/events/manifests, participant records, registration lifecycles, payment/activity records, crew assignments, and gear tracking.
 - Health check endpoint for uptime monitoring and Chi middleware for structured logging and request tracing.
@@ -22,6 +23,7 @@ The service uses the following environment variables:
 | --- | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://postgres:postgres@localhost:5432/innhopp?sslmode=disable` |
 | `PORT` | HTTP listen port | `8080` |
+| `BUDGETS_V1` | Enable budget endpoints (`false` disables mount) | `true` |
 
 For Railway deployments set `DATABASE_URL` to the connection string provided by the managed PostgreSQL add-on and map the service port to `$PORT`.
 
@@ -44,6 +46,12 @@ On startup the server creates these tables if they do not already exist:
 - `email_deliveries` – rendered outbound messages logged per recipient and campaign.
 - `crew_assignments` – role assignments for a participant on a manifest.
 - `gear_assets` – tracked gear inventory with inspection status.
+- `event_budgets` – one budget per event, with base currency (EUR default), workflow status, and notes.
+- `budget_sections` – normalized section groupings for budget line items.
+- `budget_line_items` – editable budget costs, including per-item currency (`cost_currency`).
+- `budget_currencies` – event-selected currency codes used for line-item entries (live FX converted to base currency in summaries).
+- `budget_assumptions` – numeric parameters for load sizing, markup, optional tip, and drift.
+- `budget_scenarios` – saved scenario snapshots.
 
 ## Running Locally
 
@@ -121,6 +129,17 @@ On startup the server creates these tables if they do not already exist:
 | POST | `/api/rbac/crew-assignments` | Create a crew assignment |
 | GET | `/api/logistics/gear-assets` | List gear assets |
 | POST | `/api/logistics/gear-assets` | Create a gear asset |
+| GET | `/api/budgets/events/{eventID}` | Get event budget |
+| POST | `/api/budgets/events/{eventID}` | Create event budget |
+| GET | `/api/budgets/{budgetID}/summary` | Build computed budget summary (base EUR) |
+| GET | `/api/budgets/{budgetID}/line-items` | List budget line items |
+| POST | `/api/budgets/{budgetID}/line-items` | Create budget line item |
+| PUT | `/api/budgets/{budgetID}/line-items/{lineItemID}` | Update budget line item |
+| DELETE | `/api/budgets/{budgetID}/line-items/{lineItemID}` | Delete budget line item |
+| GET | `/api/budgets/{budgetID}/assumptions` | Get budget parameters |
+| PUT | `/api/budgets/{budgetID}/assumptions` | Update budget parameters |
+| GET | `/api/budgets/{budgetID}/currencies` | List selected currencies with live FX rates |
+| PUT | `/api/budgets/{budgetID}/currencies` | Update selected currencies |
 
 ### Request & Response Notes
 
@@ -131,6 +150,12 @@ On startup the server creates these tables if they do not already exist:
 - Public registration links only work for events with `public_registration_enabled=true`; the backend also respects `registration_open_at` and rejects registrations after the event start time.
 - Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/main invoice payment rows from the event commercial settings.
 - The first comms slice renders templates and logs per-recipient deliveries inside the database; it does not yet integrate an SMTP/provider transport or background scheduler.
+- Budget workflow gate: moving budget status to `review` or `approved` is blocked when `worst_case_gate.margin_without_tip` is negative.
+- Budget formula notes:
+  - `target_markup_percent` and `optional_tip_percent` are independent.
+  - Optional tip is post-event and always shown separately from guaranteed revenue/margin.
+  - `cost_drift_percent` applies before markup.
+  - Event base currency defaults to `EUR`; line items can be stored in selected foreign currencies and are converted to base using live FX on summary build.
 
 ## Testing
 

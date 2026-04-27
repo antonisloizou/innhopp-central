@@ -64,6 +64,7 @@ import {
 } from '../api/logistics';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import EventGearMenu from '../components/EventGearMenu';
+import { ISO_CURRENCY_CODES } from '../constants/currencies';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -372,6 +373,16 @@ const currentSignature = useMemo(
     const total = (Number.isFinite(deposit) ? deposit : 0) + (Number.isFinite(mainInvoice) ? mainInvoice : 0);
     return total.toFixed(2);
   }, [eventForm.deposit_amount, eventForm.main_invoice_amount]);
+  const normalizedRegistrationCurrency = useMemo(() => {
+    const currency = eventForm.currency.trim().toUpperCase();
+    return currency || 'EUR';
+  }, [eventForm.currency]);
+  const registrationCurrencyOptions = useMemo(() => {
+    if (ISO_CURRENCY_CODES.includes(normalizedRegistrationCurrency as (typeof ISO_CURRENCY_CODES)[number])) {
+      return ISO_CURRENCY_CODES;
+    }
+    return [normalizedRegistrationCurrency, ...ISO_CURRENCY_CODES];
+  }, [normalizedRegistrationCurrency]);
   const registrationsByParticipantId = useMemo(() => {
     const next = new Map<number, Registration>();
     registrations.forEach((registration) => {
@@ -1755,119 +1766,114 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         {openSections.registration && (
           <form className="form-grid" onSubmit={handleSaveRegistrationSettings}>
             <div className="registration-settings-grid">
-              <label className="form-field registration-settings-field">
-                <span>Commercial status</span>
-                <select
-                  value={eventForm.commercial_status}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({
-                      ...prev,
-                      commercial_status: e.target.value as EventCommercialStatus
-                    }))
-                  }
-                >
-                  {commercialStatusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="registration-settings-row">
+                <label className="form-field registration-settings-field">
+                  <span>Status</span>
+                  <select
+                    value={eventForm.commercial_status}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({
+                        ...prev,
+                        commercial_status: e.target.value as EventCommercialStatus
+                      }))
+                    }
+                  >
+                    {commercialStatusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Registration opens</span>
-                <input
-                  type="datetime-local"
-                  value={eventForm.registration_open_at}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, registration_open_at: e.target.value }))
-                  }
-                />
-              </label>
+                <label className="form-field registration-settings-field">
+                  <span>Registration opens</span>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.registration_open_at}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, registration_open_at: e.target.value }))
+                    }
+                  />
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Registration slug</span>
-                <input
-                  type="text"
-                  value={eventForm.public_registration_slug}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, public_registration_slug: e.target.value }))
-                  }
-                  placeholder="event-name-2026"
-                />
-              </label>
+                <label className="form-field registration-settings-field">
+                  <span>Minimum registrations</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={eventForm.minimum_deposit_count}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, minimum_deposit_count: e.target.value }))
+                    }
+                    placeholder="0"
+                  />
+                </label>
+              </div>
 
-              <label className="form-field registration-settings-field">
-                <span>Currency</span>
-                <input
-                  type="text"
-                  maxLength={8}
-                  value={eventForm.currency}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, currency: e.target.value.toUpperCase() }))
-                  }
-                  placeholder="EUR"
-                />
-              </label>
+              <div className="registration-settings-row">
+                <label className="form-field registration-settings-field">
+                  <span>Deposit</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={eventForm.deposit_amount}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, deposit_amount: e.target.value }))
+                    }
+                    placeholder="0.00"
+                  />
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Minimum registrations</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={eventForm.minimum_deposit_count}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, minimum_deposit_count: e.target.value }))
-                  }
-                  placeholder="0"
-                />
-              </label>
+                <label className="form-field registration-settings-field">
+                  <span>Main Invoice</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={eventForm.main_invoice_amount}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, main_invoice_amount: e.target.value }))
+                    }
+                    placeholder="0.00"
+                  />
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Deposit amount</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={eventForm.deposit_amount}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, deposit_amount: e.target.value }))
-                  }
-                  placeholder="0.00"
-                />
-              </label>
+                <label className="form-field registration-settings-field">
+                  <span>Currency</span>
+                  <select
+                    value={normalizedRegistrationCurrency}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, currency: e.target.value }))
+                    }
+                  >
+                    {registrationCurrencyOptions.map((currencyCode) => (
+                      <option key={currencyCode} value={currencyCode}>
+                        {currencyCode}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Main Invoice amount</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={eventForm.main_invoice_amount}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, main_invoice_amount: e.target.value }))
-                  }
-                  placeholder="0.00"
-                />
-              </label>
+                <label className="form-field registration-settings-field">
+                  <span>Main Invoice deadline</span>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.main_invoice_deadline}
+                    onChange={(e) =>
+                      setEventForm((prev) => ({ ...prev, main_invoice_deadline: e.target.value }))
+                    }
+                  />
+                </label>
 
-              <label className="form-field registration-settings-field">
-                <span>Main Invoice deadline</span>
-                <input
-                  type="datetime-local"
-                  value={eventForm.main_invoice_deadline}
-                  onChange={(e) =>
-                    setEventForm((prev) => ({ ...prev, main_invoice_deadline: e.target.value }))
-                  }
-                />
-              </label>
-
-              <label className="form-field registration-settings-field registration-total-field">
-                <span>Total amount</span>
-                <div className="registration-total-amount">
-                  {totalRegistrationAmount} {eventForm.currency.trim().toUpperCase() || 'EUR'}
-                </div>
-              </label>
+                <label className="form-field registration-settings-field registration-total-field">
+                  <span>Total amount</span>
+                  <div className="registration-total-amount">
+                    {totalRegistrationAmount} {normalizedRegistrationCurrency}
+                  </div>
+                </label>
+              </div>
 
               <label className="form-field registration-settings-field registration-checkbox-field">
                 <span className="registration-checkbox-row">
@@ -1885,52 +1891,92 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 </span>
               </label>
 
-              <div className="form-field registration-settings-field registration-link-preview">
-                <span>Public link preview</span>
-                <div className="registration-link-preview-row">
-                  <div className="muted registration-link-preview-text">
-                    {publicRegistrationUrl || 'Set a registration slug to generate the public link'}
-                  </div>
-                  <button
-                    type="button"
-                    className="ghost registration-link-copy-button"
-                    disabled={!publicRegistrationUrl}
-                    aria-label={copiedPublicLink ? 'Public link copied' : 'Copy public link'}
-                    title={copiedPublicLink ? 'Copied' : 'Copy link'}
-                    onClick={async () => {
-                      if (!publicRegistrationUrl || !navigator.clipboard) return;
-                      try {
-                        await navigator.clipboard.writeText(publicRegistrationUrl);
-                        setCopiedPublicLink(true);
-                        window.setTimeout(() => setCopiedPublicLink(false), 1600);
-                      } catch {
-                        setCopiedPublicLink(false);
+              {eventForm.public_registration_enabled && (
+                <div className="registration-settings-row registration-settings-row--link">
+                  <label className="form-field registration-settings-field registration-slug-field">
+                    <span>Slug</span>
+                    <input
+                      type="text"
+                      value={eventForm.public_registration_slug}
+                      onChange={(e) =>
+                        setEventForm((prev) => ({ ...prev, public_registration_slug: e.target.value }))
                       }
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path
-                        d="M9 9V5.75A1.75 1.75 0 0 1 10.75 4h7.5A1.75 1.75 0 0 1 20 5.75v7.5A1.75 1.75 0 0 1 18.25 15H15"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <rect
-                        x="4"
-                        y="9"
-                        width="11"
-                        height="11"
-                        rx="1.75"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                      />
-                    </svg>
-                  </button>
+                      placeholder="event-name-2026"
+                    />
+                  </label>
+
+                  <div className="form-field registration-settings-field registration-link-preview">
+                    <span>Link</span>
+                    <div className="registration-link-preview-row">
+                      <div className="muted registration-link-preview-text">
+                        {publicRegistrationUrl || 'Set a registration slug to generate the public link'}
+                      </div>
+                      <div className="registration-link-actions">
+                        <button
+                          type="button"
+                          className="ghost registration-link-action-button"
+                          disabled={!publicRegistrationUrl}
+                          aria-label="Open public registration page"
+                          title="Open link"
+                          onClick={() => {
+                            if (!publicRegistrationUrl) return;
+                            window.open(publicRegistrationUrl, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path
+                              d="M14 5.75h4.25V10M18 6l-8.5 8.5M10.75 5H8.6C7.16 5 6 6.16 6 7.6v7.8C6 16.84 7.16 18 8.6 18h7.8c1.44 0 2.6-1.16 2.6-2.6v-2.15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          className="ghost registration-link-action-button"
+                          disabled={!publicRegistrationUrl}
+                          aria-label={copiedPublicLink ? 'Public link copied' : 'Copy public link'}
+                          title={copiedPublicLink ? 'Copied' : 'Copy link'}
+                          onClick={async () => {
+                            if (!publicRegistrationUrl || !navigator.clipboard) return;
+                            try {
+                              await navigator.clipboard.writeText(publicRegistrationUrl);
+                              setCopiedPublicLink(true);
+                              window.setTimeout(() => setCopiedPublicLink(false), 1600);
+                            } catch {
+                              setCopiedPublicLink(false);
+                            }
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path
+                              d="M9 9V5.75A1.75 1.75 0 0 1 10.75 4h7.5A1.75 1.75 0 0 1 20 5.75v7.5A1.75 1.75 0 0 1 18.25 15H15"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <rect
+                              x="4"
+                              y="9"
+                              width="11"
+                              height="11"
+                              rx="1.75"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="form-actions">
               <button type="submit" className={saveButtonClass} disabled={saving}>

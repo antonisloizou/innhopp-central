@@ -14,6 +14,7 @@ Create a single source of truth for operational data that keeps the team synchro
 - Public event registration pages by slug that create participant-linked registrations and default payment placeholders.
 - Staff registration operations pages for event-level registration lists, status changes, payment updates, and internal notes.
 - Event comms pages with reusable email templates, audience preview by registration/payment filters, manual campaign send, and delivery history.
+- Event budget workspace with line items, parameters, scenario summaries, profitability gates, and live FX-backed multi-currency cost inputs.
 - Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
 - RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.
 
@@ -22,6 +23,7 @@ Create a single source of truth for operational data that keeps the team synchro
 - Payment provider integrations, waivers, certifications, and health declarations.
 - Check-in flows or public driver route pages.
 - Analytics dashboards beyond raw data access.
+- Spreadsheet sync/import remains out of scope for budgets V1; budgeting is app-native.
 
 ## User roles
 
@@ -106,6 +108,7 @@ Backend environment variables:
 | `SESSION_SECRET` | HMAC secret for session cookies | `dev-insecure-session-secret` (development only) |
 | `SESSION_COOKIE_SECURE` | Set to `true` to mark cookies as secure | `false` |
 | `DEV_ALLOW_ALL` | If `true`, bypasses auth/RBAC (local use only) | `false` |
+| `BUDGETS_V1` | Enable budget API routes (`false` disables rollout) | `true` |
 | `OIDC_ISSUER` | OIDC issuer URL | – |
 | `OIDC_CLIENT_ID` | OIDC client ID | – |
 | `OIDC_CLIENT_SECRET` | OIDC client secret (if required) | – |
@@ -118,7 +121,8 @@ Frontend environment variables:
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | API base URL; leave empty to use `/api` (proxied in dev) | `/api` |
 | `VITE_GOOGLE_MAPS_API_KEY` | Google Maps API key for route duration features | placeholder value |
+| `VITE_BUDGETS_V1` | Enable budget routes/navigation in SPA (`false` hides) | `true` |
 
 ## API and UI references
 - Backend endpoints for seasons, events, innhopps, manifests, airfields, participants, registrations, crew assignments, logistics transports, and auth are documented in `backend/README.md`.
-- Frontend routes include `/login`, `/register/:slug`, `/events`, `/events/:eventId`, `/events/:eventId/details`, `/events/:eventId/registrations`, `/events/:eventId/comms`, `/registrations/:registrationId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.
+- Frontend routes include `/login`, `/register/:slug`, `/events`, `/events/:eventId`, `/events/:eventId/details`, `/events/:eventId/registrations`, `/events/:eventId/comms`, `/events/:eventId/budget`, `/budgets`, `/registrations/:registrationId`, `/events/:eventId/innhopps/:innhoppId`, `/manifests`, `/manifests/:manifestId`, `/participants`, `/participants/:participantId`, `/logistics`, `/airfields/:airfieldId`, plus creation flows for seasons, events, manifests, and participants.

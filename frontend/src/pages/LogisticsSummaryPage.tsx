@@ -230,6 +230,7 @@ const LogisticsSummaryPage = () => {
           </header>
           <p className="muted">Activities, other points of Interest, etc.</p>
         </article>
+
       </div>
     </section>
   );

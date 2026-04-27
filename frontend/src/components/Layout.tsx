@@ -4,6 +4,7 @@ import { getMyParticipantProfile } from '../api/participants';
 import { listMyRegistrations } from '../api/registrations';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
+import { budgetsV1Enabled } from '../config/flags';
 import AppHeader from './AppHeader';
 
 const hasText = (value?: string | number | null) => String(value ?? '').trim().length > 0;
@@ -31,10 +32,11 @@ const Layout = () => {
   const forceDocumentNavigation = !!user?.impersonator;
   const navItems = participantOnly
     ? [{ to: '/events', label: 'Events' }]
-    : [
+      : [
         { to: '/events', label: 'Events' },
         { to: '/participants', label: 'Participants' },
         { to: '/logistics', label: 'Logistics' },
+        ...(budgetsV1Enabled ? [{ to: '/budgets', label: 'Budgets' }] : []),
         { to: '/communications', label: 'Communications' }
       ];
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {

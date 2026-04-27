@@ -1,7 +1,15 @@
 import { MouseEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { budgetsV1Enabled } from '../config/flags';
 
-export type EventGearMenuPage = 'schedule' | 'details' | 'route' | 'registrations' | 'manifest' | 'communications';
+export type EventGearMenuPage =
+  | 'schedule'
+  | 'details'
+  | 'route'
+  | 'budget'
+  | 'registrations'
+  | 'manifest'
+  | 'communications';
 
 type EventGearMenuProps = {
   eventId: number;
@@ -17,6 +25,7 @@ const eventMenuPages: Array<{ key: EventGearMenuPage; label: string; path: (even
   { key: 'schedule', label: 'Schedule', path: (eventId) => `/events/${eventId}` },
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
+  { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
   { key: 'registrations', label: 'Registrations', path: (eventId) => `/events/${eventId}/registrations` },
   { key: 'manifest', label: 'Manifest', path: (eventId) => `/manifests?eventId=${eventId}` },
   { key: 'communications', label: 'Communications', path: (eventId) => `/events/${eventId}/comms` }
@@ -74,6 +83,7 @@ const EventGearMenu = ({
       {open && (
         <div className="event-schedule-menu" id={menuId} role="menu">
           {eventMenuPages
+            .filter((item) => (budgetsV1Enabled ? true : item.key !== 'budget'))
             .filter((item) => item.key !== currentPage)
             .map((item) => (
               <button

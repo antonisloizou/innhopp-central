@@ -1,6 +1,7 @@
 # Innhopp Central Frontend
 
 This package contains a React + TypeScript single-page application that provides navigation for the login, event calendar, manifest management, participant onboarding, and logistics dashboards described in the root project README.
+It also includes the event budgeting workspace (`BUDGETS_V1`) for cost/revenue planning.
 
 ## Getting started
 
@@ -56,8 +57,22 @@ When the `/login` route loads, the app checks `/api/auth/session`. If there is n
 | --- | --- |
 | `/login` | Google OIDC hand-off through the backend |
 | `/events` | Event calendar cards for upcoming experiences |
+| `/budgets` | Budget workspace with season/event picker |
+| `/events/:eventId/budget` | Event-scoped budget workspace with summary, visuals, parameters, and line items |
 | `/manifests` | Manifest load sheets with crew assignments |
 | `/participants` | Participant onboarding task summaries |
 | `/logistics` | Basic logistics dashboards for transport and gear |
+
+## Budget module notes
+
+- Base budget currency defaults to `EUR`.
+- Each line item can use any event-selected currency; summaries convert to base with live FX rates.
+- `Display Currency` changes only how computed totals/charts are shown in the UI; it does not mutate stored base calculations.
+- Parameters include `target_markup_percent` (default `20`), `optional_tip_percent` (default `8`), and `cost_drift_percent` (default `3`).
+- The worst-case profitability gate drives submit/review workflow visuals.
+
+## Feature flags
+
+- `VITE_BUDGETS_V1=false` hides budget navigation/routes in the SPA.
 
 The shared navigation shell lives in `src/components/Layout.tsx` while page-specific content resides under `src/pages/`.

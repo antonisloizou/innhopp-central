@@ -42,6 +42,8 @@ import RegistrationDetailPage from './pages/RegistrationDetailPage';
 import EventCommsPage from './pages/EventCommsPage';
 import CommunicationsPage from './pages/CommunicationsPage';
 import EventRoutePlannerPage from './pages/EventRoutePlannerPage';
+import EventBudgetPage from './pages/EventBudgetPage';
+import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
   <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -52,6 +54,9 @@ const App = () => (
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/events" replace />} />
           <Route path="events" element={<EventCalendarPage />} />
+          {budgetsV1Enabled ? (
+            <Route path="budgets" element={<ParticipantRouteGuard><EventBudgetPage /></ParticipantRouteGuard>} />
+          ) : null}
           <Route path="communications" element={<ParticipantRouteGuard><CommunicationsPage /></ParticipantRouteGuard>} />
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
@@ -59,6 +64,9 @@ const App = () => (
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/comms" element={<ParticipantRouteGuard eventParam="eventId"><EventCommsPage /></ParticipantRouteGuard>} />
+          {budgetsV1Enabled ? (
+            <Route path="events/:eventId/budget" element={<ParticipantRouteGuard eventParam="eventId"><EventBudgetPage /></ParticipantRouteGuard>} />
+          ) : null}
           <Route path="registrations/:registrationId" element={<ParticipantRouteGuard><RegistrationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/new" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />

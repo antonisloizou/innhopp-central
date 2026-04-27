@@ -233,7 +233,7 @@ export interface UpdateInnhoppPayload {
   image_files?: InnhoppImage[];
 }
 
-export interface UpdateEventPayload extends CreateEventPayload {
+export interface UpdateEventPayload extends Partial<CreateEventPayload> {
   participant_ids?: number[];
   innhopps?: InnhoppInput[];
 }
