@@ -46,6 +46,21 @@ const Layout = () => {
   });
 
   useEffect(() => {
+    const selectNumberInputValue = (event: FocusEvent | MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const numberInput = target?.closest('input[type="number"]') as HTMLInputElement | null;
+      if (!numberInput || numberInput.disabled || numberInput.readOnly) return;
+
+      window.requestAnimationFrame(() => {
+        if (document.activeElement !== numberInput) return;
+        try {
+          numberInput.select();
+        } catch {
+          // Some browsers may not support selection APIs on number inputs.
+        }
+      });
+    };
+
     const preventNumberScroll = (event: WheelEvent) => {
       const target = event.target as HTMLElement | null;
       const activeNumberInput = target?.closest('input[type="number"]');
@@ -53,8 +68,15 @@ const Layout = () => {
         event.preventDefault();
       }
     };
+
+    window.addEventListener('focusin', selectNumberInputValue);
+    window.addEventListener('click', selectNumberInputValue);
     window.addEventListener('wheel', preventNumberScroll, { passive: false });
-    return () => window.removeEventListener('wheel', preventNumberScroll);
+    return () => {
+      window.removeEventListener('focusin', selectNumberInputValue);
+      window.removeEventListener('click', selectNumberInputValue);
+      window.removeEventListener('wheel', preventNumberScroll);
+    };
   }, []);
 
   useEffect(() => {

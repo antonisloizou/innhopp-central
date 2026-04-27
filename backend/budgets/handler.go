@@ -1516,6 +1516,12 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftRateToBase <= 0 {
 		aircraftRateToBase = 1
 	}
+	toBaseAmount := func(amount float64, rate float64) float64 {
+		if rate <= 0 {
+			return amount
+		}
+		return amount / rate
+	}
 	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
 	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
 	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
@@ -1559,9 +1565,9 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	confirmAircraftDerivedCost := roundMoney(confirmAircraftMinutes * aircraftPricePerMinute * aircraftRateToBase)
-	worstAircraftDerivedCost := roundMoney(worstAircraftMinutes * aircraftPricePerMinute * aircraftRateToBase)
-	plannedAircraftDerivedCost := roundMoney(plannedAircraftMinutes * aircraftPricePerMinute * aircraftRateToBase)
+	confirmAircraftDerivedCost := roundMoney(toBaseAmount(confirmAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
+	worstAircraftDerivedCost := roundMoney(toBaseAmount(worstAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
+	plannedAircraftDerivedCost := roundMoney(toBaseAmount(plannedAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
 
 	lineRows, err := h.db.Query(
 		ctx,
@@ -1590,7 +1596,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		if rate <= 0 {
 			rate = 1
 		}
-		manualTotalsBySection[sectionID] += quantity * unitCost * rate
+		manualTotalsBySection[sectionID] += toBaseAmount(quantity*unitCost, rate)
 	}
 	if err := lineRows.Err(); err != nil {
 		return BudgetSummary{}, err

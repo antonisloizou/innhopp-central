@@ -167,6 +167,17 @@ const EventBudgetPage = () => {
       currency: currencyCode || 'EUR',
       maximumFractionDigits: 2
     }).format(amount || 0);
+  const convertAmountToDisplayCurrency = (amount: number, sourceCurrency: string) => {
+    const source = (sourceCurrency || baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
+    const target = (effectiveDisplayCurrency || baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
+    const safeAmount = Number(amount || 0);
+    if (source === target) return safeAmount;
+    const sourceRate = source === baseCurrency ? 1 : liveRates[source] || 1;
+    const targetRate = target === baseCurrency ? 1 : liveRates[target] || 1;
+    if (sourceRate <= 0 || targetRate <= 0) return safeAmount;
+    const baseAmount = safeAmount / sourceRate;
+    return baseAmount * targetRate;
+  };
   const rateTooltip = (targetCurrency: string) => {
     const base = (pendingBaseCurrency || baseCurrency || 'EUR').trim().toUpperCase();
     const target = (targetCurrency || '').trim().toUpperCase();
@@ -577,21 +588,25 @@ const EventBudgetPage = () => {
           minutes: Number(item.quantity || 0),
           unitCost: Number(item.unit_cost || 0),
           totalCost: Number(item.line_total || 0),
+          displayTotalCost: convertAmountToDisplayCurrency(
+            Number(item.line_total || 0),
+            (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
+          ),
           costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
         };
       })
       .sort((a, b) => a.sequence - b.sequence || a.sortOrder - b.sortOrder || a.key - b.key);
-  }, [lineItems, innhoppsByID, aircraftCurrency]);
+  }, [lineItems, innhoppsByID, aircraftCurrency, baseCurrency, effectiveDisplayCurrency, liveRates]);
   const aircraftPerInnhoppSplit = useMemo(() => {
-    const total = aircraftPerInnhoppRows.reduce((acc, row) => acc + row.totalCost, 0);
-    const max = aircraftPerInnhoppRows.reduce((acc, row) => Math.max(acc, row.totalCost), 0);
+    const total = aircraftPerInnhoppRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
+    const max = aircraftPerInnhoppRows.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
     return aircraftPerInnhoppRows.map((row) => {
-      const percentage = total > 0 ? (row.totalCost / total) * 100 : 0;
+      const percentage = total > 0 ? (row.displayTotalCost / total) * 100 : 0;
       return {
         ...row,
         percentage,
-        barPct: max > 0 ? (row.totalCost / max) * 100 : 0,
-        displayValue: aircraftSplitMode === 'percentage' ? percentage : row.totalCost
+        barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0,
+        displayValue: aircraftSplitMode === 'percentage' ? percentage : row.displayTotalCost
       };
     });
   }, [aircraftPerInnhoppRows, aircraftSplitMode]);
@@ -1144,7 +1159,7 @@ const EventBudgetPage = () => {
                       <span className="field-label">{row.label}</span>
                       <span className="muted">
                         {aircraftSplitMode === 'amount'
-                          ? formatBaseMoney(row.displayValue, row.costCurrency)
+                          ? formatBaseMoney(row.displayValue, effectiveDisplayCurrency)
                           : `${row.displayValue.toFixed(1)}%`}
                       </span>
                     </div>
