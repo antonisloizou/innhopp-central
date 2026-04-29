@@ -34,6 +34,10 @@ export type MarginCurveMarker = {
   margin: number;
   x: number;
   y: number;
+  labelX: number;
+  labelY: number;
+  labelAnchor: 'start' | 'middle' | 'end';
+  labelPlacement: 'above' | 'below';
   status: 'green' | 'red';
 };
 
@@ -101,8 +105,7 @@ export const buildCostSplit = (
       key: String(section.code || section.section_id),
       label: String(section.name || section.code || 'Section'),
       total: Number(section.total || 0)
-    }))
-    .filter((section) => section.total > 0);
+    }));
   const grandTotal = sectionTotals.reduce((acc, section) => acc + section.total, 0);
   const maxSectionTotal = sectionTotals.reduce((acc, section) => Math.max(acc, section.total), 0);
   return sectionTotals.map((section) => {
@@ -206,10 +209,48 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
         margin: scenario.margin_without_tip || 0,
         x: toX(scenario.participants || 0),
         y: toY(scenario.margin_without_tip || 0),
+        labelX: 0,
+        labelY: 0,
+        labelAnchor: 'middle' as const,
+        labelPlacement: key === 'confirm_case' ? ('above' as const) : ('below' as const),
         status: scenario.status || 'red'
       };
     })
     .filter((marker): marker is MarginCurveMarker => marker !== null);
+
+  const labelPadX = 6;
+  const labelPadY = 6;
+  const lineHeight = 12;
+  const labelHeight = lineHeight * 2;
+  const gapAbove = 6;
+  const gapBelow = 6;
+  const sortedMarkers = [...markers].sort((a, b) => a.x - b.x);
+
+  for (let index = 0; index < sortedMarkers.length; index += 1) {
+    const marker = sortedMarkers[index];
+    const approxTextChars = Math.max(marker.label.length, 10);
+    const approxLabelWidth = Math.min(120, Math.max(40, approxTextChars * 6));
+    const nearLeft = marker.x - approxLabelWidth / 2 < plotLeft + labelPadX;
+    const nearRight = marker.x + approxLabelWidth / 2 > plotRight - labelPadX;
+    const labelAnchor: MarginCurveMarker['labelAnchor'] = nearLeft ? 'start' : nearRight ? 'end' : 'middle';
+    const labelX =
+      labelAnchor === 'start'
+        ? Math.min(plotRight - labelPadX, Math.max(plotLeft + labelPadX, marker.x + 2))
+        : labelAnchor === 'end'
+          ? Math.max(plotLeft + labelPadX, Math.min(plotRight - labelPadX, marker.x - 2))
+          : Math.max(plotLeft + labelPadX, Math.min(plotRight - labelPadX, marker.x));
+    let labelY =
+      marker.labelPlacement === 'above'
+        ? marker.y - (lineHeight + gapAbove + lineHeight / 2)
+        : marker.y + gapBelow + lineHeight;
+    const minTopY = plotTop + labelPadY + lineHeight;
+    const maxBottomY = plotBottom - labelPadY - (labelHeight - lineHeight);
+    labelY = clamp(labelY, minTopY, maxBottomY);
+
+    marker.labelX = labelX;
+    marker.labelY = labelY;
+    marker.labelAnchor = labelAnchor;
+  }
 
   return {
     points,

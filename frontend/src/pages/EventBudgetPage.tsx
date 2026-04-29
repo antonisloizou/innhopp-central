@@ -37,11 +37,26 @@ const parameterLabels: Record<string, string> = {
   confirm_load_count: 'Confirm load count',
   full_load_count: 'Full load count',
   aircraft_price_per_minute: 'Aircraft rate per min',
+  minimum_load_duration: 'Minimum Load Duration',
   aircraft_cruising_speed_kmh: 'Aircraft speed km/h',
   target_markup_percent: 'Target markup %',
   optional_tip_percent: 'Optional tip %',
-  cost_drift_percent: 'Cost drift %'
+  cost_drift_percent: 'Cost drift %',
+  estimate_accommodation_per_person_night: 'Accommodation (1 person 1 night)',
+  estimate_transport_per_day: 'Transport (1 day)',
+  estimate_food_per_day: 'Food (1 Person 1 Day)',
+  estimate_staff_salary_per_person_day: 'Staff salary (1 person 1 day)'
 };
+const BUDGET_METHOD_KEY = 'budget_method';
+const BUDGET_METHOD_ESTIMATES = 0;
+const BUDGET_METHOD_LINE_ITEMS = 1;
+const BUDGET_METHOD_HYBRID = 2;
+const ESTIMATE_PARAMETER_KEYS = [
+  'estimate_accommodation_per_person_night',
+  'estimate_transport_per_day',
+  'estimate_food_per_day',
+  'estimate_staff_salary_per_person_day'
+] as const;
 
 type BudgetSectionKey =
   | 'overview'
@@ -49,8 +64,25 @@ type BudgetSectionKey =
   | 'costRevenue'
   | 'profitability'
   | 'costSplit'
-  | 'aircraftPerInnhopp'
   | 'lineItems';
+
+type ParametersTabKey = 'load' | 'aircraft' | 'pricing' | 'estimates' | 'currencies';
+type CostSplitTabKey = 'section' | 'innhopp' | 'day';
+type LabelScenarioKey = 'confirm' | 'worst' | 'full';
+type ScenarioSummaryKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
+type OverviewScenarioCardKey = 'expectedCost' | 'costWithDrift' | 'targetRevenue' | 'perParticipant';
+
+const labelScenarioMeta: Record<LabelScenarioKey, { label: string; long: string }> = {
+  confirm: { label: 'Confirm', long: 'Confirm scenario' },
+  worst: { label: 'Worst', long: 'Worst-case scenario' },
+  full: { label: 'Full', long: 'Full-capacity scenario' }
+};
+
+const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = {
+  confirm: 'confirm_case',
+  worst: 'worst_case_gate',
+  full: 'full_capacity_case'
+};
 
 const EventBudgetPage = () => {
   const { eventId } = useParams();
@@ -60,6 +92,7 @@ const EventBudgetPage = () => {
   const [creating, setCreating] = useState(false);
   const [savingParameters, setSavingParameters] = useState(false);
   const [savingLineItem, setSavingLineItem] = useState(false);
+  const [addingLineItem, setAddingLineItem] = useState(false);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -81,7 +114,15 @@ const EventBudgetPage = () => {
   const [aircraftCurrency, setAircraftCurrency] = useState('EUR');
   const [displayCurrency, setDisplayCurrency] = useState('EUR');
   const [costSplitMode, setCostSplitMode] = useState<CostSplitMode>('amount');
-  const [aircraftSplitMode, setAircraftSplitMode] = useState<CostSplitMode>('amount');
+  const [costSplitTab, setCostSplitTab] = useState<CostSplitTabKey>('section');
+  const [costSplitScenario, setCostSplitScenario] = useState<LabelScenarioKey>('full');
+  const [parametersTab, setParametersTab] = useState<ParametersTabKey>('load');
+  const [estimateCurrencies, setEstimateCurrencies] = useState<Record<string, string>>({
+    estimate_accommodation_per_person_night: 'EUR',
+    estimate_transport_per_day: 'EUR',
+    estimate_food_per_day: 'EUR',
+    estimate_staff_salary_per_person_day: 'EUR'
+  });
   const [curveHover, setCurveHover] = useState<{
     x: number;
     y: number;
@@ -94,9 +135,29 @@ const EventBudgetPage = () => {
     costRevenue: true,
     profitability: true,
     costSplit: true,
-    aircraftPerInnhopp: true,
     lineItems: true
   });
+  const [overviewScenarios, setOverviewScenarios] = useState<Record<OverviewScenarioCardKey, LabelScenarioKey>>({
+    expectedCost: 'full',
+    costWithDrift: 'full',
+    targetRevenue: 'full',
+    perParticipant: 'worst'
+  });
+  const [openScenarioMenuFor, setOpenScenarioMenuFor] = useState<OverviewScenarioCardKey | null>(null);
+  useEffect(() => {
+    if (!openScenarioMenuFor) return;
+    const onDocumentMouseDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setOpenScenarioMenuFor(null);
+        return;
+      }
+      if (target.closest('.budget-scenario-indicator-wrap')) return;
+      setOpenScenarioMenuFor(null);
+    };
+    document.addEventListener('mousedown', onDocumentMouseDown);
+    return () => document.removeEventListener('mousedown', onDocumentMouseDown);
+  }, [openScenarioMenuFor]);
   const [message, setMessage] = useState<string | null>(null);
   const [newLineItem, setNewLineItem] = useState({
     section_id: '',
@@ -203,6 +264,56 @@ const EventBudgetPage = () => {
       />
     </label>
   );
+  const renderEstimateParameterField = (key: (typeof ESTIMATE_PARAMETER_KEYS)[number]) => {
+    const selectedEstimateCurrency =
+      estimateCurrencies[key] && orderedSelectedCurrencies.includes(estimateCurrencies[key])
+        ? estimateCurrencies[key]
+        : pendingBaseCurrency || baseCurrency || 'EUR';
+    const rawLabel = parameterLabels[key] || key;
+    const labelMatch = rawLabel.match(/^(.+?)\s*\((.+)\)$/);
+    const labelMain = labelMatch ? labelMatch[1] : rawLabel;
+    const labelMeta = labelMatch ? labelMatch[2] : '';
+    return (
+      <div className="budget-estimate-field" key={key}>
+        <label className="form-field">
+          <span>
+            {labelMain}
+            {labelMeta ? <small className="budget-estimate-label-meta">{labelMeta}</small> : null}
+          </span>
+          <input
+            type="number"
+            step="0.01"
+            value={parameters[key] ?? ''}
+            onChange={(e) =>
+              setParameters((prev) => ({
+                ...prev,
+                [key]: Number(e.target.value || 0)
+              }))
+            }
+          />
+        </label>
+        <label className="form-field">
+          <span>Currency</span>
+          <select
+            value={selectedEstimateCurrency}
+            onChange={(e) =>
+              setEstimateCurrencies((prev) => ({
+                ...prev,
+                [key]: e.target.value
+              }))
+            }
+          >
+            {orderedSelectedCurrencies.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  };
+  const budgetMethod = Number(parameters[BUDGET_METHOD_KEY] ?? BUDGET_METHOD_HYBRID);
 
   const loadBudgetData = async (targetEventID: number) => {
     setLoading(true);
@@ -245,9 +356,17 @@ const EventBudgetPage = () => {
       );
       setLiveRates(currenciesResp.live_rates || {});
       setPendingBaseCurrency(currenciesResp.base_currency || evtBudget.base_currency || 'EUR');
+      const loadedBaseCurrency = currenciesResp.base_currency || evtBudget.base_currency || 'EUR';
       setAircraftCurrency(
-        currenciesResp.aircraft_currency || evtBudget.aircraft_currency || currenciesResp.base_currency || 'EUR'
+        currenciesResp.aircraft_currency || evtBudget.aircraft_currency || loadedBaseCurrency
       );
+      setEstimateCurrencies((prev) => {
+        const next: Record<string, string> = { ...prev };
+        ESTIMATE_PARAMETER_KEYS.forEach((key) => {
+          if (!next[key]) next[key] = loadedBaseCurrency;
+        });
+        return next;
+      });
       setDisplayCurrency((prev) =>
         currenciesResp.currencies?.includes(prev) ? prev : currenciesResp.base_currency || 'EUR'
       );
@@ -335,6 +454,27 @@ const EventBudgetPage = () => {
       cancelled = true;
     };
   }, [budget?.id, budget?.base_currency, pendingBaseCurrency, selectedCurrencies]);
+  useEffect(() => {
+    if (!budget?.id) return;
+    const storageKey = `budget-estimate-currencies:${budget.id}`;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      setEstimateCurrencies((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // Ignore invalid local storage payloads.
+    }
+  }, [budget?.id]);
+  useEffect(() => {
+    if (!budget?.id) return;
+    const storageKey = `budget-estimate-currencies:${budget.id}`;
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(estimateCurrencies));
+    } catch {
+      // Ignore local storage write failures.
+    }
+  }, [budget?.id, estimateCurrencies]);
 
   const createBudget = async () => {
     if (!hasValidEventID) return;
@@ -415,7 +555,27 @@ const EventBudgetPage = () => {
         aircraft_currency: resolvedAircraftCurrency
       });
       const currenciesResp = await updateBudgetCurrencies(budget.id, payload);
-      await updateBudgetAssumptions(budget.id, parameters);
+      const assumptionsPayload = { ...parameters };
+      ESTIMATE_PARAMETER_KEYS.forEach((key) => {
+        const rawAmount = Number(assumptionsPayload[key] || 0);
+        const sourceCurrency = (estimateCurrencies[key] || resolvedBaseCurrency).trim().toUpperCase();
+        if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+          assumptionsPayload[key] = 0;
+          return;
+        }
+        if (sourceCurrency === resolvedBaseCurrency) {
+          assumptionsPayload[key] = rawAmount;
+          return;
+        }
+        const sourceRate = sourceCurrency === resolvedBaseCurrency ? 1 : liveRates[sourceCurrency] || 1;
+        if (sourceRate <= 0) {
+          assumptionsPayload[key] = rawAmount;
+          return;
+        }
+        assumptionsPayload[key] = rawAmount / sourceRate;
+      });
+      await updateBudgetAssumptions(budget.id, assumptionsPayload);
+      setParameters(assumptionsPayload);
       const nextCurrencies = currenciesResp.currencies?.length
         ? dedupeCurrencies(currenciesResp.currencies)
         : [resolvedBaseCurrency];
@@ -493,6 +653,7 @@ const EventBudgetPage = () => {
         cost_currency: baseCurrency,
         notes: ''
       }));
+      setAddingLineItem(false);
       await loadBudgetData(activeEventID);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to add line item');
@@ -558,7 +719,66 @@ const EventBudgetPage = () => {
   };
 
   const scenarioBars = useMemo(() => buildScenarioBars(summary), [summary]);
-  const costSplit = useMemo(() => buildCostSplit(summary, costSplitMode), [summary, costSplitMode]);
+  const confirmLoads = Math.max(
+    0,
+    Math.round(
+      parameters.confirm_load_count ??
+        summary?.parameters?.confirm_load_count ??
+        summary?.assumptions?.confirm_load_count ??
+        0
+    )
+  );
+  const fullLoads = Math.max(
+    0,
+    Math.round(
+      parameters.full_load_count ??
+        summary?.parameters?.full_load_count ??
+        summary?.assumptions?.full_load_count ??
+        0
+    )
+  );
+  const scenarioAircraftLoads =
+    costSplitScenario === 'confirm' ? confirmLoads : costSplitScenario === 'worst' ? confirmLoads + 1 : fullLoads;
+  const aircraftLoadScale = useMemo(() => {
+    if (fullLoads <= 0 || scenarioAircraftLoads <= 0) return 1;
+    return scenarioAircraftLoads / fullLoads;
+  }, [fullLoads, scenarioAircraftLoads]);
+  const selectedScenarioParticipants =
+    summary?.scenarios?.[scenarioSummaryKeyByLabel[costSplitScenario]]?.participants || 0;
+  const fullScenarioParticipants = summary?.scenarios?.full_capacity_case?.participants || 0;
+  const participantScale = useMemo(() => {
+    if (fullScenarioParticipants <= 0 || selectedScenarioParticipants <= 0) return 1;
+    return selectedScenarioParticipants / fullScenarioParticipants;
+  }, [selectedScenarioParticipants, fullScenarioParticipants]);
+  const isLoadBasedCrewMode = budgetMethod === BUDGET_METHOD_ESTIMATES || budgetMethod === BUDGET_METHOD_HYBRID;
+  const isEstimateOrHybridMode = budgetMethod === BUDGET_METHOD_ESTIMATES || budgetMethod === BUDGET_METHOD_HYBRID;
+  const costSplit = useMemo(() => {
+    const split = buildCostSplit(summary, costSplitMode);
+    const scaledSections = split.map((section) => {
+      const sectionCode = (section.key || '').trim().toLowerCase();
+      const isAircraft = sectionCode === 'aircraft';
+      const isPayableCrew = sectionCode === 'payable_crew';
+      const isFoodAccommodation = sectionCode === 'food_accommodation';
+      const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode);
+      const paxScale = isFoodAccommodation && isEstimateOrHybridMode;
+      const scaledTotal = section.total * (loadScale ? aircraftLoadScale : 1) * (paxScale ? participantScale : 1);
+      return {
+        ...section,
+        total: scaledTotal
+      };
+    });
+    const scaledTotalAll = scaledSections.reduce((acc, section) => acc + section.total, 0);
+    const scaledMax = scaledSections.reduce((acc, section) => Math.max(acc, section.total), 0);
+    return scaledSections.map((section) => {
+      const scaledPercentage = scaledTotalAll > 0 ? (section.total / scaledTotalAll) * 100 : 0;
+      return {
+        ...section,
+        percentage: scaledPercentage,
+        barPct: scaledMax > 0 ? (section.total / scaledMax) * 100 : 0,
+        displayValue: costSplitMode === 'percentage' ? scaledPercentage : section.total
+      };
+    });
+  }, [summary, costSplitMode, aircraftLoadScale, participantScale, isLoadBasedCrewMode, isEstimateOrHybridMode]);
   const marginCurve = useMemo(() => buildMarginCurveModel(summary), [summary]);
   const worstCaseGreen = useMemo(() => isWorstCaseGreen(summary), [summary]);
   const innhoppsByID = useMemo(
@@ -566,79 +786,361 @@ const EventBudgetPage = () => {
     [activeEventData?.innhopps]
   );
   const aircraftPerInnhoppRows = useMemo(() => {
-    return lineItems
+    const seedRows = (activeEventData?.innhopps || []).map((innhopp) => {
+      const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
+      const label = innhopp.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
+      return {
+        key: innhopp.id,
+        label,
+        sequence: innhopp.sequence || Number.MAX_SAFE_INTEGER,
+        sortOrder: 0,
+        minutes: 0,
+        unitCost: 0,
+        totalCost: 0,
+        displayTotalCost: 0,
+        costCurrency: aircraftCurrency
+      };
+    });
+    const byInnhoppID = new Map(seedRows.map((row) => [row.key, row]));
+    lineItems
       .filter(
         (item): item is BudgetLineItem & { innhopp_id: number } =>
           (item.section_code || '').trim().toLowerCase() === 'aircraft' &&
           typeof item.innhopp_id === 'number' &&
           item.innhopp_id > 0
       )
-      .map((item) => {
+      .forEach((item) => {
         const innhopp = innhoppsByID.get(item.innhopp_id);
+        const existing = byInnhoppID.get(item.innhopp_id);
         const fallbackName = item.location_label || item.name || `Innhopp ${item.innhopp_id}`;
         const normalizedName = fallbackName.trim().replace(/^#\d+\s+/, '');
         const cleanName = normalizedName || `Innhopp ${item.innhopp_id}`;
         const label =
           innhopp?.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
-        return {
-          key: item.id,
+        const converted = convertAmountToDisplayCurrency(
+          Number(item.line_total || 0),
+          (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
+        );
+        if (existing) {
+          existing.minutes += Number(item.quantity || 0);
+          existing.totalCost += Number(item.line_total || 0);
+          existing.displayTotalCost += converted;
+          return;
+        }
+        byInnhoppID.set(item.innhopp_id, {
+          key: item.innhopp_id,
           label,
           sequence: innhopp?.sequence || Number.MAX_SAFE_INTEGER,
           sortOrder: item.sort_order || 0,
           minutes: Number(item.quantity || 0),
           unitCost: Number(item.unit_cost || 0),
           totalCost: Number(item.line_total || 0),
-          displayTotalCost: convertAmountToDisplayCurrency(
-            Number(item.line_total || 0),
-            (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
-          ),
+          displayTotalCost: converted,
           costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
-        };
-      })
-      .sort((a, b) => a.sequence - b.sequence || a.sortOrder - b.sortOrder || a.key - b.key);
-  }, [lineItems, innhoppsByID, aircraftCurrency, baseCurrency, effectiveDisplayCurrency, liveRates]);
+        });
+      });
+    return Array.from(byInnhoppID.values()).sort(
+      (a, b) => a.sequence - b.sequence || a.sortOrder - b.sortOrder || a.key - b.key
+    );
+  }, [lineItems, innhoppsByID, activeEventData?.innhopps, aircraftCurrency, baseCurrency, effectiveDisplayCurrency, liveRates]);
   const aircraftPerInnhoppSplit = useMemo(() => {
-    const total = aircraftPerInnhoppRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
-    const max = aircraftPerInnhoppRows.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
-    return aircraftPerInnhoppRows.map((row) => {
+    const scaledRows = aircraftPerInnhoppRows.map((row) => ({
+      ...row,
+      displayTotalCost: row.displayTotalCost * aircraftLoadScale
+    }));
+    const aircraftSectionBaseTotal =
+      summary?.section_totals?.find((section) => (section.code || '').trim().toLowerCase() === 'aircraft')?.total || 0;
+    const aircraftSectionScenarioTotal = aircraftSectionBaseTotal * aircraftLoadScale;
+    const rawTotal = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
+    const normalizeRatio = rawTotal > 0 ? aircraftSectionScenarioTotal / rawTotal : 1;
+    const normalizedRows =
+      costSplitMode === 'amount'
+        ? scaledRows.map((row) => ({
+            ...row,
+            displayTotalCost: row.displayTotalCost * normalizeRatio
+          }))
+        : scaledRows;
+    const total = normalizedRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
+    const max = normalizedRows.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
+    return normalizedRows.map((row) => {
+      const percentage = total > 0 ? (row.displayTotalCost / total) * 100 : 0;
+      return {
+        ...row,
+        percentage,
+        barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0
+      };
+    });
+  }, [aircraftPerInnhoppRows, aircraftLoadScale, costSplitMode, summary?.section_totals]);
+  const costSplitByDay = useMemo(() => {
+    const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
+    const formatDayLabel = (isoDate: string) => {
+      const parts = isoDate.split('-').map((part) => Number(part));
+      if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return isoDate;
+      const [year, month, day] = parts;
+      const date = new Date(Date.UTC(year, month - 1, day));
+      const weekday = weekdayNames[date.getUTCDay()];
+      const monthName = monthNames[date.getUTCMonth()];
+      return `${weekday}, ${monthName} ${day} ${year}`;
+    };
+    const dailyTotals = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        displayTotalCost: number;
+        aircraftDisplayTotalCost: number;
+        payableCrewDisplayTotalCost: number;
+        foodAccommodationDisplayTotalCost: number;
+        nonLoadBasedDisplayTotalCost: number;
+      }
+    >();
+    const startDate = activeEventData?.starts_at ? activeEventData.starts_at.slice(0, 10) : '';
+    const endDate = activeEventData?.ends_at ? activeEventData.ends_at.slice(0, 10) : startDate;
+    if (startDate) {
+      const [startY, startM, startD] = startDate.split('-').map((part) => Number(part));
+      const [endY, endM, endD] = (endDate || startDate).split('-').map((part) => Number(part));
+      const startUTC = Date.UTC(startY, startM - 1, startD);
+      const endUTC = Date.UTC(endY, endM - 1, endD);
+      if (Number.isFinite(startUTC) && Number.isFinite(endUTC)) {
+        const step = 24 * 60 * 60 * 1000;
+        const from = Math.min(startUTC, endUTC);
+        const to = Math.max(startUTC, endUTC);
+        for (let ts = from; ts <= to; ts += step) {
+          const d = new Date(ts);
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(d.getUTCDate()).padStart(2, '0');
+          const key = `${y}-${m}-${day}`;
+          dailyTotals.set(key, {
+            key,
+            label: formatDayLabel(key),
+            displayTotalCost: 0,
+            aircraftDisplayTotalCost: 0,
+            payableCrewDisplayTotalCost: 0,
+            foodAccommodationDisplayTotalCost: 0,
+            nonLoadBasedDisplayTotalCost: 0
+          });
+        }
+      }
+    }
+    lineItems.forEach((item) => {
+      const key = item.service_date ? item.service_date.slice(0, 10) : 'undated';
+      const label = item.service_date ? formatDayLabel(item.service_date.slice(0, 10)) : 'Undated';
+      const sectionCode = (item.section_code || '').trim().toLowerCase();
+      const isAircraft = sectionCode === 'aircraft';
+      const isPayableCrew = sectionCode === 'payable_crew';
+      const isFoodAccommodation = sectionCode === 'food_accommodation';
+      const converted = convertAmountToDisplayCurrency(
+        Number(item.line_total || 0),
+        (item.cost_currency || baseCurrency).trim().toUpperCase() || baseCurrency
+      );
+      const existing = dailyTotals.get(key);
+      if (existing) {
+        existing.displayTotalCost += converted;
+        if (isAircraft) {
+          existing.aircraftDisplayTotalCost += converted;
+        } else if (isPayableCrew) {
+          existing.payableCrewDisplayTotalCost += converted;
+        } else if (isFoodAccommodation) {
+          existing.foodAccommodationDisplayTotalCost += converted;
+        } else {
+          existing.nonLoadBasedDisplayTotalCost += converted;
+        }
+      } else {
+        dailyTotals.set(key, {
+          key,
+          label,
+          displayTotalCost: converted,
+          aircraftDisplayTotalCost: isAircraft ? converted : 0,
+          payableCrewDisplayTotalCost: isPayableCrew ? converted : 0,
+          foodAccommodationDisplayTotalCost: isFoodAccommodation ? converted : 0,
+          nonLoadBasedDisplayTotalCost: !isAircraft && !isPayableCrew && !isFoodAccommodation ? converted : 0
+        });
+      }
+    });
+    const rows = Array.from(dailyTotals.values()).sort((a, b) => {
+      if (a.key === 'undated') return 1;
+      if (b.key === 'undated') return -1;
+      return a.key.localeCompare(b.key);
+    });
+    let dayNumber = 0;
+    const numberedRows = rows.map((row) => {
+      if (row.key === 'undated') return row;
+      dayNumber += 1;
+      return {
+        ...row,
+        label: `#${dayNumber} ${row.label}`
+      };
+    });
+    const scaledRows = numberedRows.map((row) => ({
+      ...row,
+      displayTotalCost:
+        row.nonLoadBasedDisplayTotalCost +
+        row.aircraftDisplayTotalCost * aircraftLoadScale +
+        row.payableCrewDisplayTotalCost * (isLoadBasedCrewMode ? aircraftLoadScale : 1) +
+        row.foodAccommodationDisplayTotalCost * (isEstimateOrHybridMode ? participantScale : 1)
+    }));
+    const dayRowsAmountAdjusted =
+      isEstimateOrHybridMode
+        ? (() => {
+            const totalFromRows = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
+            const targetFromSections = costSplit.reduce((acc, section) => acc + section.total, 0);
+            const delta = targetFromSections - totalFromRows;
+            if (Math.abs(delta) < 0.0001) return scaledRows;
+            const datedRows = scaledRows.filter((row) => row.key !== 'undated');
+            const bucketRows = datedRows.length > 0 ? datedRows : scaledRows;
+            if (!bucketRows.length) return scaledRows;
+            const perRowDelta = delta / bucketRows.length;
+            return scaledRows.map((row) => {
+              const shouldAdjust = bucketRows.some((bucket) => bucket.key === row.key);
+              if (!shouldAdjust) return row;
+              return {
+                ...row,
+                displayTotalCost: row.displayTotalCost + perRowDelta
+              };
+            });
+          })()
+        : scaledRows;
+    const total = dayRowsAmountAdjusted.reduce((acc, row) => acc + row.displayTotalCost, 0);
+    const max = dayRowsAmountAdjusted.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
+    return dayRowsAmountAdjusted.map((row) => {
       const percentage = total > 0 ? (row.displayTotalCost / total) * 100 : 0;
       return {
         ...row,
         percentage,
         barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0,
-        displayValue: aircraftSplitMode === 'percentage' ? percentage : row.displayTotalCost
+        displayValue: costSplitMode === 'percentage' ? percentage : row.displayTotalCost
       };
     });
-  }, [aircraftPerInnhoppRows, aircraftSplitMode]);
-  const worstCaseParticipants = summary?.scenarios?.worst_case_gate?.participants || 0;
+  }, [
+    lineItems,
+    costSplitMode,
+    costSplit,
+    aircraftLoadScale,
+    participantScale,
+    isLoadBasedCrewMode,
+    isEstimateOrHybridMode,
+    baseCurrency,
+    effectiveDisplayCurrency,
+    liveRates,
+    activeEventData?.starts_at,
+    activeEventData?.ends_at
+  ]);
+  const targetMarkupPercent =
+    parameters.target_markup_percent ??
+    summary?.parameters?.target_markup_percent ??
+    summary?.assumptions?.target_markup_percent ??
+    0;
+  const scenarioForCard = (card: OverviewScenarioCardKey) =>
+    summary?.scenarios?.[scenarioSummaryKeyByLabel[overviewScenarios[card]]] || null;
+  const expectedCostScenario = scenarioForCard('expectedCost');
+  const costWithDriftScenario = scenarioForCard('costWithDrift');
+  const targetRevenueScenario = scenarioForCard('targetRevenue');
+  const perParticipantScenario = scenarioForCard('perParticipant');
+  const overviewExpectedCost = expectedCostScenario?.expected_cost ?? summary?.expected_cost ?? 0;
+  const overviewCostWithDrift = costWithDriftScenario?.cost_with_drift ?? summary?.cost_with_drift ?? 0;
+  const targetRevenueCostWithDrift = targetRevenueScenario?.cost_with_drift ?? summary?.cost_with_drift ?? 0;
+  const overviewRevenue = targetRevenueCostWithDrift * (1 + targetMarkupPercent / 100);
+  const perParticipantParticipants = perParticipantScenario?.participants || 0;
+  const perParticipantCostWithDrift = perParticipantScenario?.cost_with_drift ?? summary?.cost_with_drift ?? 0;
+  const perParticipantRevenue = perParticipantScenario?.revenue ?? summary?.target_revenue ?? 0;
   const costPerParticipant =
-    worstCaseParticipants > 0 ? (summary?.cost_with_drift || 0) / worstCaseParticipants : 0;
+    perParticipantParticipants > 0 ? perParticipantCostWithDrift / perParticipantParticipants : 0;
   const tipPercent =
     parameters.optional_tip_percent ??
     summary?.parameters?.optional_tip_percent ??
     summary?.assumptions?.optional_tip_percent ??
     0;
-  const tipPerParticipant = (summary?.revenue_per_participant || 0) * (tipPercent / 100);
+  const revenuePerParticipant =
+    perParticipantParticipants > 0 ? perParticipantRevenue / perParticipantParticipants : 0;
+  const tipPerParticipant = revenuePerParticipant * (tipPercent / 100);
   const targetRegistrationPerParticipant =
-    worstCaseParticipants > 0 ? (summary?.target_revenue || 0) / worstCaseParticipants : 0;
+    perParticipantParticipants > 0
+      ? (perParticipantCostWithDrift * (1 + targetMarkupPercent / 100)) / perParticipantParticipants
+      : 0;
+  const renderLabelWithScenario = (label: string, card: OverviewScenarioCardKey) => {
+    const scenario = overviewScenarios[card];
+    const currentMeta = labelScenarioMeta[scenario];
+    return (
+      <span className="budget-label-with-scenario">
+        <span>{label}</span>
+        <span className="budget-scenario-indicator-wrap">
+          <button
+            type="button"
+            className={`budget-scenario-indicator budget-scenario-indicator-${scenario}`}
+            aria-label={`Calculated with ${currentMeta.long.toLowerCase()}. Click to change scenario.`}
+            title={`Calculated with ${currentMeta.long}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpenScenarioMenuFor((prev) => (prev === card ? null : card));
+            }}
+          >
+            {currentMeta.label}
+            <span className="budget-scenario-indicator-caret" aria-hidden="true">
+              ▾
+            </span>
+          </button>
+          {openScenarioMenuFor === card ? (
+            <div className="budget-scenario-menu" role="menu" onClick={(e) => e.stopPropagation()}>
+              {(['confirm', 'worst', 'full'] as LabelScenarioKey[]).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`budget-scenario-menu-item ${scenario === key ? 'is-active' : ''}`}
+                  role="menuitemradio"
+                  aria-checked={scenario === key}
+                  onClick={() => {
+                    setOverviewScenarios((prev) => ({ ...prev, [card]: key }));
+                    setOpenScenarioMenuFor(null);
+                  }}
+                >
+                  {labelScenarioMeta[key].label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </span>
+      </span>
+    );
+  };
   const toggleSection = (key: BudgetSectionKey) =>
     setOpenSections((prev) => ({
       ...prev,
       [key]: !prev[key]
     }));
   const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+  const getCurveMarginAtX = (x: number) => {
+    if (!marginCurve || marginCurve.points.length === 0) return 0;
+    const points = [...marginCurve.points].sort((a, b) => a.x - b.x);
+    if (x <= points[0].x) return points[0].margin;
+    if (x >= points[points.length - 1].x) return points[points.length - 1].margin;
+    for (let index = 1; index < points.length; index += 1) {
+      const left = points[index - 1];
+      const right = points[index];
+      if (x <= right.x) {
+        const span = right.x - left.x || 1;
+        const ratio = (x - left.x) / span;
+        return left.margin + ratio * (right.margin - left.margin);
+      }
+    }
+    return points[points.length - 1].margin;
+  };
   const handleCurveMouseMove = (event: MouseEvent<SVGSVGElement>) => {
     if (!marginCurve) return;
     const rect = event.currentTarget.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const localX = ((event.clientX - rect.left) / rect.width) * marginCurve.chartWidth;
-    const localY = ((event.clientY - rect.top) / rect.height) * marginCurve.chartHeight;
     const x = clamp(localX, marginCurve.plotLeft, marginCurve.plotRight);
-    const y = clamp(localY, marginCurve.plotTop, marginCurve.plotBottom);
+    const margin = getCurveMarginAtX(x);
+    const yRatio = (marginCurve.axisMax - margin) / (marginCurve.axisMax - marginCurve.axisMin || 1);
+    const y = clamp(
+      marginCurve.plotTop + yRatio * (marginCurve.plotBottom - marginCurve.plotTop),
+      marginCurve.plotTop,
+      marginCurve.plotBottom
+    );
     const xRatio = (x - marginCurve.plotLeft) / (marginCurve.plotRight - marginCurve.plotLeft || 1);
-    const yRatio = (y - marginCurve.plotTop) / (marginCurve.plotBottom - marginCurve.plotTop || 1);
     const participants = marginCurve.xMin + xRatio * (marginCurve.xMax - marginCurve.xMin);
-    const margin = marginCurve.axisMax - yRatio * (marginCurve.axisMax - marginCurve.axisMin);
     setCurveHover({ x, y, participants, margin });
   };
   const clearCurveHover = () => setCurveHover(null);
@@ -770,19 +1272,20 @@ const EventBudgetPage = () => {
               <>
             <div className="budget-kpi-grid">
               <div className="budget-kpi-card budget-kpi-card-scenario">
-                <span className="field-label budget-kpi-section-title">Expected Cost</span>
-                <strong>{formatMoney(summary.expected_cost || 0)}</strong>
+                <span className="field-label budget-kpi-section-title">{renderLabelWithScenario('Expected Cost', 'expectedCost')}</span>
+                <strong>{formatMoney(overviewExpectedCost)}</strong>
               </div>
               <div className="budget-kpi-card budget-kpi-card-scenario">
-                <span className="field-label budget-kpi-section-title">Cost with Drift</span>
-                <strong>{formatMoney(summary.cost_with_drift || 0)}</strong>
+                <span className="field-label budget-kpi-section-title">{renderLabelWithScenario('Cost with Drift', 'costWithDrift')}</span>
+                <strong>{formatMoney(overviewCostWithDrift)}</strong>
               </div>
               <div className="budget-kpi-card budget-kpi-card-scenario">
-                <span className="field-label budget-kpi-section-title">Target Revenue</span>
-                <strong>{formatMoney(summary.target_revenue || 0)}</strong>
+                <span className="field-label budget-kpi-section-title">{renderLabelWithScenario('Target Revenue', 'targetRevenue')}</span>
+                <strong>{formatMoney(overviewRevenue)}</strong>
               </div>
               <div className="budget-kpi-card budget-kpi-card-scenario">
-                <span className="field-label budget-kpi-section-title">Per Participant</span>
+                <span className="field-label budget-kpi-section-title">{renderLabelWithScenario('Per Participant', 'perParticipant')}</span>
+                <div className="budget-kpi-badge-row-spacer budget-kpi-badge-row-spacer-top" aria-hidden="true" />
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
                     <span className="field-label">Cost</span>
@@ -790,22 +1293,22 @@ const EventBudgetPage = () => {
                   </div>
                   <div className="budget-kpi-split-item">
                     <span className="field-label">Revenue</span>
-                    <strong>{formatMoney(summary.revenue_per_participant || 0)}</strong>
+                    <strong>{formatMoney(revenuePerParticipant)}</strong>
                   </div>
                   <div className="budget-kpi-split-item">
                     <span className="field-label">Tip</span>
                     <strong>{formatMoney(tipPerParticipant)}</strong>
                   </div>
                 </div>
-                <span className="field-label budget-kpi-section-subtitle budget-kpi-inline-label">
-                  Target Registration
-                </span>
+                <div className="budget-kpi-badge-row-spacer" aria-hidden="true" />
+                <span className="field-label budget-kpi-section-subtitle budget-kpi-inline-label">Target Registration</span>
                 <div className="budget-kpi-single-row">
                   <strong>{formatMoney(targetRegistrationPerParticipant)}</strong>
                 </div>
               </div>
               <div className="budget-kpi-card budget-kpi-card-scenario">
                 <span className="field-label budget-kpi-section-title">Revenue</span>
+                <div className="budget-kpi-badge-row-spacer budget-kpi-badge-row-spacer-top" aria-hidden="true" />
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
                     <span className="field-label">Confirm</span>
@@ -820,6 +1323,7 @@ const EventBudgetPage = () => {
                     <strong>{formatMoney(summary.scenarios?.full_capacity_case?.revenue || 0)}</strong>
                   </div>
                 </div>
+                <div className="budget-kpi-badge-row-spacer" aria-hidden="true" />
                 <span className="field-label budget-kpi-section-subtitle budget-kpi-inline-label">
                   Including tip
                 </span>
@@ -837,6 +1341,7 @@ const EventBudgetPage = () => {
               </div>
               <div className="budget-kpi-card budget-kpi-card-scenario">
                 <span className="field-label budget-kpi-section-title">Margin</span>
+                <div className="budget-kpi-badge-row-spacer budget-kpi-badge-row-spacer-top" aria-hidden="true" />
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
                     <span className="field-label">Confirm</span>
@@ -878,6 +1383,20 @@ const EventBudgetPage = () => {
                     >
                       {(summary.scenarios?.full_capacity_case?.margin_without_tip || 0) >= 0 ? 'Green' : 'Red'}
                     </span>
+                  </div>
+                </div>
+                <span className="field-label budget-kpi-section-subtitle budget-kpi-inline-label">
+                  Including tip
+                </span>
+                <div className="budget-kpi-split">
+                  <div className="budget-kpi-split-item">
+                    <strong>{formatMoney(summary.scenarios?.confirm_case?.margin_with_tip || 0)}</strong>
+                  </div>
+                  <div className="budget-kpi-split-item">
+                    <strong>{formatMoney(summary.scenarios?.worst_case_gate?.margin_with_tip || 0)}</strong>
+                  </div>
+                  <div className="budget-kpi-split-item">
+                    <strong>{formatMoney(summary.scenarios?.full_capacity_case?.margin_with_tip || 0)}</strong>
                   </div>
                 </div>
               </div>
@@ -946,12 +1465,17 @@ const EventBudgetPage = () => {
                     </div>
                   </div>
                   <div className="budget-bar-values muted">
-                    <span>Cost: {formatMoney(entry.costWithDrift || 0)}</span>
-                    <span>Revenue: {formatMoney(entry.revenue || 0)}</span>
+                    <span>
+                      Cost: <span className="budget-bar-value-amount">{formatMoney(entry.costWithDrift || 0)}</span>
+                    </span>
+                    <span>
+                      Revenue: <span className="budget-bar-value-amount">{formatMoney(entry.revenue || 0)}</span>
+                    </span>
                   </div>
-                  <div className="budget-bar-values">
+                  <div className="budget-bar-values budget-bar-values-margin-row">
                     <span className="muted">
-                      Margin: {formatMoney(entry.marginWithoutTip || 0)}
+                      Margin:{' '}
+                      <span className="budget-bar-value-amount">{formatMoney(entry.marginWithoutTip || 0)}</span>
                     </span>
                     <span className={`badge ${entry.status === 'green' ? 'success' : 'danger'}`}>
                       {entry.status === 'green' ? 'Green' : 'Red'}
@@ -1080,23 +1604,25 @@ const EventBudgetPage = () => {
                         cx={marker.x}
                         cy={marker.y}
                         r="5"
-                        className={
-                          marker.status === 'green'
-                            ? 'budget-curve-marker budget-curve-marker-green'
-                            : 'budget-curve-marker budget-curve-marker-red'
-                        }
+                        className={`budget-curve-marker ${
+                          marker.key === 'confirm_case'
+                            ? 'budget-curve-marker-confirm'
+                            : marker.key === 'worst_case_gate'
+                              ? 'budget-curve-marker-worst'
+                              : 'budget-curve-marker-full'
+                        }`}
                       />
                       <text
-                        x={marker.x}
-                        y={marker.y - 21}
+                        x={marker.labelX}
+                        y={marker.labelY}
                         className="budget-curve-label"
-                        textAnchor="middle"
+                        textAnchor={marker.labelAnchor}
                       >
-                        <tspan x={marker.x} dy="0">
+                        <tspan x={marker.labelX} dy="0">
                           {marker.label}
                         </tspan>
-                        <tspan x={marker.x} dy="1.2em">
-                          ({formatMoney(marker.margin)})
+                        <tspan x={marker.labelX} dy="1.2em">
+                          {formatMoney(marker.margin)}
                         </tspan>
                       </text>
                     </g>
@@ -1108,70 +1634,6 @@ const EventBudgetPage = () => {
             )}
             </>
             )}
-          </article>
-
-          <article className="card budget-aircraft-per-innhopp-card">
-            <header
-              className="card-header event-detail-section-header budget-cost-split-header"
-              onClick={() => toggleSection('aircraftPerInnhopp')}
-            >
-              <div className="event-detail-section-header-main">
-                <button
-                  className="ghost"
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleSection('aircraftPerInnhopp');
-                  }}
-                >
-                  {openSections.aircraftPerInnhopp ? '▾' : '▸'}
-                </button>
-                <h3 className="event-detail-section-title">Aircraft cost per Innhopp</h3>
-              </div>
-              <div className="budget-toggle-group">
-                <button
-                  type="button"
-                  className={aircraftSplitMode === 'amount' ? 'primary' : 'ghost'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setAircraftSplitMode('amount');
-                  }}
-                >
-                  Amount
-                </button>
-                <button
-                  type="button"
-                  className={aircraftSplitMode === 'percentage' ? 'primary' : 'ghost'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setAircraftSplitMode('percentage');
-                  }}
-                >
-                  Percentage
-                </button>
-              </div>
-            </header>
-            {openSections.aircraftPerInnhopp && aircraftPerInnhoppSplit.length > 0 ? (
-              <div className="budget-cost-split-list">
-                {aircraftPerInnhoppSplit.map((row) => (
-                  <div className="budget-cost-split-item" key={row.key}>
-                    <div className="budget-cost-split-top">
-                      <span className="field-label">{row.label}</span>
-                      <span className="muted">
-                        {aircraftSplitMode === 'amount'
-                          ? formatBaseMoney(row.displayValue, effectiveDisplayCurrency)
-                          : `${row.displayValue.toFixed(1)}%`}
-                      </span>
-                    </div>
-                    <div className="budget-bar-track">
-                      <div className="budget-bar budget-bar-blue" style={{ width: `${row.barPct}%` }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : openSections.aircraftPerInnhopp ? (
-              <p className="muted">No innhopps available for aircraft calculation yet.</p>
-            ) : null}
           </article>
 
           <article className="card budget-cost-split-card">
@@ -1192,7 +1654,54 @@ const EventBudgetPage = () => {
                 </button>
                 <h3 className="event-detail-section-title">Cost Split</h3>
               </div>
-              <div className="budget-toggle-group">
+              {openSections.costSplit && <div className="budget-cost-split-controls">
+              <div className="budget-cost-split-scenario-row">
+                <label className="form-field budget-cost-split-scenario-field">
+                  <span>Scenario</span>
+                  <select
+                    value={costSplitScenario}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => setCostSplitScenario(e.target.value as LabelScenarioKey)}
+                  >
+                    <option value="confirm">Confirm</option>
+                    <option value="worst">Worst</option>
+                    <option value="full">Full</option>
+                  </select>
+                </label>
+              </div>
+              <div className="budget-toggle-group budget-cost-split-tabs">
+                <button
+                  type="button"
+                  className={costSplitTab === 'section' ? 'primary' : 'ghost'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCostSplitTab('section');
+                  }}
+                >
+                  Section
+                </button>
+                <button
+                  type="button"
+                  className={costSplitTab === 'innhopp' ? 'primary' : 'ghost'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCostSplitTab('innhopp');
+                  }}
+                >
+                  Innhopp
+                </button>
+                <button
+                  type="button"
+                  className={costSplitTab === 'day' ? 'primary' : 'ghost'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCostSplitTab('day');
+                  }}
+                >
+                  Day
+                </button>
+              </div>
+              <div className="budget-toggle-group budget-cost-split-mode">
                 <button
                   type="button"
                   className={costSplitMode === 'amount' ? 'primary' : 'ghost'}
@@ -1214,24 +1723,116 @@ const EventBudgetPage = () => {
                   Percentage
                 </button>
               </div>
+              </div>}
             </header>
             {openSections.costSplit && (
             <div className="budget-cost-split-list">
-              {costSplit.map((section) => (
-                <div className="budget-cost-split-item" key={section.key}>
-                  <div className="budget-cost-split-top">
-                    <span className="field-label">{section.label}</span>
-                    <span className="muted">
-                      {costSplitMode === 'amount'
-                        ? formatMoney(section.displayValue)
-                        : `${section.displayValue.toFixed(1)}%`}
-                    </span>
-                  </div>
-                  <div className="budget-bar-track">
-                    <div className="budget-bar budget-bar-blue" style={{ width: `${section.barPct}%` }} />
-                  </div>
-                </div>
-              ))}
+              {costSplitTab === 'section' &&
+                (() => {
+                  const totalValue = costSplit.reduce((acc, section) => acc + section.displayValue, 0);
+                  return (
+                    <>
+                      {costSplit.map((section) => (
+                        <div className="budget-cost-split-item" key={section.key}>
+                          <div className="budget-cost-split-top">
+                            <span className="field-label">{section.label}</span>
+                            <span className="muted">
+                              {costSplitMode === 'amount'
+                                ? formatMoney(section.displayValue)
+                                : `${section.displayValue.toFixed(1)}%`}
+                            </span>
+                          </div>
+                          <div className="budget-bar-track">
+                            <div className="budget-bar budget-bar-blue" style={{ width: `${section.barPct}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                      <div className="budget-cost-split-item budget-cost-split-item-total">
+                        <div className="budget-cost-split-top">
+                          <span className="field-label">Total</span>
+                          <span className="muted">
+                            {costSplitMode === 'amount' ? formatMoney(totalValue) : `${totalValue.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              {costSplitTab === 'innhopp' &&
+                (() => {
+                  const totalValue = aircraftPerInnhoppSplit.reduce(
+                    (acc, row) => acc + (costSplitMode === 'amount' ? row.displayTotalCost : row.percentage),
+                    0
+                  );
+                  return (
+                    <>
+                      {aircraftPerInnhoppSplit.map((row) => (
+                        <div className="budget-cost-split-item" key={row.key}>
+                          <div className="budget-cost-split-top">
+                            <span className="field-label">{row.label}</span>
+                            <span className="muted">
+                              {costSplitMode === 'amount'
+                                ? formatBaseMoney(row.displayTotalCost, effectiveDisplayCurrency)
+                                : `${row.percentage.toFixed(1)}%`}
+                            </span>
+                          </div>
+                          <div className="budget-bar-track">
+                            <div className="budget-bar budget-bar-blue" style={{ width: `${row.barPct}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                      <div className="budget-cost-split-item budget-cost-split-item-total">
+                        <div className="budget-cost-split-top">
+                          <span className="field-label">Total</span>
+                          <span className="muted">
+                            {costSplitMode === 'amount'
+                              ? formatBaseMoney(totalValue, effectiveDisplayCurrency)
+                              : `${totalValue.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              {costSplitTab === 'day' &&
+                (() => {
+                  const totalValue = costSplitByDay.reduce((acc, row) => acc + row.displayValue, 0);
+                  return (
+                    <>
+                      {costSplitByDay.map((row) => (
+                        <div className="budget-cost-split-item" key={row.key}>
+                          <div className="budget-cost-split-top">
+                            <span className="field-label">{row.label}</span>
+                            <span className="muted">
+                              {costSplitMode === 'amount'
+                                ? formatBaseMoney(row.displayValue, effectiveDisplayCurrency)
+                                : `${row.displayValue.toFixed(1)}%`}
+                            </span>
+                          </div>
+                          <div className="budget-bar-track">
+                            <div className="budget-bar budget-bar-blue" style={{ width: `${row.barPct}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                      <div className="budget-cost-split-item budget-cost-split-item-total">
+                        <div className="budget-cost-split-top">
+                          <span className="field-label">Total</span>
+                          <span className="muted">
+                            {costSplitMode === 'amount'
+                              ? formatBaseMoney(totalValue, effectiveDisplayCurrency)
+                              : `${totalValue.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              {costSplitTab === 'innhopp' && aircraftPerInnhoppSplit.length === 0 ? (
+                <p className="muted">No innhopps available for aircraft calculation yet.</p>
+              ) : null}
+              {costSplitTab === 'day' && costSplitByDay.length === 0 ? (
+                <p className="muted">No dated line items available yet.</p>
+              ) : null}
             </div>
             )}
           </article>
@@ -1258,134 +1859,232 @@ const EventBudgetPage = () => {
             {openSections.parameters && (
             <>
             <form onSubmit={onSaveParameters} className="form-grid budget-assumptions-grid">
-              <div className="budget-assumptions-row">
-                {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count'].map(
-                  renderNumericParameterField
-                )}
+              <div className="budget-parameters-tabs" role="tablist" aria-label="Parameter groups">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={parametersTab === 'load'}
+                  className={parametersTab === 'load' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('load')}
+                >
+                  Load
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={parametersTab === 'aircraft'}
+                  className={parametersTab === 'aircraft' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('aircraft')}
+                >
+                  Aircraft
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={parametersTab === 'pricing'}
+                  className={parametersTab === 'pricing' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('pricing')}
+                >
+                  Pricing
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={parametersTab === 'estimates'}
+                  className={parametersTab === 'estimates' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('estimates')}
+                >
+                  Estimates
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={parametersTab === 'currencies'}
+                  className={parametersTab === 'currencies' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('currencies')}
+                >
+                  Currencies
+                </button>
               </div>
-              <div className="budget-assumptions-row">
-                {renderNumericParameterField('aircraft_price_per_minute')}
-                <label className="form-field">
-                  <span>Aircraft currency</span>
-                  <select
-                    value={aircraftCurrency}
-                    onChange={(e) => setAircraftCurrency(e.target.value)}
-                  >
-                    {orderedSelectedCurrencies.map((code) => (
-                      <option key={code} value={code}>
-                        {code}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {renderNumericParameterField('aircraft_cruising_speed_kmh')}
-              </div>
-              <div className="budget-assumptions-row">
-                {['target_markup_percent', 'optional_tip_percent', 'cost_drift_percent'].map(
-                  renderNumericParameterField
-                )}
-              </div>
-              <div className="budget-currencies-grid">
-                <label className="form-field">
-                  <span>Event Registration</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={eventRegistrationTotal}
-                    onChange={(e) => setEventRegistrationTotal(e.target.value)}
-                  />
-                </label>
-                <label className="form-field">
-                  <span>Event Currency</span>
-                  <input
-                    value={eventCurrencyInput}
-                    maxLength={3}
-                    onChange={(e) => setEventCurrencyInput(e.target.value.toUpperCase())}
-                  />
-                </label>
-                <div className="budget-display-currency">
+              {parametersTab === 'load' && (
+                <div className="budget-assumptions-row budget-assumptions-row--load">
+                  {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count'].map(
+                    renderNumericParameterField
+                  )}
+                </div>
+              )}
+              {parametersTab === 'aircraft' && (
+                <div className="budget-assumptions-row budget-assumptions-row--aircraft">
+                  {renderNumericParameterField('aircraft_price_per_minute')}
+                  {renderNumericParameterField('minimum_load_duration')}
                   <label className="form-field">
-                    <span>Base Currency</span>
+                    <span>Aircraft currency</span>
                     <select
-                      value={pendingBaseCurrency}
-                      onChange={(e) => {
-                        const nextBase = e.target.value;
-                        setPendingBaseCurrency(nextBase);
-                        if (!selectedCurrencies.includes(nextBase)) {
-                          setSelectedCurrencies((prev) => [...prev, nextBase]);
+                      value={aircraftCurrency}
+                      onChange={(e) => setAircraftCurrency(e.target.value)}
+                    >
+                      {orderedSelectedCurrencies.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {renderNumericParameterField('aircraft_cruising_speed_kmh')}
+                </div>
+              )}
+              {parametersTab === 'pricing' && (
+                <div className="budget-pricing-tab">
+                  <div className="budget-currencies-grid">
+                    {['target_markup_percent', 'optional_tip_percent', 'cost_drift_percent'].map(
+                      renderNumericParameterField
+                    )}
+                  </div>
+                  <div className="budget-currencies-grid">
+                    <label className="form-field">
+                      <span>Event Registration</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={eventRegistrationTotal}
+                        onChange={(e) => setEventRegistrationTotal(e.target.value)}
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Event Currency</span>
+                      <select
+                        value={
+                          orderedSelectedCurrencies.includes(eventCurrencyInput)
+                            ? eventCurrencyInput
+                            : pendingBaseCurrency
                         }
-                        if (!selectedCurrencies.includes(displayCurrency)) {
-                          setDisplayCurrency(nextBase);
+                        onChange={(e) => setEventCurrencyInput(e.target.value)}
+                      >
+                        {orderedSelectedCurrencies.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              )}
+              {parametersTab === 'currencies' && (
+                <div className="budget-currencies-grid">
+                  <div className="budget-display-currency">
+                    <label className="form-field">
+                      <span>Base Currency</span>
+                      <select
+                        value={pendingBaseCurrency}
+                        onChange={(e) => {
+                          const nextBase = e.target.value;
+                          setPendingBaseCurrency(nextBase);
+                          if (!selectedCurrencies.includes(nextBase)) {
+                            setSelectedCurrencies((prev) => [...prev, nextBase]);
+                          }
+                          if (!selectedCurrencies.includes(displayCurrency)) {
+                            setDisplayCurrency(nextBase);
+                          }
+                        }}
+                      >
+                        {orderedSelectedCurrencies.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="budget-display-currency">
+                    <label className="form-field">
+                      <span>Display Currency</span>
+                      <select
+                        value={effectiveDisplayCurrency}
+                        onChange={(e) => setDisplayCurrency(e.target.value)}
+                      >
+                        {orderedSelectedCurrencies.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label className="form-field">
+                    <span>Add Currency</span>
+                    <input
+                      list="budget-currency-options"
+                      value={currencySearch}
+                      onChange={(e) => {
+                        const value = e.target.value.toUpperCase();
+                        setCurrencySearch(value);
+                        if (ISO_CURRENCY_CODES.includes(value as (typeof ISO_CURRENCY_CODES)[number])) {
+                          onAddCurrency(value);
                         }
                       }}
-                    >
-                      {orderedSelectedCurrencies.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
+                      placeholder="Type or select ISO code, e.g. USD"
+                    />
+                    <datalist id="budget-currency-options">
+                      {ISO_CURRENCY_CODES.map((code) => (
+                        <option key={code} value={code} />
                       ))}
-                    </select>
+                    </datalist>
                   </label>
-                </div>
-                <div className="budget-display-currency">
-                  <label className="form-field">
-                    <span>Display Currency</span>
-                    <select
-                      value={effectiveDisplayCurrency}
-                      onChange={(e) => setDisplayCurrency(e.target.value)}
-                    >
-                      {orderedSelectedCurrencies.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <label className="form-field">
-                  <span>Add Currency</span>
-                  <input
-                    list="budget-currency-options"
-                    value={currencySearch}
-                    onChange={(e) => {
-                      const value = e.target.value.toUpperCase();
-                      setCurrencySearch(value);
-                      if (ISO_CURRENCY_CODES.includes(value as (typeof ISO_CURRENCY_CODES)[number])) {
-                        onAddCurrency(value);
-                      }
-                    }}
-                    placeholder="Type or select ISO code, e.g. USD"
-                  />
-                  <datalist id="budget-currency-options">
-                    {ISO_CURRENCY_CODES.map((code) => (
-                      <option key={code} value={code} />
+                  <div className="budget-currency-selected">
+                    <span className="budget-currency-selected-label">Budget currencies:</span>
+                    {orderedSelectedCurrencies.map((code) => (
+                      <span className="budget-currency-chip" key={code} title={rateTooltip(code)}>
+                        <span>{code}</span>
+                        {code !== pendingBaseCurrency && code !== aircraftCurrency ? (
+                          <button
+                            type="button"
+                            className="budget-currency-chip-remove"
+                            aria-label={`Remove ${code}`}
+                            onClick={() => onRemoveCurrency(code)}
+                          >
+                            ×
+                          </button>
+                        ) : (
+                          <span className="budget-currency-chip-remove-placeholder" aria-hidden="true">
+                            ×
+                          </span>
+                        )}
+                      </span>
                     ))}
-                  </datalist>
-                </label>
-                <div className="budget-currency-selected">
-                  <span className="budget-currency-selected-label">Budget currencies:</span>
-                  {orderedSelectedCurrencies.map((code) => (
-                    <span className="budget-currency-chip" key={code} title={rateTooltip(code)}>
-                      <span>{code}</span>
-                      {code !== pendingBaseCurrency && code !== aircraftCurrency ? (
-                        <button
-                          type="button"
-                          className="budget-currency-chip-remove"
-                          aria-label={`Remove ${code}`}
-                          onClick={() => onRemoveCurrency(code)}
-                        >
-                          ×
-                        </button>
-                      ) : (
-                        <span className="budget-currency-chip-remove-placeholder" aria-hidden="true">
-                          ×
-                        </span>
-                      )}
-                    </span>
-                  ))}
+                  </div>
                 </div>
-              </div>
+              )}
+              {parametersTab === 'estimates' && (
+                <>
+                  <div className="budget-estimates-list">
+                    {ESTIMATE_PARAMETER_KEYS.map(renderEstimateParameterField)}
+                    <label className="form-field">
+                      <span>Budget method</span>
+                      <select
+                        value={budgetMethod}
+                        onChange={(e) =>
+                          setParameters((prev) => ({
+                            ...prev,
+                            [BUDGET_METHOD_KEY]: Number(e.target.value)
+                          }))
+                        }
+                      >
+                        <option value={BUDGET_METHOD_ESTIMATES}>Estimates</option>
+                        <option value={BUDGET_METHOD_LINE_ITEMS}>Line Items</option>
+                        <option value={BUDGET_METHOD_HYBRID}>Hybrid</option>
+                      </select>
+                    </label>
+                  </div>
+                  {budgetMethod === BUDGET_METHOD_HYBRID && (
+                    <p className="muted budget-hybrid-help">
+                      Hybrid uses line items on days where they exist, and falls back to estimates for days with no
+                      line items.
+                    </p>
+                  )}
+                </>
+              )}
               <div className="form-actions">
                 <button type="submit" className="primary" disabled={savingParameters}>
                   {savingParameters ? 'Saving…' : 'Save parameters'}
@@ -1417,7 +2116,8 @@ const EventBudgetPage = () => {
             </header>
             {openSections.lineItems && (
             <>
-            <form onSubmit={onAddLineItem} className="form-grid budget-lineitem-form">
+            {addingLineItem ? (
+            <form id="add-line-item-form" onSubmit={onAddLineItem} className="form-grid budget-lineitem-form">
               <label className="form-field">
                 <span>Section</span>
                 <select
@@ -1504,12 +2204,37 @@ const EventBudgetPage = () => {
                   onChange={(e) => setNewLineItem((prev) => ({ ...prev, notes: e.target.value }))}
                 />
               </label>
-              <div className="form-actions">
-                <button type="submit" className="primary" disabled={savingLineItem}>
-                  {savingLineItem ? 'Adding…' : 'Add line item'}
-                </button>
-              </div>
             </form>
+            ) : null}
+
+            <div className="form-actions event-detail-top-margin">
+              <button
+                type={addingLineItem ? 'submit' : 'button'}
+                form={addingLineItem ? 'add-line-item-form' : undefined}
+                className="primary"
+                disabled={savingLineItem}
+                onClick={
+                  addingLineItem
+                    ? undefined
+                    : () => {
+                        setAddingLineItem(true);
+                      }
+                }
+              >
+                {savingLineItem ? 'Saving…' : addingLineItem ? 'Save' : 'Add'}
+              </button>
+              {addingLineItem ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={savingLineItem}
+                  onClick={() => setAddingLineItem(false)}
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+            <div className="event-detail-spacer" />
 
             <div className="table-wrap">
               <table className="table">

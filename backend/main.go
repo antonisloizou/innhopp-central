@@ -665,6 +665,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS inputs_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS results_json JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		`ALTER TABLE budget_scenarios ADD COLUMN IF NOT EXISTS is_baseline BOOLEAN NOT NULL DEFAULT FALSE`,
+		`UPDATE budget_sections SET name = 'Transport' WHERE code = 'transport_activities' AND name IN ('Transport & Activities', 'Transport and Activities', 'Transport and Actiovities')`,
+		`UPDATE budget_sections SET name = 'Entertainment & Activities' WHERE code = 'entertainment' AND name = 'Entertainment'`,
 		`CREATE TABLE IF NOT EXISTS accounts (
             id SERIAL PRIMARY KEY,
             subject TEXT NOT NULL UNIQUE,
