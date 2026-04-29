@@ -126,24 +126,25 @@ var defaultSections = []struct {
 }
 
 var defaultAssumptions = map[string]float64{
-	"full_load_size":              14,
-	"crew_on_load_count":          2,
-	"confirm_load_count":          1,
-	"full_load_count":             2,
-	"aircraft_price_per_minute":   0,
-	"minimum_load_duration":       0,
-	"aircraft_cruising_speed_kmh": 180,
-	"target_markup_percent":       20,
-	"optional_tip_percent":        8,
-	"cost_drift_percent":          3,
-	"budget_method":               2, // 0=estimates, 1=line_items, 2=hybrid
+	"full_load_size":                          14,
+	"crew_on_load_count":                      2,
+	"confirm_load_count":                      1,
+	"full_load_count":                         2,
+	"aircraft_price_per_minute":               0,
+	"minimum_load_duration":                   0,
+	"aircraft_cruising_speed_kmh":             180,
+	"target_markup_percent":                   20,
+	"optional_tip_percent":                    8,
+	"cost_drift_percent":                      3,
+	"budget_method":                           2, // 0=estimates, 1=line_items, 2=hybrid
 	"estimate_accommodation_per_person_night": 0,
-	"estimate_transport_per_day":             0,
-	"estimate_food_per_day":                  0,
-	"estimate_staff_salary_per_person_day":   0,
+	"estimate_transport_per_day":              0,
+	"estimate_food_per_day":                   0,
+	"estimate_staff_salary_per_person_day":    0,
 }
 
 const autoAircraftInnhoppNotePrefix = "[auto-aircraft-innhopp]"
+const autoAircraftMissingDistanceSuffix = ":missing-distance"
 const legacyPlannedLoadCountKey = "planned_load_count"
 const fullLoadCountKey = "full_load_count"
 
@@ -2041,15 +2042,16 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 	minimumLoadDuration := clampNonNegative(assumptions["minimum_load_duration"])
 
 	type generatedLineItem struct {
-		InnhoppID     int64
-		Marker        string
-		Name          string
-		ServiceDate   *time.Time
-		LocationLabel string
-		Quantity      float64
-		UnitCost      float64
-		CostCurrency  string
-		SortOrder     int
+		InnhoppID       int64
+		Marker          string
+		MissingDistance bool
+		Name            string
+		ServiceDate     *time.Time
+		LocationLabel   string
+		Quantity        float64
+		UnitCost        float64
+		CostCurrency    string
+		SortOrder       int
 	}
 
 	rows, err := h.db.Query(
@@ -2075,12 +2077,16 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		if err := rows.Scan(&innhoppID, &sequence, &name, &scheduledAt, &distanceByAirKm); err != nil {
 			return err
 		}
-		if distanceByAirKm <= 0 || fullLoadCount <= 0 {
+		if fullLoadCount <= 0 {
 			continue
 		}
 
 		roundTripDistanceKm := distanceByAirKm * 2
-		roundTripMinutes := (roundTripDistanceKm / cruisingSpeedKmh) * 60
+		roundTripMinutes := 0.0
+		missingDistance := distanceByAirKm <= 0
+		if !missingDistance {
+			roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
+		}
 		if roundTripMinutes < minimumLoadDuration {
 			roundTripMinutes = minimumLoadDuration
 		}
@@ -2097,6 +2103,9 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 			displayName = fmt.Sprintf("#%d %s", sequence, displayName)
 		}
 		marker := fmt.Sprintf("%s:%d", autoAircraftInnhoppNotePrefix, innhoppID)
+		if missingDistance {
+			marker += autoAircraftMissingDistanceSuffix
+		}
 		var serviceDate *time.Time
 		if scheduledAt != nil {
 			day := time.Date(scheduledAt.Year(), scheduledAt.Month(), scheduledAt.Day(), 0, 0, 0, 0, time.UTC)
@@ -2104,15 +2113,16 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		}
 
 		items = append(items, generatedLineItem{
-			InnhoppID:     innhoppID,
-			Marker:        marker,
-			Name:          "Aircraft",
-			ServiceDate:   serviceDate,
-			LocationLabel: displayName,
-			Quantity:      totalMinutes,
-			UnitCost:      aircraftPricePerMinute,
-			CostCurrency:  aircraftCurrency,
-			SortOrder:     len(items),
+			InnhoppID:       innhoppID,
+			Marker:          marker,
+			MissingDistance: missingDistance,
+			Name:            "Aircraft",
+			ServiceDate:     serviceDate,
+			LocationLabel:   displayName,
+			Quantity:        totalMinutes,
+			UnitCost:        aircraftPricePerMinute,
+			CostCurrency:    aircraftCurrency,
+			SortOrder:       len(items),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -2238,13 +2248,16 @@ func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int6
 		if err := rows.Scan(&distanceByAirKm); err != nil {
 			return 0, 0, err
 		}
-		if distanceByAirKm <= 0 || loadCount <= 0 {
+		if loadCount <= 0 {
 			continue
 		}
 		// One load is takeoff->innhopp->takeoff, so each load is one round trip.
 		roundTripDistanceKm := distanceByAirKm * 2
 		aggregateDistance += roundTripDistanceKm * float64(loadCount)
-		roundTripMinutes := (roundTripDistanceKm / cruisingSpeedKmh) * 60
+		roundTripMinutes := 0.0
+		if distanceByAirKm > 0 {
+			roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
+		}
 		if roundTripMinutes < minimumLoadDuration {
 			roundTripMinutes = minimumLoadDuration
 		}

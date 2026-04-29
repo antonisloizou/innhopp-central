@@ -83,6 +83,7 @@ const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = 
   worst: 'worst_case_gate',
   full: 'full_capacity_case'
 };
+const AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER = ':missing-distance';
 
 const EventBudgetPage = () => {
   const { eventId } = useParams();
@@ -745,7 +746,14 @@ const EventBudgetPage = () => {
   }, [fullLoads, scenarioAircraftLoads]);
   const selectedScenarioParticipants =
     summary?.scenarios?.[scenarioSummaryKeyByLabel[costSplitScenario]]?.participants || 0;
+  const selectedCostSplitScenario = summary?.scenarios?.[scenarioSummaryKeyByLabel[costSplitScenario]] || null;
   const fullScenarioParticipants = summary?.scenarios?.full_capacity_case?.participants || 0;
+  const scenarioDriftScale = useMemo(() => {
+    const expected = selectedCostSplitScenario?.expected_cost || 0;
+    const withDrift = selectedCostSplitScenario?.cost_with_drift || 0;
+    if (expected <= 0 || withDrift <= 0) return 1;
+    return withDrift / expected;
+  }, [selectedCostSplitScenario?.expected_cost, selectedCostSplitScenario?.cost_with_drift]);
   const participantScale = useMemo(() => {
     if (fullScenarioParticipants <= 0 || selectedScenarioParticipants <= 0) return 1;
     return selectedScenarioParticipants / fullScenarioParticipants;
@@ -761,7 +769,8 @@ const EventBudgetPage = () => {
       const isFoodAccommodation = sectionCode === 'food_accommodation';
       const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode);
       const paxScale = isFoodAccommodation && isEstimateOrHybridMode;
-      const scaledTotal = section.total * (loadScale ? aircraftLoadScale : 1) * (paxScale ? participantScale : 1);
+      const scaledTotal =
+        section.total * (loadScale ? aircraftLoadScale : 1) * (paxScale ? participantScale : 1) * scenarioDriftScale;
       return {
         ...section,
         total: scaledTotal
@@ -778,29 +787,40 @@ const EventBudgetPage = () => {
         displayValue: costSplitMode === 'percentage' ? scaledPercentage : section.total
       };
     });
-  }, [summary, costSplitMode, aircraftLoadScale, participantScale, isLoadBasedCrewMode, isEstimateOrHybridMode]);
+  }, [
+    summary,
+    costSplitMode,
+    aircraftLoadScale,
+    participantScale,
+    isLoadBasedCrewMode,
+    isEstimateOrHybridMode,
+    scenarioDriftScale
+  ]);
   const marginCurve = useMemo(() => buildMarginCurveModel(summary), [summary]);
   const worstCaseGreen = useMemo(() => isWorstCaseGreen(summary), [summary]);
   const innhoppsByID = useMemo(
     () => new Map((activeEventData?.innhopps || []).map((innhopp) => [innhopp.id, innhopp])),
     [activeEventData?.innhopps]
   );
+  const hasMissingDistanceWarning = (notes?: string) =>
+    typeof notes === 'string' && notes.includes(AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER);
   const aircraftPerInnhoppRows = useMemo(() => {
     const seedRows = (activeEventData?.innhopps || []).map((innhopp) => {
       const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
       const label = innhopp.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
-      return {
-        key: innhopp.id,
-        label,
-        sequence: innhopp.sequence || Number.MAX_SAFE_INTEGER,
-        sortOrder: 0,
-        minutes: 0,
-        unitCost: 0,
-        totalCost: 0,
-        displayTotalCost: 0,
-        costCurrency: aircraftCurrency
-      };
-    });
+        return {
+          key: innhopp.id,
+          label,
+          sequence: innhopp.sequence || Number.MAX_SAFE_INTEGER,
+          sortOrder: 0,
+          minutes: 0,
+          unitCost: 0,
+          totalCost: 0,
+          displayTotalCost: 0,
+          costCurrency: aircraftCurrency,
+          hasMissingDistanceWarning: false
+        };
+      });
     const byInnhoppID = new Map(seedRows.map((row) => [row.key, row]));
     lineItems
       .filter(
@@ -825,6 +845,8 @@ const EventBudgetPage = () => {
           existing.minutes += Number(item.quantity || 0);
           existing.totalCost += Number(item.line_total || 0);
           existing.displayTotalCost += converted;
+          existing.hasMissingDistanceWarning =
+            existing.hasMissingDistanceWarning || hasMissingDistanceWarning(item.notes);
           return;
         }
         byInnhoppID.set(item.innhopp_id, {
@@ -836,7 +858,8 @@ const EventBudgetPage = () => {
           unitCost: Number(item.unit_cost || 0),
           totalCost: Number(item.line_total || 0),
           displayTotalCost: converted,
-          costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
+          costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency,
+          hasMissingDistanceWarning: hasMissingDistanceWarning(item.notes)
         });
       });
     return Array.from(byInnhoppID.values()).sort(
@@ -850,7 +873,7 @@ const EventBudgetPage = () => {
     }));
     const aircraftSectionBaseTotal =
       summary?.section_totals?.find((section) => (section.code || '').trim().toLowerCase() === 'aircraft')?.total || 0;
-    const aircraftSectionScenarioTotal = aircraftSectionBaseTotal * aircraftLoadScale;
+    const aircraftSectionScenarioTotal = aircraftSectionBaseTotal * aircraftLoadScale * scenarioDriftScale;
     const rawTotal = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
     const normalizeRatio = rawTotal > 0 ? aircraftSectionScenarioTotal / rawTotal : 1;
     const normalizedRows =
@@ -870,7 +893,7 @@ const EventBudgetPage = () => {
         barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0
       };
     });
-  }, [aircraftPerInnhoppRows, aircraftLoadScale, costSplitMode, summary?.section_totals]);
+  }, [aircraftPerInnhoppRows, aircraftLoadScale, costSplitMode, summary?.section_totals, scenarioDriftScale]);
   const costSplitByDay = useMemo(() => {
     const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
@@ -981,27 +1004,24 @@ const EventBudgetPage = () => {
         row.payableCrewDisplayTotalCost * (isLoadBasedCrewMode ? aircraftLoadScale : 1) +
         row.foodAccommodationDisplayTotalCost * (isEstimateOrHybridMode ? participantScale : 1)
     }));
-    const dayRowsAmountAdjusted =
-      isEstimateOrHybridMode
-        ? (() => {
-            const totalFromRows = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
-            const targetFromSections = costSplit.reduce((acc, section) => acc + section.total, 0);
-            const delta = targetFromSections - totalFromRows;
-            if (Math.abs(delta) < 0.0001) return scaledRows;
-            const datedRows = scaledRows.filter((row) => row.key !== 'undated');
-            const bucketRows = datedRows.length > 0 ? datedRows : scaledRows;
-            if (!bucketRows.length) return scaledRows;
-            const perRowDelta = delta / bucketRows.length;
-            return scaledRows.map((row) => {
-              const shouldAdjust = bucketRows.some((bucket) => bucket.key === row.key);
-              if (!shouldAdjust) return row;
-              return {
-                ...row,
-                displayTotalCost: row.displayTotalCost + perRowDelta
-              };
-            });
-          })()
-        : scaledRows;
+    const dayRowsAmountAdjusted = (() => {
+      const totalFromRows = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
+      const targetFromSections = costSplit.reduce((acc, section) => acc + section.total, 0);
+      const delta = targetFromSections - totalFromRows;
+      if (Math.abs(delta) < 0.0001) return scaledRows;
+      const datedRows = scaledRows.filter((row) => row.key !== 'undated');
+      const bucketRows = datedRows.length > 0 ? datedRows : scaledRows;
+      if (!bucketRows.length) return scaledRows;
+      const perRowDelta = delta / bucketRows.length;
+      return scaledRows.map((row) => {
+        const shouldAdjust = bucketRows.some((bucket) => bucket.key === row.key);
+        if (!shouldAdjust) return row;
+        return {
+          ...row,
+          displayTotalCost: row.displayTotalCost + perRowDelta
+        };
+      });
+    })();
     const total = dayRowsAmountAdjusted.reduce((acc, row) => acc + row.displayTotalCost, 0);
     const max = dayRowsAmountAdjusted.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
     return dayRowsAmountAdjusted.map((row) => {
@@ -1769,7 +1789,18 @@ const EventBudgetPage = () => {
                       {aircraftPerInnhoppSplit.map((row) => (
                         <div className="budget-cost-split-item" key={row.key}>
                           <div className="budget-cost-split-top">
-                            <span className="field-label">{row.label}</span>
+                            <span className="field-label">
+                              {row.label}
+                              {row.hasMissingDistanceWarning ? (
+                                <sup
+                                  className="nav-user-warning budget-warning-sup"
+                                  title="Distance missing; minimum load duration used."
+                                  aria-label="Distance missing; minimum load duration used."
+                                >
+                                  !
+                                </sup>
+                              ) : null}
+                            </span>
                             <span className="muted">
                               {costSplitMode === 'amount'
                                 ? formatBaseMoney(row.displayTotalCost, effectiveDisplayCurrency)
@@ -2255,10 +2286,23 @@ const EventBudgetPage = () => {
                   {lineItems.map((item) => (
                     <tr key={item.id}>
                       <td>{item.section_name || item.section_code || '-'}</td>
-                      <td>{item.name}</td>
+                      <td>
+                        {item.name}
+                      </td>
                       <td>{item.service_date ? item.service_date.slice(0, 10) : '-'}</td>
                       <td>{item.location_label || '-'}</td>
-                      <td>{item.quantity}</td>
+                      <td>
+                        {item.quantity}
+                        {hasMissingDistanceWarning(item.notes) ? (
+                          <sup
+                            className="nav-user-warning budget-warning-sup"
+                            title="Distance missing; minimum load duration used."
+                            aria-label="Distance missing; minimum load duration used."
+                          >
+                            !
+                          </sup>
+                        ) : null}
+                      </td>
                       <td>{formatBaseMoney(item.unit_cost || 0, item.cost_currency || baseCurrency)}</td>
                       <td>{item.cost_currency || baseCurrency}</td>
                       <td>{formatBaseMoney(item.line_total || 0, item.cost_currency || baseCurrency)}</td>
