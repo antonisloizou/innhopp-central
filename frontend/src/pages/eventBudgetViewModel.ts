@@ -122,6 +122,7 @@ export const buildCostSplit = (
 };
 
 export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurveModel | null => {
+  const isNonNull = <T>(value: T | null): value is T => value !== null;
   const rawCurve = summary?.margin_curve;
   const scenarioCurvePoints = scenarioSpecs
     .map(({ key }) => {
@@ -202,7 +203,7 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
       const scenario = summary?.scenarios?.[key];
       if (!scenario) return null;
       const markerLabel = key === 'worst_case_gate' ? 'Worst' : label;
-      return {
+      const marker: MarginCurveMarker = {
         key,
         label: markerLabel,
         participants: scenario.participants || 0,
@@ -215,8 +216,9 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
         labelPlacement: key === 'confirm_case' ? ('above' as const) : ('below' as const),
         status: scenario.status || 'red'
       };
+      return marker;
     })
-    .filter((marker): marker is MarginCurveMarker => marker !== null);
+    .filter(isNonNull);
 
   const labelPadX = 6;
   const labelPadY = 6;
