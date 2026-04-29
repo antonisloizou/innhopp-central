@@ -68,7 +68,7 @@ When the `/login` route loads, the app checks `/api/auth/session`. If there is n
 - Base budget currency defaults to `EUR`.
 - Each line item can use any event-selected currency; summaries convert to base with live FX rates.
 - `Display Currency` changes only how computed totals/charts are shown in the UI; it does not mutate stored base calculations.
-- Parameters include `target_markup_percent` (default `20`), `optional_tip_percent` (default `8`), and `cost_drift_percent` (default `3`).
+- Parameters include `target_markup_percent` (default `20`), `optional_tip_percent` (default `8`), and `cost_drift_percent` (default `10`).
 - The worst-case profitability gate drives submit/review workflow visuals.
 
 ## Feature flags

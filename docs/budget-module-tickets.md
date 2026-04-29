@@ -20,7 +20,7 @@
 - Markup and tip:
 - `target_markup_percent` default `20`.
 - `optional_tip_percent` default `8`.
-- `cost_drift_percent` default `3`.
+- `cost_drift_percent` default `10`.
 - Both are fully configurable per event budget.
 - Optional tip semantics:
 - Tip is post-event and optional.
@@ -256,7 +256,7 @@ Implement a single budget workspace with:
 - Editable assumptions must include:
 - `target_markup_percent` (default 20)
 - `optional_tip_percent` (default 8)
-- `cost_drift_percent` (default 3)
+- `cost_drift_percent` (default 10)
 - `full_load_size`
 - `crew_on_load_count` (default 2)
 - `confirm_load_count` (default 1)

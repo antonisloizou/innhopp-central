@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { BudgetSummary } from '../api/budgets';
 import {
+  buildMarginCurveModel,
   buildCostSplit,
   buildScenarioBars,
   hasFalseSafetyWarning,
@@ -125,5 +126,37 @@ describe('eventBudgetViewModel', () => {
     const confirm = bars.find((entry) => entry.key === 'confirm_case');
     expect(confirm?.revenue).toBe(3000);
     expect(summary.scenarios.confirm_case.revenue_with_tip).toBe(3240);
+  });
+
+  it('builds target margin polyline from scenario target markup', () => {
+    const summary = makeSummary({
+      parameters: { target_markup_percent: 20 },
+      scenarios: {
+        confirm_case: {
+          ...makeSummary().scenarios.confirm_case,
+          participants: 12,
+          cost_with_drift: 500
+        },
+        worst_case_gate: {
+          ...makeSummary().scenarios.worst_case_gate,
+          participants: 18,
+          cost_with_drift: 600
+        },
+        full_capacity_case: {
+          ...makeSummary().scenarios.full_capacity_case,
+          participants: 24,
+          cost_with_drift: 700
+        }
+      }
+    });
+
+    const curve = buildMarginCurveModel(summary);
+    expect(curve).not.toBeNull();
+    expect(curve?.targetMarginPolylinePoints.split(' ').length).toBe(3);
+    const targetPoints = curve?.targetMarginPolylinePoints
+      .split(' ')
+      .map((entry) => Number(entry.split(',')[1]));
+    expect(targetPoints?.[0]).toBeGreaterThan(targetPoints?.[1] || 0);
+    expect(targetPoints?.[1]).toBeGreaterThan(targetPoints?.[2] || 0);
   });
 });

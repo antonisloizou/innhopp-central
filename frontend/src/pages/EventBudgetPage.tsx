@@ -1617,6 +1617,25 @@ const EventBudgetPage = () => {
                     </g>
                   ) : null}
                   <polyline points={marginCurve.polylinePoints} className="budget-curve-line" />
+                  <polyline
+                    points={marginCurve.targetMarginPolylinePoints}
+                    className="budget-curve-line budget-curve-line-target"
+                  />
+                  {marginCurve.targetMarkupLabel ? (
+                    <text
+                      x={marginCurve.targetMarkupLabel.x}
+                      y={marginCurve.targetMarkupLabel.y}
+                      className="budget-curve-target-label"
+                      textAnchor="middle"
+                    >
+                      <tspan x={marginCurve.targetMarkupLabel.x} dy="0">
+                        Target Markup
+                      </tspan>
+                      <tspan x={marginCurve.targetMarkupLabel.x} dy="1.2em">
+                        {`${Math.round(marginCurve.targetMarkupLabel.percent)}%`}
+                      </tspan>
+                    </text>
+                  ) : null}
                   {marginCurve.markers.map((marker) => (
                     <g key={marker.key}>
                       <circle

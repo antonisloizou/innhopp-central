@@ -5391,6 +5391,11 @@ button.ghost.event-route-preview-overlay-button {
   stroke-linejoin: round;
 }
 
+.budget-curve-line-target {
+  stroke: rgba(226, 232, 240, 0.38);
+  stroke-dasharray: 7 3 1.5 3;
+}
+
 .budget-curve-hover-guide {
   stroke: rgba(203, 213, 225, 0.7);
   stroke-width: 1;
@@ -5428,6 +5433,13 @@ button.ghost.event-route-preview-overlay-button {
   font-family: inherit;
   font-size: 10px;
   font-weight: 400;
+}
+
+.budget-curve-target-label {
+  fill: var(--text-muted);
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 500;
 }
 
 .budget-curve-meta {

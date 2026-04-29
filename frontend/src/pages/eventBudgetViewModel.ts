@@ -44,6 +44,8 @@ export type MarginCurveMarker = {
 export type MarginCurveModel = {
   points: Array<{ participants: number; margin: number; x: number; y: number }>;
   polylinePoints: string;
+  targetMarginPolylinePoints: string;
+  targetMarkupLabel: { x: number; y: number; percent: number } | null;
   zeroY: number;
   yMax: number;
   yMin: number;
@@ -195,8 +197,35 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
     x: toX(point.participants),
     y: toY(point.margin)
   }));
+  const targetMarkupPercent = Math.max(0, Number(summary?.parameters?.target_markup_percent || 0));
+  const targetMarginPoints = sourceCurvePoints.map((point) => {
+    const matchingScenario = Object.values(summary?.scenarios || {}).find(
+      (scenario) => (scenario?.participants || 0) === point.participants
+    );
+    const scenarioCostWithDrift =
+      matchingScenario && Number.isFinite(matchingScenario.cost_with_drift)
+        ? matchingScenario.cost_with_drift
+        : summary?.cost_with_drift || 0;
+    const targetMargin = (scenarioCostWithDrift * targetMarkupPercent) / 100;
+    return {
+      participants: point.participants,
+      margin: targetMargin,
+      x: toX(point.participants),
+      y: toY(targetMargin)
+    };
+  });
   const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const targetMarginPolylinePoints = targetMarginPoints.map((point) => `${point.x},${point.y}`).join(' ');
   const zeroY = toY(0);
+  const avgTargetY =
+    targetMarginPoints.reduce((sum, point) => sum + point.y, 0) / Math.max(1, targetMarginPoints.length);
+  const targetMarkupLabel = targetMarginPoints.length
+    ? {
+        x: (plotLeft + plotRight) / 2,
+        y: Math.max(plotTop + 14, Math.min(plotBottom - 22, avgTargetY + 10)),
+        percent: targetMarkupPercent
+      }
+    : null;
 
   const markers = scenarioSpecs
     .map(({ key, label }) => {
@@ -232,9 +261,16 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
     const marker = sortedMarkers[index];
     const approxTextChars = Math.max(marker.label.length, 10);
     const approxLabelWidth = Math.min(120, Math.max(40, approxTextChars * 6));
+    const forceCenteredLabel = marker.key === 'confirm_case' || marker.key === 'full_capacity_case';
     const nearLeft = marker.x - approxLabelWidth / 2 < plotLeft + labelPadX;
     const nearRight = marker.x + approxLabelWidth / 2 > plotRight - labelPadX;
-    const labelAnchor: MarginCurveMarker['labelAnchor'] = nearLeft ? 'start' : nearRight ? 'end' : 'middle';
+    const labelAnchor: MarginCurveMarker['labelAnchor'] = forceCenteredLabel
+      ? 'middle'
+      : nearLeft
+        ? 'start'
+        : nearRight
+          ? 'end'
+          : 'middle';
     const labelX =
       labelAnchor === 'start'
         ? Math.min(plotRight - labelPadX, Math.max(plotLeft + labelPadX, marker.x + 2))
@@ -257,6 +293,8 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
   return {
     points,
     polylinePoints,
+    targetMarginPolylinePoints,
+    targetMarkupLabel,
     zeroY,
     yMax,
     yMin,

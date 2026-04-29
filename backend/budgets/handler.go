@@ -135,7 +135,7 @@ var defaultAssumptions = map[string]float64{
 	"aircraft_cruising_speed_kmh":             180,
 	"target_markup_percent":                   20,
 	"optional_tip_percent":                    8,
-	"cost_drift_percent":                      3,
+	"cost_drift_percent":                      10,
 	"budget_method":                           2, // 0=estimates, 1=line_items, 2=hybrid
 	"estimate_accommodation_per_person_night": 0,
 	"estimate_transport_per_day":              0,
