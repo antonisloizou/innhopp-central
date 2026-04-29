@@ -5500,6 +5500,11 @@ button.ghost.event-route-preview-overlay-button {
   gap: 0.35rem;
 }
 
+.budget-cost-split-item-total .field-label,
+.budget-cost-split-item-total .muted {
+  font-weight: 700;
+}
+
 .budget-cost-split-top {
   display: flex;
   justify-content: space-between;

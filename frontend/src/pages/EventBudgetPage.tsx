@@ -628,7 +628,6 @@ const EventBudgetPage = () => {
     e.preventDefault();
     if (!budget) return;
     if (!newLineItem.section_id || !newLineItem.name.trim()) {
-      setMessage('Section and item name are required');
       return;
     }
     setSavingLineItem(true);

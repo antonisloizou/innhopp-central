@@ -122,7 +122,7 @@ var defaultSections = []struct {
 	{Code: "transport_activities", Name: "Transport"},
 	{Code: "entertainment", Name: "Entertainment & Activities"},
 	{Code: "payable_crew", Name: "Payable Crew"},
-	{Code: "optional_add_on", Name: "Optional Add-on"},
+	{Code: "optional_add_on", Name: "Other"},
 }
 
 var defaultAssumptions = map[string]float64{
