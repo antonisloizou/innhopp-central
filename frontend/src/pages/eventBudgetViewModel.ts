@@ -217,12 +217,34 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
   const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
   const targetMarginPolylinePoints = targetMarginPoints.map((point) => `${point.x},${point.y}`).join(' ');
   const zeroY = toY(0);
-  const avgTargetY =
-    targetMarginPoints.reduce((sum, point) => sum + point.y, 0) / Math.max(1, targetMarginPoints.length);
+  const midX = (plotLeft + plotRight) / 2;
+  const interpolateYAtX = (series: Array<{ x: number; y: number }>, x: number) => {
+    if (!series.length) return plotTop;
+    if (series.length === 1) return series[0].y;
+    const sorted = [...series].sort((a, b) => a.x - b.x);
+    if (x <= sorted[0].x) return sorted[0].y;
+    if (x >= sorted[sorted.length - 1].x) return sorted[sorted.length - 1].y;
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const left = sorted[i];
+      const right = sorted[i + 1];
+      if (x >= left.x && x <= right.x) {
+        const dx = right.x - left.x || 1;
+        const ratio = (x - left.x) / dx;
+        return left.y + (right.y - left.y) * ratio;
+      }
+    }
+    return sorted[0].y;
+  };
+  const targetYAtMid = interpolateYAtX(targetMarginPoints, midX);
+  const profitabilityYAtMid = interpolateYAtX(points, midX);
+  const targetAboveProfitability = targetYAtMid < profitabilityYAtMid;
   const targetMarkupLabel = targetMarginPoints.length
     ? {
-        x: (plotLeft + plotRight) / 2,
-        y: Math.max(plotTop + 14, Math.min(plotBottom - 22, avgTargetY + 10)),
+        x: midX,
+        y: Math.max(
+          plotTop + 14,
+          Math.min(plotBottom - 22, targetYAtMid + (targetAboveProfitability ? -8 : 10))
+        ),
         percent: targetMarkupPercent
       }
     : null;
