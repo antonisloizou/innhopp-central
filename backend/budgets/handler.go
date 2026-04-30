@@ -2086,12 +2086,18 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		}
 
 		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
-		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && landingDistanceByAirKm <= 0)
+		// If landing airfield differs but landing->innhopp is effectively zero,
+		// use takeoff->innhopp distance for both legs instead of falling back to minimum duration.
+		effectiveLandingDistanceByAirKm := landingDistanceByAirKm
+		if !sameAirfield && effectiveLandingDistanceByAirKm <= 0 && distanceByAirKm > 0 {
+			effectiveLandingDistanceByAirKm = distanceByAirKm
+		}
+		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && effectiveLandingDistanceByAirKm <= 0)
 		totalDistanceKm := 0.0
 		if sameAirfield {
 			totalDistanceKm = distanceByAirKm * 2 * float64(fullLoadCount)
 		} else {
-			perLoadedTripKm := distanceByAirKm + landingDistanceByAirKm
+			perLoadedTripKm := distanceByAirKm + effectiveLandingDistanceByAirKm
 			totalDistanceKm = perLoadedTripKm*float64(fullLoadCount) + perLoadedTripKm*math.Max(float64(fullLoadCount-1), 0)
 		}
 		totalMinutes := 0.0
@@ -2280,7 +2286,11 @@ func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int6
 			aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
 			continue
 		}
-		perLoadedTripKm := distanceByAirKm + landingDistanceByAirKm
+		effectiveLandingDistanceByAirKm := landingDistanceByAirKm
+		if effectiveLandingDistanceByAirKm <= 0 && distanceByAirKm > 0 {
+			effectiveLandingDistanceByAirKm = distanceByAirKm
+		}
+		perLoadedTripKm := distanceByAirKm + effectiveLandingDistanceByAirKm
 		totalDistanceKm := perLoadedTripKm*float64(loadCount) + perLoadedTripKm*math.Max(float64(loadCount-1), 0)
 		aggregateDistance += totalDistanceKm
 		totalMinutes := 0.0

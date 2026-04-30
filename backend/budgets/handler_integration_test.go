@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +114,76 @@ func TestUpdateBudgetBlocksReviewWhenWorstCaseNegative(t *testing.T) {
 	}
 	if deficit, ok := payload["margin_deficit"].(float64); !ok || deficit <= 0 {
 		t.Fatalf("margin_deficit mismatch: got %v", payload["margin_deficit"])
+	}
+}
+
+func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'full_load_count' THEN 2
+           WHEN 'aircraft_cruising_speed_kmh' THEN 60
+           WHEN 'minimum_load_duration' THEN 1
+           WHEN 'aircraft_price_per_minute' THEN 1
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('full_load_count', 'aircraft_cruising_speed_kmh', 'minimum_load_duration', 'aircraft_price_per_minute')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var innhoppID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, takeoff_airfield_id, landing_airfield_id, distance_by_air, landing_distance_by_air)
+         VALUES ($1, 1, 'Split Route', 100, 200, 10, 15)
+         RETURNING id`,
+		eventID,
+	).Scan(&innhoppID); err != nil {
+		t.Fatalf("insert innhopp failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	if err := h.syncAutoAircraftLineItems(ctx, budgetID); err != nil {
+		t.Fatalf("sync auto aircraft line items failed: %v", err)
+	}
+
+	var qty float64
+	var notes string
+	if err := db.QueryRow(
+		ctx,
+		`SELECT quantity, COALESCE(notes, '')
+         FROM budget_line_items
+         WHERE budget_id = $1
+           AND notes LIKE '[auto-aircraft-innhopp]:' || $2
+         LIMIT 1`,
+		budgetID,
+		strconv.FormatInt(innhoppID, 10)+"%",
+	).Scan(&qty, &notes); err != nil {
+		t.Fatalf("load generated line item failed: %v", err)
+	}
+
+	// full_load_count=2, perLoadedTripKm=(10+15)=25, totalDistanceKm=25*2 + 25*(2-1)=75
+	// speed=60km/h => 75 minutes, minimum total=2 minutes, so quantity should be 75.
+	if qty != 75 {
+		t.Fatalf("quantity mismatch: got %.2f want 75.00", qty)
+	}
+	if strings.Contains(notes, ":missing-distance") {
+		t.Fatalf("unexpected missing-distance marker in notes: %q", notes)
 	}
 }
 
