@@ -582,7 +582,6 @@ const EventBudgetPage = () => {
         assumptionsPayload[key] = rawAmount / sourceRate;
       });
       await updateBudgetAssumptions(budget.id, assumptionsPayload);
-      setParameters(assumptionsPayload);
       const nextCurrencies = currenciesResp.currencies?.length
         ? dedupeCurrencies(currenciesResp.currencies)
         : [resolvedBaseCurrency];
