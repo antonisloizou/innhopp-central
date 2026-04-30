@@ -97,6 +97,7 @@ const formatMinutesAsHours = (minutes: number) => {
   const safeMinutes = Math.max(0, Math.round(Number(minutes) || 0));
   const hours = Math.floor(safeMinutes / 60);
   const remainingMinutes = safeMinutes % 60;
+  if (hours === 0) return `${remainingMinutes} min`;
   return `${hours} hrs ${remainingMinutes} min`;
 };
 
