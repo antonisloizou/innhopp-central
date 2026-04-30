@@ -87,7 +87,7 @@ const loadGoogleMapsApi = () => {
 };
 
 const formatDurationMinutes = (minutes?: number | null) => {
-  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Unavailable';
+  if (!Number.isFinite(minutes) || (minutes as number) < 0) return 'Unavailable';
   const total = Math.round(minutes as number);
   const hours = Math.floor(total / 60);
   const mins = total % 60;
@@ -249,12 +249,14 @@ const InnhoppDetailPage = () => {
   const lastLandingDrivingUnavailableReasonRef = useRef<string | null>(null);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const flyingDurationMinutes = useMemo(() => {
-    if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) <= 0) return null;
+    if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) < 0) return null;
+    if ((form.distance_by_air as number) === 0) return 0;
     if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
     return Math.round(((form.distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
   }, [form.distance_by_air, budgetAircraftSpeedKmh]);
   const landingFlyingDurationMinutes = useMemo(() => {
-    if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) <= 0) return null;
+    if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) < 0) return null;
+    if ((form.landing_distance_by_air as number) === 0) return 0;
     if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
     return Math.round(((form.landing_distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
   }, [form.landing_distance_by_air, budgetAircraftSpeedKmh]);
@@ -770,7 +772,7 @@ const InnhoppDetailPage = () => {
       return;
     }
     const km = haversineKm(innhoppCoords, takeoffCoords);
-    const rounded = Math.ceil(km);
+    const rounded = km < 1 ? 0 : Math.ceil(km);
     setForm((prev) => {
       if (prev.distance_by_air === rounded) return prev;
       return { ...prev, distance_by_air: rounded };
@@ -813,6 +815,16 @@ const InnhoppDetailPage = () => {
       setLandingDrivingDurationMinutes(null);
       setLandingRoadRouteError(null);
       setLandingRoadRouteLoading(false);
+      return;
+    }
+    if (haversineKm(landingCoords, innhoppCoords) < 1) {
+      setLandingDrivingDurationMinutes(0);
+      setLandingRoadRouteError(null);
+      setLandingRoadRouteLoading(false);
+      setForm((prev) => {
+        if (prev.landing_distance_by_road === 0) return prev;
+        return { ...prev, landing_distance_by_road: 0 };
+      });
       return;
     }
     if (!hasConfiguredGoogleMapsApiKey) {
@@ -883,7 +895,7 @@ const InnhoppDetailPage = () => {
     const landingCoords = parseCoordinates(landing?.coordinates);
     if (!innhoppCoords || !landingCoords) return;
     const km = haversineKm(innhoppCoords, landingCoords);
-    const rounded = Math.ceil(km);
+    const rounded = km < 1 ? 0 : Math.ceil(km);
     setForm((prev) => {
       if (prev.landing_distance_by_air === rounded) return prev;
       return { ...prev, landing_distance_by_air: rounded };
@@ -926,6 +938,16 @@ const InnhoppDetailPage = () => {
       setDrivingDurationMinutes(null);
       setRoadRouteError(null);
       setRoadRouteLoading(false);
+      return;
+    }
+    if (haversineKm(takeoffCoords, innhoppCoords) < 1) {
+      setDrivingDurationMinutes(0);
+      setRoadRouteError(null);
+      setRoadRouteLoading(false);
+      setForm((prev) => {
+        if (prev.distance_by_road === 0) return prev;
+        return { ...prev, distance_by_road: 0 };
+      });
       return;
     }
     if (!hasConfiguredGoogleMapsApiKey) {
