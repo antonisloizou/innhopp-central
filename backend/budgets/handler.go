@@ -2210,7 +2210,11 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		}
 
 		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
-		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && landingDistanceByAirKm < 0)
+		// Zero-distance jumps at the takeoff airfield are legitimate and should not warn.
+		missingDistance := distanceByAirKm < 0
+		if !sameAirfield {
+			missingDistance = distanceByAirKm <= 0 || landingDistanceByAirKm < 0
+		}
 		totalDistanceKm := 0.0
 		if sameAirfield {
 			totalDistanceKm = distanceByAirKm * 2 * float64(fullLoadCount)
