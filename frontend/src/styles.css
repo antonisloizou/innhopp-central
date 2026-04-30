@@ -5923,6 +5923,18 @@ button.ghost.event-route-preview-overlay-button {
   overflow-x: auto;
 }
 
+.budget-line-items-card .table-wrap {
+  max-height: calc(2.8rem + (10 * 3rem));
+  overflow-y: auto;
+}
+
+.budget-line-items-card .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(var(--surface-rgb), 0.97);
+}
+
 @media (min-width: 960px) {
   .budget-bars-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

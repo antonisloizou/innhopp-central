@@ -30,7 +30,7 @@ export type BudgetLineItem = {
   section_name?: string;
   name: string;
   service_date?: string | null;
-  location_label?: string;
+  description?: string;
   quantity: number;
   unit_cost: number;
   cost_currency: string;
@@ -136,7 +136,7 @@ export const createBudgetLineItem = (
     innhopp_id?: number;
     name: string;
     service_date?: string;
-    location_label?: string;
+    description?: string;
     quantity?: number;
     unit_cost?: number;
     cost_currency?: string;
@@ -157,7 +157,7 @@ export const updateBudgetLineItem = (
     innhopp_id?: number;
     name: string;
     service_date?: string;
-    location_label?: string;
+    description?: string;
     quantity?: number;
     unit_cost?: number;
     cost_currency?: string;

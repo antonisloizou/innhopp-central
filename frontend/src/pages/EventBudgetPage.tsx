@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Fragment, MouseEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Budget,
@@ -17,6 +17,7 @@ import {
   previewBudgetCurrencyRates,
   updateBudget,
   updateBudgetAssumptions,
+  updateBudgetLineItem,
   updateBudgetCurrencies
 } from '../api/budgets';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
@@ -84,6 +85,9 @@ const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = 
   full: 'full_capacity_case'
 };
 const AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER = ':missing-distance';
+const AUTO_AIRCRAFT_LINE_ITEM_PREFIX = '[auto-aircraft-innhopp]:';
+const AUTO_ESTIMATE_LINE_ITEM_PREFIX = '[auto-estimate]:';
+const AUTO_ESTIMATE_WARNING_MARKER = ':estimate-generated';
 const formatQty = (value: number) => {
   if (!Number.isFinite(value)) return '0';
   if (Number.isInteger(value)) return String(value);
@@ -99,6 +103,8 @@ const EventBudgetPage = () => {
   const [savingParameters, setSavingParameters] = useState(false);
   const [savingLineItem, setSavingLineItem] = useState(false);
   const [addingLineItem, setAddingLineItem] = useState(false);
+  const [editingLineItemID, setEditingLineItemID] = useState<number | null>(null);
+  const [openLineItemActionsFor, setOpenLineItemActionsFor] = useState<number | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -123,6 +129,7 @@ const EventBudgetPage = () => {
   const [costSplitTab, setCostSplitTab] = useState<CostSplitTabKey>('section');
   const [costSplitScenario, setCostSplitScenario] = useState<LabelScenarioKey>('full');
   const [lineItemsScenario, setLineItemsScenario] = useState<LabelScenarioKey>('full');
+  const [lineItemsSectionFilter, setLineItemsSectionFilter] = useState<string>('all');
   const [parametersTab, setParametersTab] = useState<ParametersTabKey>('load');
   const [estimateCurrencies, setEstimateCurrencies] = useState<Record<string, string>>({
     estimate_accommodation_per_person_night: 'EUR',
@@ -178,7 +185,7 @@ const EventBudgetPage = () => {
     section_id: '',
     name: '',
     service_date: '',
-    location_label: '',
+    description: '',
     quantity: '1',
     unit_cost: '',
     cost_currency: 'EUR',
@@ -237,10 +244,23 @@ const EventBudgetPage = () => {
   const formatParticipants = (value: number) => {
     return String(Math.round(value));
   };
+  const formatLineItemDate = (value?: string | null) => {
+    if (!value) return '-';
+    const raw = value.slice(0, 10);
+    const parts = raw.split('-');
+    if (parts.length !== 3) return raw;
+    const [year, month, day] = parts;
+    return `${day}-${month}-${year}`;
+  };
   const formatBaseMoney = (amount: number, currencyCode?: string) =>
     new Intl.NumberFormat('en-GB', {
       style: 'currency',
       currency: currencyCode || 'EUR',
+      maximumFractionDigits: 2
+    }).format(amount || 0);
+  const formatMoneyNumber = (amount: number) =>
+    new Intl.NumberFormat('en-GB', {
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2
     }).format(amount || 0);
   const convertAmountToDisplayCurrency = (amount: number, sourceCurrency: string) => {
@@ -637,30 +657,36 @@ const EventBudgetPage = () => {
     setSavingLineItem(true);
     setMessage(null);
     try {
-      await createBudgetLineItem(budget.id, {
+      const payload = {
         section_id: Number(newLineItem.section_id),
         name: newLineItem.name.trim(),
         service_date: newLineItem.service_date || undefined,
-        location_label: newLineItem.location_label || undefined,
+        description: newLineItem.description || undefined,
         quantity: Number(newLineItem.quantity || '1'),
         unit_cost: Number(newLineItem.unit_cost || '0'),
         cost_currency: newLineItem.cost_currency || baseCurrency,
         notes: newLineItem.notes || undefined
-      });
+      };
+      if (editingLineItemID) {
+        await updateBudgetLineItem(budget.id, editingLineItemID, payload);
+      } else {
+        await createBudgetLineItem(budget.id, payload);
+      }
       setNewLineItem((prev) => ({
         ...prev,
         name: '',
         service_date: '',
-        location_label: '',
+        description: '',
         quantity: '1',
         unit_cost: '',
         cost_currency: baseCurrency,
         notes: ''
       }));
       setAddingLineItem(false);
+      setEditingLineItemID(null);
       await loadBudgetData(activeEventID);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Failed to add line item');
+      setMessage(err instanceof Error ? err.message : editingLineItemID ? 'Failed to update line item' : 'Failed to add line item');
     } finally {
       setSavingLineItem(false);
     }
@@ -675,6 +701,25 @@ const EventBudgetPage = () => {
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to delete line item');
     }
+  };
+  const isAutogeneratedLineItem = (item: BudgetLineItem) => {
+    const notes = (item.notes || '').trim().toLowerCase();
+    return notes.startsWith('[auto-estimate]') || notes.startsWith('[auto-aircraft-innhopp]');
+  };
+  const onEditLineItem = (item: BudgetLineItem) => {
+    setNewLineItem({
+      section_id: String(item.section_id),
+      name: item.name || '',
+      service_date: item.service_date ? item.service_date.slice(0, 10) : '',
+      description: item.description || '',
+      quantity: String(item.quantity ?? 1),
+      unit_cost: String(item.unit_cost ?? ''),
+      cost_currency: item.cost_currency || baseCurrency,
+      notes: item.notes || ''
+    });
+    setEditingLineItemID(item.id);
+    setAddingLineItem(true);
+    setOpenLineItemActionsFor(null);
   };
 
   const onSubmitForReview = async () => {
@@ -818,8 +863,16 @@ const EventBudgetPage = () => {
     () => new Map((activeEventData?.innhopps || []).map((innhopp) => [innhopp.id, innhopp])),
     [activeEventData?.innhopps]
   );
-  const hasMissingDistanceWarning = (notes?: string) =>
-    typeof notes === 'string' && notes.includes(AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER);
+  const warningMessageForNotes = (notes?: string) => {
+    if (typeof notes !== 'string') return null;
+    if (notes.includes(AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER)) {
+      return 'Distance missing; minimum load duration used.';
+    }
+    if (notes.includes(AUTO_ESTIMATE_LINE_ITEM_PREFIX) || notes.includes(AUTO_ESTIMATE_WARNING_MARKER)) {
+      return 'Estimate-generated fallback line item.';
+    }
+    return null;
+  };
   const aircraftPerInnhoppRows = useMemo(() => {
     const seedRows = (activeEventData?.innhopps || []).map((innhopp) => {
       const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
@@ -848,7 +901,7 @@ const EventBudgetPage = () => {
       .forEach((item) => {
         const innhopp = innhoppsByID.get(item.innhopp_id);
         const existing = byInnhoppID.get(item.innhopp_id);
-        const fallbackName = item.location_label || item.name || `Innhopp ${item.innhopp_id}`;
+        const fallbackName = item.description || item.name || `Innhopp ${item.innhopp_id}`;
         const normalizedName = fallbackName.trim().replace(/^#\d+\s+/, '');
         const cleanName = normalizedName || `Innhopp ${item.innhopp_id}`;
         const label =
@@ -862,7 +915,7 @@ const EventBudgetPage = () => {
           existing.totalCost += Number(item.line_total || 0);
           existing.displayTotalCost += converted;
           existing.hasMissingDistanceWarning =
-            existing.hasMissingDistanceWarning || hasMissingDistanceWarning(item.notes);
+            existing.hasMissingDistanceWarning || warningMessageForNotes(item.notes) !== null;
           return;
         }
         byInnhoppID.set(item.innhopp_id, {
@@ -875,7 +928,7 @@ const EventBudgetPage = () => {
           totalCost: Number(item.line_total || 0),
           displayTotalCost: converted,
           costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency,
-          hasMissingDistanceWarning: hasMissingDistanceWarning(item.notes)
+          hasMissingDistanceWarning: warningMessageForNotes(item.notes) !== null
         });
       });
     return Array.from(byInnhoppID.values()).sort(
@@ -1064,30 +1117,57 @@ const EventBudgetPage = () => {
     activeEventData?.ends_at
   ]);
   const lineItemsScales = getScenarioScales(lineItemsScenario);
+  const lineItemsSectionOptions = useMemo(
+    () =>
+      sections.map((section) => ({
+        id: String(section.id),
+        name: section.name
+      })),
+    [sections]
+  );
   const scenarioLineItems = useMemo<
     Array<BudgetLineItem & { scenario_quantity: number; scenario_line_total: number }>
   >(
     () =>
-      lineItems.map((item) => {
-        const sectionCode = (item.section_code || '').trim().toLowerCase();
-        const isAircraft = sectionCode === 'aircraft';
-        const isPayableCrew = sectionCode === 'payable_crew';
-        const isFoodAccommodation = sectionCode === 'food_accommodation';
-        const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode) ? lineItemsScales.aircraftScale : 1;
-        const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
-        const scaledQuantity = Number(item.quantity || 0) * loadScale;
-        const scenarioQuantity = isAircraft ? Math.ceil(scaledQuantity) : scaledQuantity;
-        const scenarioScale = loadScale * paxScale * lineItemsScales.driftScale;
-        const scenarioLineTotal = isAircraft
-          ? scenarioQuantity * Number(item.unit_cost || 0) * lineItemsScales.driftScale
-          : Number(item.line_total || 0) * scenarioScale;
-        return {
-          ...item,
-          scenario_quantity: scenarioQuantity,
-          scenario_line_total: scenarioLineTotal
-        };
-      }),
-    [lineItems, lineItemsScales.aircraftScale, lineItemsScales.participantScale, lineItemsScales.driftScale, isLoadBasedCrewMode, isEstimateOrHybridMode]
+      lineItems
+        .filter((item) => lineItemsSectionFilter === 'all' || String(item.section_id) === lineItemsSectionFilter)
+        .sort((a, b) => {
+          const aDate = a.service_date ? a.service_date.slice(0, 10) : '9999-12-31';
+          const bDate = b.service_date ? b.service_date.slice(0, 10) : '9999-12-31';
+          if (aDate !== bDate) return aDate.localeCompare(bDate);
+          const aSection = a.section_name || a.section_code || '';
+          const bSection = b.section_name || b.section_code || '';
+          if (aSection !== bSection) return aSection.localeCompare(bSection);
+          return a.id - b.id;
+        })
+        .map((item) => {
+          const sectionCode = (item.section_code || '').trim().toLowerCase();
+          const isAircraft = sectionCode === 'aircraft';
+          const isPayableCrew = sectionCode === 'payable_crew';
+          const isFoodAccommodation = sectionCode === 'food_accommodation';
+          const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode) ? lineItemsScales.aircraftScale : 1;
+          const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
+          const scaledQuantity = Number(item.quantity || 0) * loadScale;
+          const scenarioQuantity = isAircraft ? Math.ceil(scaledQuantity) : scaledQuantity;
+          const scenarioScale = loadScale * paxScale * lineItemsScales.driftScale;
+          const scenarioLineTotal = isAircraft
+            ? scenarioQuantity * Number(item.unit_cost || 0) * lineItemsScales.driftScale
+            : Number(item.line_total || 0) * scenarioScale;
+          return {
+            ...item,
+            scenario_quantity: scenarioQuantity,
+            scenario_line_total: scenarioLineTotal
+          };
+        }),
+    [
+      lineItems,
+      lineItemsSectionFilter,
+      lineItemsScales.aircraftScale,
+      lineItemsScales.participantScale,
+      lineItemsScales.driftScale,
+      isLoadBasedCrewMode,
+      isEstimateOrHybridMode
+    ]
   );
   const scenarioForCard = (card: OverviewScenarioCardKey) =>
     summary?.scenarios?.[scenarioSummaryKeyByLabel[overviewScenarios[card]]] || null;
@@ -2410,6 +2490,37 @@ const EventBudgetPage = () => {
                       </select>
                     </label>
                   </div>
+                  <div className="budget-cost-split-scenario-row">
+                    <div className="budget-parameters-tabs" role="tablist" aria-label="Line item section filters">
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={lineItemsSectionFilter === 'all'}
+                        className={lineItemsSectionFilter === 'all' ? 'primary' : 'ghost'}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLineItemsSectionFilter('all');
+                        }}
+                      >
+                        All
+                      </button>
+                      {lineItemsSectionOptions.map((section) => (
+                        <button
+                          key={section.id}
+                          type="button"
+                          role="tab"
+                          aria-selected={lineItemsSectionFilter === section.id}
+                          className={lineItemsSectionFilter === section.id ? 'primary' : 'ghost'}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLineItemsSectionFilter(section.id);
+                          }}
+                        >
+                          {section.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </header>
@@ -2451,11 +2562,11 @@ const EventBudgetPage = () => {
                 />
               </label>
               <label className="form-field">
-                <span>Location</span>
+                <span>Description</span>
                 <input
-                  value={newLineItem.location_label}
+                  value={newLineItem.description}
                   onChange={(e) =>
-                    setNewLineItem((prev) => ({ ...prev, location_label: e.target.value }))
+                    setNewLineItem((prev) => ({ ...prev, description: e.target.value }))
                   }
                 />
               </label>
@@ -2520,14 +2631,17 @@ const EventBudgetPage = () => {
                       }
                 }
               >
-                {savingLineItem ? 'Saving…' : addingLineItem ? 'Save' : 'Add'}
+                {savingLineItem ? 'Saving…' : addingLineItem ? (editingLineItemID ? 'Update' : 'Save') : 'Add'}
               </button>
               {addingLineItem ? (
                 <button
                   type="button"
                   className="ghost"
                   disabled={savingLineItem}
-                  onClick={() => setAddingLineItem(false)}
+                  onClick={() => {
+                    setAddingLineItem(false);
+                    setEditingLineItemID(null);
+                  }}
                 >
                   Cancel
                 </button>
@@ -2539,57 +2653,97 @@ const EventBudgetPage = () => {
               <table className="table">
                 <thead>
                   <tr>
+                    <th>#</th>
                     <th>Section</th>
                     <th>Item</th>
                     <th>Date</th>
-                    <th>Location</th>
+                    <th>Description</th>
                     <th>Qty</th>
                     <th>Unit Cost</th>
-                    <th>Currency</th>
                     <th>Line Total</th>
-                    <th />
+                    <th>Currency</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {scenarioLineItems.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.section_name || item.section_code || '-'}</td>
-                      <td>
-                        {item.name}
-                      </td>
-                      <td>{item.service_date ? item.service_date.slice(0, 10) : '-'}</td>
-                      <td>{item.location_label || '-'}</td>
-                      <td>
-                        {formatQty(item.scenario_quantity)}
-                        {hasMissingDistanceWarning(item.notes) ? (
-                          <sup
-                            className="nav-user-warning budget-warning-sup"
-                            title="Distance missing; minimum load duration used."
-                            aria-label="Distance missing; minimum load duration used."
-                          >
-                            !
-                          </sup>
-                        ) : null}
-                      </td>
-                      <td>{formatBaseMoney(item.unit_cost || 0, item.cost_currency || baseCurrency)}</td>
-                      <td>{item.cost_currency || baseCurrency}</td>
-                      <td>
-                        {formatBaseMoney(
-                          item.scenario_line_total || 0,
-                          item.cost_currency || baseCurrency
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => void onDeleteLineItem(item.id)}
+                  {scenarioLineItems.map((item, index) => {
+                    const isActionsOpen = openLineItemActionsFor === item.id;
+                    const canDelete = !isAutogeneratedLineItem(item);
+                    const isAircraftItem = (item.section_code || '').trim().toLowerCase() === 'aircraft';
+                    const hasInnhoppLink = isAircraftItem && typeof item.innhopp_id === 'number' && item.innhopp_id > 0;
+                    return (
+                      <Fragment key={item.id}>
+                        <tr
+                          onClick={() => setOpenLineItemActionsFor((prev) => (prev === item.id ? null : item.id))}
+                          style={{ cursor: 'pointer' }}
                         >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          <td>
+                            {index + 1}
+                            {warningMessageForNotes(item.notes) ? (
+                              <sup
+                                className="nav-user-warning budget-warning-sup"
+                                title={warningMessageForNotes(item.notes) || undefined}
+                                aria-label={warningMessageForNotes(item.notes) || undefined}
+                              >
+                                !
+                              </sup>
+                            ) : null}
+                          </td>
+                          <td>{item.section_name || item.section_code || '-'}</td>
+                          <td>
+                            {item.name}
+                          </td>
+                          <td>{formatLineItemDate(item.service_date)}</td>
+                          <td>{item.description || '-'}</td>
+                          <td>{formatQty(item.scenario_quantity)}</td>
+                          <td>{formatMoneyNumber(item.unit_cost || 0)}</td>
+                          <td>{formatMoneyNumber(item.scenario_line_total || 0)}</td>
+                          <td>{item.cost_currency || baseCurrency}</td>
+                        </tr>
+                        {isActionsOpen ? (
+                          <tr>
+                            <td colSpan={9}>
+                              <div className="form-actions">
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEditLineItem(item);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                                {canDelete ? (
+                                  <button
+                                    type="button"
+                                    className="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      void onDeleteLineItem(item.id);
+                                    }}
+                                  >
+                                    Delete
+                                  </button>
+                                ) : null}
+                                {hasInnhoppLink ? (
+                                  <button
+                                    type="button"
+                                    className="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/events/${activeEventID}/innhopps/${item.innhopp_id}`);
+                                    }}
+                                  >
+                                    Open innhopp details
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

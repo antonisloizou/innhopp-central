@@ -51,23 +51,23 @@ type BudgetSection struct {
 }
 
 type BudgetLineItem struct {
-	ID            int64      `json:"id"`
-	BudgetID      int64      `json:"budget_id"`
-	SectionID     int64      `json:"section_id"`
-	InnhoppID     *int64     `json:"innhopp_id,omitempty"`
-	SectionCode   string     `json:"section_code,omitempty"`
-	SectionName   string     `json:"section_name,omitempty"`
-	Name          string     `json:"name"`
-	ServiceDate   *time.Time `json:"service_date,omitempty"`
-	LocationLabel string     `json:"location_label,omitempty"`
-	Quantity      float64    `json:"quantity"`
-	UnitCost      float64    `json:"unit_cost"`
-	CostCurrency  string     `json:"cost_currency"`
-	LineTotal     float64    `json:"line_total"`
-	SortOrder     int        `json:"sort_order"`
-	Notes         string     `json:"notes,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID           int64      `json:"id"`
+	BudgetID     int64      `json:"budget_id"`
+	SectionID    int64      `json:"section_id"`
+	InnhoppID    *int64     `json:"innhopp_id,omitempty"`
+	SectionCode  string     `json:"section_code,omitempty"`
+	SectionName  string     `json:"section_name,omitempty"`
+	Name         string     `json:"name"`
+	ServiceDate  *time.Time `json:"service_date,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Quantity     float64    `json:"quantity"`
+	UnitCost     float64    `json:"unit_cost"`
+	CostCurrency string     `json:"cost_currency"`
+	LineTotal    float64    `json:"line_total"`
+	SortOrder    int        `json:"sort_order"`
+	Notes        string     `json:"notes,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 type BudgetCurrency struct {
@@ -153,6 +153,8 @@ var estimateAssumptionKeys = map[string]struct{}{
 
 const autoAircraftInnhoppNotePrefix = "[auto-aircraft-innhopp]"
 const autoAircraftMissingDistanceSuffix = ":missing-distance"
+const autoEstimateLineItemNotePrefix = "[auto-estimate]"
+const autoEstimateWarningSuffix = ":estimate-generated"
 const legacyPlannedLoadCountKey = "planned_load_count"
 const fullLoadCountKey = "full_load_count"
 
@@ -630,7 +632,7 @@ func (h *Handler) listLineItems(w http.ResponseWriter, r *http.Request) {
          FROM budget_line_items li
          JOIN budget_sections s ON s.id = li.section_id
          WHERE li.budget_id = $1
-         ORDER BY s.sort_order ASC, li.sort_order ASC, li.id ASC`,
+         ORDER BY li.service_date ASC NULLS LAST, s.sort_order ASC, li.sort_order ASC, li.id ASC`,
 		budgetID,
 	)
 	if err != nil {
@@ -643,7 +645,7 @@ func (h *Handler) listLineItems(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item BudgetLineItem
 		if err := rows.Scan(
-			&item.ID, &item.BudgetID, &item.SectionID, &item.SectionCode, &item.SectionName, &item.Name, &item.ServiceDate, &item.LocationLabel,
+			&item.ID, &item.BudgetID, &item.SectionID, &item.SectionCode, &item.SectionName, &item.Name, &item.ServiceDate, &item.Description,
 			&item.InnhoppID, &item.Quantity, &item.UnitCost, &item.CostCurrency, &item.SortOrder, &item.Notes, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse line item")
@@ -669,6 +671,7 @@ func (h *Handler) createLineItem(w http.ResponseWriter, r *http.Request) {
 		InnhoppID     *int64  `json:"innhopp_id"`
 		Name          string  `json:"name"`
 		ServiceDate   string  `json:"service_date"`
+		Description   string  `json:"description"`
 		LocationLabel string  `json:"location_label"`
 		Quantity      float64 `json:"quantity"`
 		UnitCost      float64 `json:"unit_cost"`
@@ -712,14 +715,19 @@ func (h *Handler) createLineItem(w http.ResponseWriter, r *http.Request) {
 		serviceDate = &parsed
 	}
 
+	description := strings.TrimSpace(payload.Description)
+	if description == "" {
+		description = strings.TrimSpace(payload.LocationLabel)
+	}
+
 	var item BudgetLineItem
 	err := h.db.QueryRow(
 		r.Context(),
 		`INSERT INTO budget_line_items (budget_id, section_id, innhopp_id, name, service_date, location_label, quantity, unit_cost, cost_currency, sort_order, notes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, budget_id, section_id, innhopp_id, name, service_date, location_label, quantity, unit_cost, cost_currency, sort_order, notes, created_at, updated_at`,
-		budgetID, payload.SectionID, payload.InnhoppID, strings.TrimSpace(payload.Name), serviceDate, strings.TrimSpace(payload.LocationLabel), quantity, unitCost, costCurrency, payload.SortOrder, strings.TrimSpace(payload.Notes),
-	).Scan(&item.ID, &item.BudgetID, &item.SectionID, &item.InnhoppID, &item.Name, &item.ServiceDate, &item.LocationLabel, &item.Quantity, &item.UnitCost, &item.CostCurrency, &item.SortOrder, &item.Notes, &item.CreatedAt, &item.UpdatedAt)
+		budgetID, payload.SectionID, payload.InnhoppID, strings.TrimSpace(payload.Name), serviceDate, description, quantity, unitCost, costCurrency, payload.SortOrder, strings.TrimSpace(payload.Notes),
+	).Scan(&item.ID, &item.BudgetID, &item.SectionID, &item.InnhoppID, &item.Name, &item.ServiceDate, &item.Description, &item.Quantity, &item.UnitCost, &item.CostCurrency, &item.SortOrder, &item.Notes, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create line item")
 		return
@@ -746,6 +754,7 @@ func (h *Handler) updateLineItem(w http.ResponseWriter, r *http.Request) {
 		InnhoppID     *int64  `json:"innhopp_id"`
 		Name          string  `json:"name"`
 		ServiceDate   string  `json:"service_date"`
+		Description   string  `json:"description"`
 		LocationLabel string  `json:"location_label"`
 		Quantity      float64 `json:"quantity"`
 		UnitCost      float64 `json:"unit_cost"`
@@ -789,6 +798,11 @@ func (h *Handler) updateLineItem(w http.ResponseWriter, r *http.Request) {
 		serviceDate = &parsed
 	}
 
+	description := strings.TrimSpace(payload.Description)
+	if description == "" {
+		description = strings.TrimSpace(payload.LocationLabel)
+	}
+
 	var item BudgetLineItem
 	err := h.db.QueryRow(
 		r.Context(),
@@ -796,8 +810,8 @@ func (h *Handler) updateLineItem(w http.ResponseWriter, r *http.Request) {
          SET section_id = $1, innhopp_id = $2, name = $3, service_date = $4, location_label = $5, quantity = $6, unit_cost = $7, cost_currency = $8, sort_order = $9, notes = $10, updated_at = NOW()
          WHERE id = $11 AND budget_id = $12
          RETURNING id, budget_id, section_id, innhopp_id, name, service_date, location_label, quantity, unit_cost, cost_currency, sort_order, notes, created_at, updated_at`,
-		payload.SectionID, payload.InnhoppID, strings.TrimSpace(payload.Name), serviceDate, strings.TrimSpace(payload.LocationLabel), quantity, unitCost, costCurrency, payload.SortOrder, strings.TrimSpace(payload.Notes), lineItemID, budgetID,
-	).Scan(&item.ID, &item.BudgetID, &item.SectionID, &item.InnhoppID, &item.Name, &item.ServiceDate, &item.LocationLabel, &item.Quantity, &item.UnitCost, &item.CostCurrency, &item.SortOrder, &item.Notes, &item.CreatedAt, &item.UpdatedAt)
+		payload.SectionID, payload.InnhoppID, strings.TrimSpace(payload.Name), serviceDate, description, quantity, unitCost, costCurrency, payload.SortOrder, strings.TrimSpace(payload.Notes), lineItemID, budgetID,
+	).Scan(&item.ID, &item.BudgetID, &item.SectionID, &item.InnhoppID, &item.Name, &item.ServiceDate, &item.Description, &item.Quantity, &item.UnitCost, &item.CostCurrency, &item.SortOrder, &item.Notes, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "line item not found")
@@ -1667,7 +1681,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 
 	lineRows, err := h.db.Query(
 		ctx,
-		`SELECT section_id, quantity, unit_cost, cost_currency, service_date
+		`SELECT section_id, quantity, unit_cost, cost_currency, service_date, COALESCE(notes, '')
          FROM budget_line_items
          WHERE budget_id = $1`,
 		budgetID,
@@ -1691,8 +1705,12 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		var unitCost float64
 		var costCurrency string
 		var serviceDate *time.Time
-		if err := lineRows.Scan(&sectionID, &quantity, &unitCost, &costCurrency, &serviceDate); err != nil {
+		var notes string
+		if err := lineRows.Scan(&sectionID, &quantity, &unitCost, &costCurrency, &serviceDate, &notes); err != nil {
 			return BudgetSummary{}, err
+		}
+		if strings.HasPrefix(notes, autoEstimateLineItemNotePrefix+":") {
+			continue
 		}
 		rate := liveRates[normalizeCurrency(costCurrency)]
 		if rate <= 0 {
@@ -1961,7 +1979,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		start, end = end, start
 	}
 	curveCostAnchors := []struct {
-		participants int
+		participants  int
 		costWithDrift float64
 	}{
 		{participants: confirmParticipants, costWithDrift: confirmCostWithDrift},
@@ -2361,6 +2379,295 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		}
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	return h.syncAutoEstimateLineItems(ctx, budgetID)
+}
+
+func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64) error {
+	budget, err := h.fetchBudget(ctx, budgetID)
+	if err != nil {
+		return err
+	}
+	assumptions, estimateCurrencies, err := h.fetchAssumptionsWithEstimateCurrencies(ctx, budgetID)
+	if err != nil {
+		return err
+	}
+	budgetMethod := int(math.Round(clampNonNegative(assumptions["budget_method"])))
+	if budgetMethod > 2 {
+		budgetMethod = 2
+	}
+
+	sectionRows, err := h.db.Query(
+		ctx,
+		`SELECT id, code FROM budget_sections WHERE budget_id = $1`,
+		budgetID,
+	)
+	if err != nil {
+		return err
+	}
+	defer sectionRows.Close()
+	sectionIDByCode := map[string]int64{}
+	for sectionRows.Next() {
+		var id int64
+		var code string
+		if err := sectionRows.Scan(&id, &code); err != nil {
+			return err
+		}
+		sectionIDByCode[code] = id
+	}
+	if err := sectionRows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if budgetMethod == 1 {
+		if _, err := tx.Exec(
+			ctx,
+			`DELETE FROM budget_line_items
+             WHERE budget_id = $1
+               AND notes LIKE $2`,
+			budgetID,
+			autoEstimateLineItemNotePrefix+":%",
+		); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	var startsAt time.Time
+	var endsAt *time.Time
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT starts_at, ends_at FROM events WHERE id = $1`,
+		budget.EventID,
+	).Scan(&startsAt, &endsAt); err != nil {
+		return err
+	}
+	startDate := startsAt.UTC().Truncate(24 * time.Hour)
+	endDate := startDate
+	if endsAt != nil {
+		endDate = endsAt.UTC().Truncate(24 * time.Hour)
+	}
+	if endDate.Before(startDate) {
+		endDate = startDate
+	}
+	eventDays := make([]time.Time, 0)
+	for day := startDate; !day.After(endDate); day = day.Add(24 * time.Hour) {
+		eventDays = append(eventDays, day)
+	}
+
+	manualDaysByCode := map[string]map[string]bool{}
+	if budgetMethod == 2 {
+		rows, err := tx.Query(
+			ctx,
+			`SELECT s.code, li.service_date
+             FROM budget_line_items li
+             JOIN budget_sections s ON s.id = li.section_id
+             WHERE li.budget_id = $1
+               AND s.code IN ('food_accommodation', 'transport_activities', 'payable_crew')
+               AND li.service_date IS NOT NULL
+               AND COALESCE(li.notes, '') NOT LIKE $2
+               AND COALESCE(li.notes, '') NOT LIKE $3`,
+			budgetID,
+			autoAircraftInnhoppNotePrefix+":%",
+			autoEstimateLineItemNotePrefix+":%",
+		)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var code string
+			var serviceDate time.Time
+			if err := rows.Scan(&code, &serviceDate); err != nil {
+				return err
+			}
+			dayKey := serviceDate.UTC().Format("2006-01-02")
+			if manualDaysByCode[code] == nil {
+				manualDaysByCode[code] = map[string]bool{}
+			}
+			manualDaysByCode[code][dayKey] = true
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+	}
+
+	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
+	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
+	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
+	fullLoads := int(clampNonNegative(assumptions["full_load_count"]))
+	_, _, fullParticipants := scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoads)
+	crewCount := crewOnLoad * fullLoads
+
+	estimateAccommodationPerPersonNight := clampNonNegative(assumptions["estimate_accommodation_per_person_night"])
+	estimateFoodPerDay := clampNonNegative(assumptions["estimate_food_per_day"])
+	estimateTransportPerDay := clampNonNegative(assumptions["estimate_transport_per_day"])
+	estimateStaffSalaryPerPersonDay := clampNonNegative(assumptions["estimate_staff_salary_per_person_day"])
+
+	type generatedLineItem struct {
+		SectionID     int64
+		Name          string
+		ServiceDate   *time.Time
+		LocationLabel string
+		Quantity      float64
+		UnitCost      float64
+		CostCurrency  string
+		SortOrder     int
+		Marker        string
+	}
+	items := make([]generatedLineItem, 0)
+	addEstimateLine := func(sectionCode, estimateKey, name string, quantity, unitCost float64, day time.Time) {
+		sectionID := sectionIDByCode[sectionCode]
+		if sectionID <= 0 {
+			return
+		}
+		dayKey := day.Format("2006-01-02")
+		if budgetMethod == 2 && manualDaysByCode[sectionCode] != nil && manualDaysByCode[sectionCode][dayKey] {
+			return
+		}
+		dateCopy := day
+		currency := normalizeCurrency(estimateCurrencies[estimateKey])
+		marker := fmt.Sprintf(
+			"%s:%s:%s:%s%s",
+			autoEstimateLineItemNotePrefix,
+			sectionCode,
+			estimateKey,
+			dayKey,
+			autoEstimateWarningSuffix,
+		)
+		items = append(items, generatedLineItem{
+			SectionID:     sectionID,
+			Name:          name,
+			ServiceDate:   &dateCopy,
+			LocationLabel: "Estimate",
+			Quantity:      quantity,
+			UnitCost:      unitCost,
+			CostCurrency:  currency,
+			SortOrder:     len(items),
+			Marker:        marker,
+		})
+	}
+
+	for _, day := range eventDays {
+		addEstimateLine(
+			"food_accommodation",
+			"estimate_accommodation_per_person_night",
+			"Accommodation",
+			float64(fullParticipants),
+			estimateAccommodationPerPersonNight,
+			day,
+		)
+		addEstimateLine(
+			"food_accommodation",
+			"estimate_food_per_day",
+			"Food",
+			float64(fullParticipants),
+			estimateFoodPerDay,
+			day,
+		)
+		addEstimateLine(
+			"transport_activities",
+			"estimate_transport_per_day",
+			"Transport",
+			1,
+			estimateTransportPerDay,
+			day,
+		)
+		addEstimateLine(
+			"payable_crew",
+			"estimate_staff_salary_per_person_day",
+			"Staff Salary",
+			float64(crewCount),
+			estimateStaffSalaryPerPersonDay,
+			day,
+		)
+	}
+
+	existingRows, err := tx.Query(
+		ctx,
+		`SELECT id, COALESCE(notes, '')
+         FROM budget_line_items
+         WHERE budget_id = $1
+           AND notes LIKE $2`,
+		budgetID,
+		autoEstimateLineItemNotePrefix+":%",
+	)
+	if err != nil {
+		return err
+	}
+	defer existingRows.Close()
+	existingByMarker := map[string]int64{}
+	staleIDs := map[int64]struct{}{}
+	for existingRows.Next() {
+		var id int64
+		var marker string
+		if err := existingRows.Scan(&id, &marker); err != nil {
+			return err
+		}
+		existingByMarker[marker] = id
+		staleIDs[id] = struct{}{}
+	}
+	if err := existingRows.Err(); err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		if existingID, ok := existingByMarker[item.Marker]; ok {
+			if _, err := tx.Exec(
+				ctx,
+				`UPDATE budget_line_items
+                 SET section_id = $1, name = $2, service_date = $3, location_label = $4, quantity = $5, unit_cost = $6,
+                     cost_currency = $7, sort_order = $8, updated_at = NOW()
+                 WHERE id = $9`,
+				item.SectionID,
+				item.Name,
+				item.ServiceDate,
+				item.LocationLabel,
+				item.Quantity,
+				item.UnitCost,
+				item.CostCurrency,
+				item.SortOrder,
+				existingID,
+			); err != nil {
+				return err
+			}
+			delete(staleIDs, existingID)
+			continue
+		}
+		if _, err := tx.Exec(
+			ctx,
+			`INSERT INTO budget_line_items
+                (budget_id, section_id, name, service_date, location_label, quantity, unit_cost, cost_currency, sort_order, notes)
+             VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			budgetID,
+			item.SectionID,
+			item.Name,
+			item.ServiceDate,
+			item.LocationLabel,
+			item.Quantity,
+			item.UnitCost,
+			item.CostCurrency,
+			item.SortOrder,
+			item.Marker,
+		); err != nil {
+			return err
+		}
+	}
+
+	for staleID := range staleIDs {
+		if _, err := tx.Exec(ctx, `DELETE FROM budget_line_items WHERE id = $1`, staleID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 
