@@ -3007,10 +3007,10 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14, $15,
-            $16, $17, $18, $19,
-            $20, $21, $22, $23,
-            $24, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32
+            $10, $11, $12, $13, $14, $15, $16,
+            $17, $18, $19, $20,
+            $21, $22, $23, $24,
+            $25, $26, $27, $28, $29, $30, $31::jsonb, $32::jsonb, $33
         )
         RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
@@ -3419,10 +3419,10 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15,
-                $16, $17, $18, $19,
-                $20, $21, $22, $23,
-                $24, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32
+                $10, $11, $12, $13, $14, $15, $16,
+                $17, $18, $19, $20,
+                $21, $22, $23, $24,
+                $25, $26, $27, $28, $29, $30, $31::jsonb, $32::jsonb, $33
             )`,
 			eventID,
 			innhopp.Sequence,
