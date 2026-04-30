@@ -1,6 +1,7 @@
 package logistics
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -2719,7 +2721,17 @@ type routesAPIRequest struct {
 }
 
 type routesAPIWaypoint struct {
-	Address string `json:"address"`
+	Address  string             `json:"address,omitempty"`
+	Location *routesAPILocation `json:"location,omitempty"`
+}
+
+type routesAPILocation struct {
+	LatLng routesAPILatLng `json:"latLng"`
+}
+
+type routesAPILatLng struct {
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
 
 type routesAPIResponse struct {
@@ -2738,6 +2750,96 @@ type routesAPIErrorResponse struct {
 	} `json:"error"`
 }
 
+var dmsTokenPattern = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*°\s*(\d+(?:\.\d+)?)?\s*['’′]?\s*(\d+(?:\.\d+)?)?\s*(?:["”″])?\s*([NSEW])`)
+
+func dmsToDecimal(degrees, minutes, seconds float64, hemi string) float64 {
+	val := degrees + (minutes / 60.0) + (seconds / 3600.0)
+	h := strings.ToUpper(strings.TrimSpace(hemi))
+	if h == "S" || h == "W" {
+		return -val
+	}
+	return val
+}
+
+func parseCoordinateWaypoint(value string) (float64, float64, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, 0, false
+	}
+
+	matches := dmsTokenPattern.FindAllStringSubmatch(trimmed, 2)
+	if len(matches) == 2 {
+		parseDMSPart := func(m []string) (float64, string, bool) {
+			deg, err := strconv.ParseFloat(m[1], 64)
+			if err != nil {
+				return 0, "", false
+			}
+			mins := 0.0
+			if strings.TrimSpace(m[2]) != "" {
+				mins, err = strconv.ParseFloat(m[2], 64)
+				if err != nil {
+					return 0, "", false
+				}
+			}
+			secs := 0.0
+			if strings.TrimSpace(m[3]) != "" {
+				secs, err = strconv.ParseFloat(m[3], 64)
+				if err != nil {
+					return 0, "", false
+				}
+			}
+			return dmsToDecimal(deg, mins, secs, m[4]), strings.ToUpper(strings.TrimSpace(m[4])), true
+		}
+		firstVal, firstHemi, ok := parseDMSPart(matches[0])
+		if !ok {
+			return 0, 0, false
+		}
+		secondVal, secondHemi, ok := parseDMSPart(matches[1])
+		if !ok {
+			return 0, 0, false
+		}
+		if (firstHemi == "N" || firstHemi == "S") && (secondHemi == "E" || secondHemi == "W") {
+			return firstVal, secondVal, true
+		}
+		if (firstHemi == "E" || firstHemi == "W") && (secondHemi == "N" || secondHemi == "S") {
+			return secondVal, firstVal, true
+		}
+	}
+
+	normalized := strings.NewReplacer(",", " ", ";", " ", "\t", " ").Replace(trimmed)
+	parts := strings.Fields(normalized)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	lat, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	lng, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	if lat < -90 || lat > 90 || lng < -180 || lng > 180 {
+		return 0, 0, false
+	}
+	return lat, lng, true
+}
+
+func buildRoutesWaypoint(value string) routesAPIWaypoint {
+	trimmed := strings.TrimSpace(value)
+	if lat, lng, ok := parseCoordinateWaypoint(trimmed); ok {
+		return routesAPIWaypoint{
+			Location: &routesAPILocation{
+				LatLng: routesAPILatLng{
+					Latitude:  lat,
+					Longitude: lng,
+				},
+			},
+		}
+	}
+	return routesAPIWaypoint{Address: trimmed}
+}
+
 func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, destination string) (*int, error) {
 	if strings.TrimSpace(origin) == "" || strings.TrimSpace(destination) == "" {
 		log.Printf("route duration skipped: empty origin or destination (origin=%q,destination=%q)", origin, destination)
@@ -2751,12 +2853,8 @@ func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, des
 	defer cancel()
 
 	body, err := json.Marshal(routesAPIRequest{
-		Origin: routesAPIWaypoint{
-			Address: origin,
-		},
-		Destination: routesAPIWaypoint{
-			Address: destination,
-		},
+		Origin:      buildRoutesWaypoint(origin),
+		Destination: buildRoutesWaypoint(destination),
 		TravelMode: "DRIVE",
 	})
 	if err != nil {
@@ -2764,7 +2862,7 @@ func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, des
 	}
 	endpoint := "https://routes.googleapis.com/directions/v2:computeRoutes"
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
