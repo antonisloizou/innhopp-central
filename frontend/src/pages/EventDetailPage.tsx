@@ -3670,6 +3670,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             ) : (
               <p className="muted">No meals yet.</p>
             )}
+            <div className="form-actions event-detail-form-toggle-actions">
+              <Link
+                to="/logistics/meals/new"
+                state={{ preselectedEventId: Number(eventId) }}
+                className="ghost button-link"
+                onClick={saveDetailState}
+              >
+                Create new meal
+              </Link>
+            </div>
           </>
         )}
       </article>

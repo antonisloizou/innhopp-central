@@ -10,6 +10,7 @@ const LogisticsMealCreatePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const copy = (location.state as any)?.copyMeal;
+  const preselectedEventId = Number((location.state as any)?.preselectedEventId) || undefined;
   const isCopy = !!copy;
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,7 +18,7 @@ const LogisticsMealCreatePage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [createdMeal, setCreatedMeal] = useState<Meal | null>(null);
   const [form, setForm] = useState({
-    event_id: copy?.event_id ? String(copy.event_id) : '',
+    event_id: copy?.event_id ? String(copy.event_id) : preselectedEventId ? String(preselectedEventId) : '',
     name: copy?.name || '',
     location: copy?.location || '',
     scheduled_at: copy?.scheduled_at || '',

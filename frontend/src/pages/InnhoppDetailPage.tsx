@@ -461,13 +461,16 @@ const InnhoppDetailPage = () => {
         } else {
           // create mode: fetch event for defaults and optionally copy data
           const copy = (location.state as any)?.copyInnhopp as Innhopp | undefined;
+          const initialScheduledAt = (location.state as any)?.initialScheduledAt as string | undefined;
           if (eventId) {
             try {
               const evt = await getEvent(Number(eventId));
               if (!cancelled) {
                 setEventData(evt);
                 evtCache.current = { ...evtCache.current, [evt.id]: evt };
-                if (!copy?.scheduled_at && evt.starts_at) {
+                if (initialScheduledAt) {
+                  setForm((prev) => ({ ...prev, scheduled_at: initialScheduledAt }));
+                } else if (!copy?.scheduled_at && evt.starts_at) {
                   const d = parseEventLocal(evt.starts_at);
                   if (d) {
                     d.setUTCHours(9, 0, 0, 0);

@@ -168,6 +168,26 @@ const minutesSinceMidnight = (iso?: string | null) => {
   return parts.hour * 60 + parts.minute;
 };
 
+const dayKeyToScheduledAt = (dayKey: string, hour = 9, minute = 0) => {
+  const [yearStr, monthStr, dayStr] = dayKey.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+  const localDate = new Date(year, month - 1, day, hour, minute, 0, 0);
+  return fromEventLocalPickerDate(localDate);
+};
+
+const dayKeyToScheduledAtWithOffset = (dayKey: string, dayOffset: number, hour = 9, minute = 0) => {
+  const [yearStr, monthStr, dayStr] = dayKey.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+  const localDate = new Date(year, month - 1, day + dayOffset, hour, minute, 0, 0);
+  return fromEventLocalPickerDate(localDate);
+};
+
 const buildDayIso = (day: Date, minutes: number) => {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
@@ -250,6 +270,8 @@ const EventSchedulePage = () => {
   const [previewEntry, setPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
   const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
   const [previewClosing, setPreviewClosing] = useState(false);
+  const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
+  const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (previewEntry) {
@@ -270,6 +292,30 @@ const EventSchedulePage = () => {
   const closePreview = useCallback(() => {
     setPreviewEntry(null);
   }, []);
+
+  useEffect(() => {
+    if (!dayAddMenuOpenKey) return;
+    const onPointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+      if (!target || !dayAddMenuRef.current) return;
+      if (!dayAddMenuRef.current.contains(target)) {
+        setDayAddMenuOpenKey(null);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDayAddMenuOpenKey(null);
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('touchstart', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('touchstart', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [dayAddMenuOpenKey]);
 
   useEffect(() => {
     if (!timePicker || !pickerPanelRef.current) return;
@@ -1610,6 +1656,70 @@ const EventSchedulePage = () => {
   const nonStaffCount = Math.max(totalSlots - remaining, 0);
   const isFull = remaining === 0;
   const pastEvent = eventData.status === 'past';
+  const openCreateFromDayMenu = (dayKey: string, type: EntryType) => {
+    if (!eventId) return;
+    const scheduledAt = dayKeyToScheduledAt(dayKey);
+    const eventNumericId = Number(eventId);
+    if (type === 'Innhopp') {
+      navigate(`/events/${eventId}/innhopps/new`, { state: { initialScheduledAt: scheduledAt } });
+      return;
+    }
+    if (type === 'Transport') {
+      navigate('/logistics/new', {
+        state: {
+          copyTransport: {
+            event_id: eventNumericId,
+            scheduled_at: scheduledAt
+          }
+        }
+      });
+      return;
+    }
+    if (type === 'Ground Crew') {
+      navigate('/logistics/ground-crew/new', {
+        state: {
+          copyGroundCrew: {
+            event_id: eventNumericId,
+            scheduled_at: scheduledAt
+          }
+        }
+      });
+      return;
+    }
+    if (type === 'Accommodation') {
+      navigate('/logistics/accommodations/new', {
+        state: {
+          copyAccommodation: {
+            event_id: eventNumericId,
+            check_in_at: dayKeyToScheduledAt(dayKey, 15, 0),
+            check_out_at: dayKeyToScheduledAtWithOffset(dayKey, 1, 11, 0)
+          }
+        }
+      });
+      return;
+    }
+    if (type === 'Meal') {
+      navigate('/logistics/meals/new', {
+        state: {
+          copyMeal: {
+            event_id: eventNumericId,
+            scheduled_at: scheduledAt
+          }
+        }
+      });
+      return;
+    }
+    if (type === 'Other') {
+      navigate('/logistics/others/new', {
+        state: {
+          initialValues: {
+            event_id: eventNumericId,
+            scheduled_at: scheduledAt
+          }
+        }
+      });
+    }
+  };
 
   return (
     <section className="stack">
@@ -1747,6 +1857,42 @@ const EventSchedulePage = () => {
               <h3 className="event-schedule-day-title">
                 {day.label}
               </h3>
+              {!participantOnly && expandedDays[day.key] !== false ? (
+                <div className="event-schedule-day-add-wrap" ref={dayAddMenuOpenKey === day.key ? dayAddMenuRef : null}>
+                  <button
+                    type="button"
+                    className="event-schedule-day-add-button"
+                    aria-label={`Add schedule item on ${day.label}`}
+                    aria-haspopup="menu"
+                    aria-expanded={dayAddMenuOpenKey === day.key}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDayAddMenuOpenKey((prev) => (prev === day.key ? null : day.key));
+                    }}
+                  >
+                    +
+                  </button>
+                  {dayAddMenuOpenKey === day.key ? (
+                    <div className="event-schedule-menu" role="menu">
+                      {(['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'] as EntryType[]).map((type) => (
+                        <button
+                          key={type}
+                          type="button"
+                          className="event-schedule-menu-item"
+                          role="menuitem"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDayAddMenuOpenKey(null);
+                            openCreateFromDayMenu(day.key, type);
+                          }}
+                        >
+                          {`Add ${type}`}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </header>
             {expandedDays[day.key] === false ? null : (() => {
               const orderedEntries = buildOrderedEntriesForDay(day);

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { listEvents, Event } from '../api/events';
@@ -8,14 +8,20 @@ import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/event
 
 const LogisticsOtherCreatePage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [events, setEvents] = useState<Event[]>([]);
-  const [form, setForm] = useState({
-    event_id: '',
-    name: '',
-    coordinates: '',
-    scheduled_at: '',
-    description: '',
-    notes: ''
+  const [form, setForm] = useState(() => {
+    const state = (location.state as any)?.initialValues as
+      | { event_id?: number; scheduled_at?: string; name?: string; coordinates?: string; description?: string; notes?: string }
+      | undefined;
+    return {
+      event_id: state?.event_id ? String(state.event_id) : '',
+      name: state?.name || '',
+      coordinates: state?.coordinates || '',
+      scheduled_at: state?.scheduled_at || '',
+      description: state?.description || '',
+      notes: state?.notes || ''
+    };
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

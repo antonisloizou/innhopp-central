@@ -4096,14 +4096,49 @@ iframe {
 .event-schedule-day-header {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.5rem;
   cursor: pointer;
 }
 
 .event-schedule-day-title {
   margin: 0;
-  flex: 1;
+  flex: 0 1 auto;
   text-align: left;
+}
+
+.event-schedule-day-add-wrap {
+  position: relative;
+  margin-left: 0.2rem;
+}
+
+.event-schedule-day-add-button {
+  border: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-muted);
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.event-schedule-day-card:hover .event-schedule-day-add-button,
+.event-schedule-day-card:focus-within .event-schedule-day-add-button,
+.event-schedule-day-add-button[aria-expanded='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.event-schedule-day-add-button:hover {
+  border-color: var(--text-strong);
+  color: var(--text-strong);
 }
 
 .event-schedule-empty-day {
