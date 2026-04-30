@@ -132,17 +132,21 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
       if (!scenario) return null;
       return {
         participants: scenario.participants || 0,
-        margin: scenario.margin_without_tip || 0
+        margin: scenario.margin_without_tip || 0,
+        costWithDrift: scenario.cost_with_drift || 0
       };
     })
-    .filter((point): point is { participants: number; margin: number } => point !== null)
+    .filter(
+      (point): point is { participants: number; margin: number; costWithDrift: number } => point !== null
+    )
     .sort((a, b) => a.participants - b.participants);
   const sourceCurvePoints =
     scenarioCurvePoints.length >= 2
       ? scenarioCurvePoints
       : (rawCurve || []).map((point) => ({
           participants: point.participants || 0,
-          margin: point.margin || 0
+          margin: point.margin || 0,
+          costWithDrift: point.cost || 0
         }));
   if (!sourceCurvePoints.length) return null;
   const width = 640;
@@ -199,13 +203,9 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
   }));
   const targetMarkupPercent = Math.max(0, Number(summary?.parameters?.target_markup_percent || 0));
   const targetMarginPoints = sourceCurvePoints.map((point) => {
-    const matchingScenario = Object.values(summary?.scenarios || {}).find(
-      (scenario) => (scenario?.participants || 0) === point.participants
-    );
-    const scenarioCostWithDrift =
-      matchingScenario && Number.isFinite(matchingScenario.cost_with_drift)
-        ? matchingScenario.cost_with_drift
-        : summary?.cost_with_drift || 0;
+    const scenarioCostWithDrift = Number.isFinite(point.costWithDrift)
+      ? point.costWithDrift
+      : summary?.cost_with_drift || 0;
     const targetMargin = (scenarioCostWithDrift * targetMarkupPercent) / 100;
     return {
       participants: point.participants,
