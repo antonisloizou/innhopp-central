@@ -16,7 +16,7 @@ export type ScenarioBar = {
   costPct: number;
 };
 
-export type CostSplitMode = 'amount' | 'percentage';
+export type CostSplitMode = 'amount' | 'percentage' | 'time';
 
 export type CostSplitEntry = {
   key: string;

@@ -93,6 +93,12 @@ const formatQty = (value: number) => {
   if (Number.isInteger(value)) return String(value);
   return value.toFixed(2).replace(/\.?0+$/, '');
 };
+const formatMinutesAsHours = (minutes: number) => {
+  const safeMinutes = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(safeMinutes / 60);
+  const remainingMinutes = safeMinutes % 60;
+  return `${hours} hrs ${remainingMinutes} min`;
+};
 
 const EventBudgetPage = () => {
   const { eventId } = useParams();
@@ -126,6 +132,8 @@ const EventBudgetPage = () => {
   const [aircraftCurrency, setAircraftCurrency] = useState('EUR');
   const [displayCurrency, setDisplayCurrency] = useState('EUR');
   const [costSplitMode, setCostSplitMode] = useState<CostSplitMode>('amount');
+  const isPercentageSplitMode = costSplitMode === 'percentage';
+  const isTimeSplitMode = costSplitMode === 'time';
   const [costSplitTab, setCostSplitTab] = useState<CostSplitTabKey>('section');
   const [costSplitScenario, setCostSplitScenario] = useState<LabelScenarioKey>('full');
   const [lineItemsScenario, setLineItemsScenario] = useState<LabelScenarioKey>('full');
@@ -2084,6 +2092,16 @@ const EventBudgetPage = () => {
                 >
                   Percentage
                 </button>
+                <button
+                  type="button"
+                  className={costSplitMode === 'time' ? 'primary' : 'ghost'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCostSplitMode('time');
+                  }}
+                >
+                  Time
+                </button>
               </div>
               </div>}
             </header>
@@ -2099,9 +2117,9 @@ const EventBudgetPage = () => {
                           <div className="budget-cost-split-top">
                             <span className="field-label">{section.label}</span>
                             <span className="muted">
-                              {costSplitMode === 'amount'
-                                ? formatMoney(section.displayValue)
-                                : `${section.displayValue.toFixed(1)}%`}
+                              {isPercentageSplitMode
+                                ? `${section.displayValue.toFixed(1)}%`
+                                : formatMoney(section.displayValue)}
                             </span>
                           </div>
                           <div className="budget-bar-track">
@@ -2113,7 +2131,7 @@ const EventBudgetPage = () => {
                         <div className="budget-cost-split-top">
                           <span className="field-label">Total</span>
                           <span className="muted">
-                            {costSplitMode === 'amount' ? formatMoney(totalValue) : `${totalValue.toFixed(1)}%`}
+                            {isPercentageSplitMode ? `${totalValue.toFixed(1)}%` : formatMoney(totalValue)}
                           </span>
                         </div>
                       </div>
@@ -2122,10 +2140,11 @@ const EventBudgetPage = () => {
                 })()}
               {costSplitTab === 'innhopp' &&
                 (() => {
-                  const totalValue = aircraftPerInnhoppSplit.reduce(
-                    (acc, row) => acc + (costSplitMode === 'amount' ? row.displayTotalCost : row.percentage),
-                    0
-                  );
+                  const totalValue = aircraftPerInnhoppSplit.reduce((acc, row) => {
+                    if (isTimeSplitMode) return acc + row.minutes;
+                    return acc + (isPercentageSplitMode ? row.percentage : row.displayTotalCost);
+                  }, 0);
+                  const maxMinutes = aircraftPerInnhoppSplit.reduce((acc, row) => Math.max(acc, row.minutes), 0);
                   return (
                     <>
                       {aircraftPerInnhoppSplit.map((row) => (
@@ -2144,13 +2163,20 @@ const EventBudgetPage = () => {
                               ) : null}
                             </span>
                             <span className="muted">
-                              {costSplitMode === 'amount'
-                                ? formatBaseMoney(row.displayTotalCost, effectiveDisplayCurrency)
-                                : `${row.percentage.toFixed(1)}%`}
+                              {isTimeSplitMode
+                                ? formatMinutesAsHours(row.minutes)
+                                : isPercentageSplitMode
+                                  ? `${row.percentage.toFixed(1)}%`
+                                  : formatBaseMoney(row.displayTotalCost, effectiveDisplayCurrency)}
                             </span>
                           </div>
                           <div className="budget-bar-track">
-                            <div className="budget-bar budget-bar-blue" style={{ width: `${row.barPct}%` }} />
+                            <div
+                              className="budget-bar budget-bar-blue"
+                              style={{
+                                width: `${isTimeSplitMode ? (maxMinutes > 0 ? (row.minutes / maxMinutes) * 100 : 0) : row.barPct}%`
+                              }}
+                            />
                           </div>
                         </div>
                       ))}
@@ -2158,9 +2184,11 @@ const EventBudgetPage = () => {
                         <div className="budget-cost-split-top">
                           <span className="field-label">Total</span>
                           <span className="muted">
-                            {costSplitMode === 'amount'
-                              ? formatBaseMoney(totalValue, effectiveDisplayCurrency)
-                              : `${totalValue.toFixed(1)}%`}
+                            {isTimeSplitMode
+                              ? formatMinutesAsHours(totalValue)
+                              : isPercentageSplitMode
+                                ? `${totalValue.toFixed(1)}%`
+                                : formatBaseMoney(totalValue, effectiveDisplayCurrency)}
                           </span>
                         </div>
                       </div>
@@ -2177,9 +2205,9 @@ const EventBudgetPage = () => {
                           <div className="budget-cost-split-top">
                             <span className="field-label">{row.label}</span>
                             <span className="muted">
-                              {costSplitMode === 'amount'
-                                ? formatBaseMoney(row.displayValue, effectiveDisplayCurrency)
-                                : `${row.displayValue.toFixed(1)}%`}
+                              {isPercentageSplitMode
+                                ? `${row.displayValue.toFixed(1)}%`
+                                : formatBaseMoney(row.displayValue, effectiveDisplayCurrency)}
                             </span>
                           </div>
                           <div className="budget-bar-track">
@@ -2191,9 +2219,9 @@ const EventBudgetPage = () => {
                         <div className="budget-cost-split-top">
                           <span className="field-label">Total</span>
                           <span className="muted">
-                            {costSplitMode === 'amount'
-                              ? formatBaseMoney(totalValue, effectiveDisplayCurrency)
-                              : `${totalValue.toFixed(1)}%`}
+                            {isPercentageSplitMode
+                              ? `${totalValue.toFixed(1)}%`
+                              : formatBaseMoney(totalValue, effectiveDisplayCurrency)}
                           </span>
                         </div>
                       </div>
