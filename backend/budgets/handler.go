@@ -143,6 +143,13 @@ var defaultAssumptions = map[string]float64{
 	"estimate_staff_salary_per_person_day":    0,
 }
 
+var estimateAssumptionKeys = map[string]struct{}{
+	"estimate_accommodation_per_person_night": {},
+	"estimate_transport_per_day":              {},
+	"estimate_food_per_day":                   {},
+	"estimate_staff_salary_per_person_day":    {},
+}
+
 const autoAircraftInnhoppNotePrefix = "[auto-aircraft-innhopp]"
 const autoAircraftMissingDistanceSuffix = ":missing-distance"
 const legacyPlannedLoadCountKey = "planned_load_count"
@@ -196,6 +203,10 @@ func normalizeCurrency(v string) string {
 		return "EUR"
 	}
 	return cur
+}
+
+func assumptionCurrencyKey(assumptionKey string) string {
+	return assumptionKey + "_currency"
 }
 
 func appendUniqueCurrency(codes []string, code string) []string {
@@ -832,12 +843,16 @@ func (h *Handler) getAssumptions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	assumptions, err := h.fetchAssumptions(r.Context(), budgetID)
+	assumptions, estimateCurrencies, err := h.fetchAssumptionsWithEstimateCurrencies(r.Context(), budgetID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"values": assumptions, "parameters": assumptions})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"values":              assumptions,
+		"parameters":          assumptions,
+		"estimate_currencies": estimateCurrencies,
+	})
 }
 
 func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
@@ -846,7 +861,8 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload struct {
-		Values map[string]float64 `json:"values"`
+		Values             map[string]float64 `json:"values"`
+		EstimateCurrencies map[string]string  `json:"estimate_currencies"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -894,6 +910,27 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for key, currency := range payload.EstimateCurrencies {
+		if _, ok := estimateAssumptionKeys[key]; !ok {
+			continue
+		}
+		normalizedCurrency := normalizeCurrency(currency)
+		if !isValidCurrencyCode(normalizedCurrency) {
+			httpx.Error(w, http.StatusBadRequest, key+"_currency must be a 3-letter ISO code")
+			return
+		}
+		if _, err := tx.Exec(
+			r.Context(),
+			`INSERT INTO budget_assumptions (budget_id, key, value_text)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (budget_id, key)
+             DO UPDATE SET value_text = EXCLUDED.value_text, updated_at = NOW()`,
+			budgetID, assumptionCurrencyKey(key), normalizedCurrency,
+		); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to update assumptions")
+			return
+		}
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to update assumptions")
 		return
@@ -902,12 +939,16 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
-	updated, err := h.fetchAssumptions(r.Context(), budgetID)
+	updated, estimateCurrencies, err := h.fetchAssumptionsWithEstimateCurrencies(r.Context(), budgetID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"values": updated, "parameters": updated})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"values":              updated,
+		"parameters":          updated,
+		"estimate_currencies": estimateCurrencies,
+	})
 }
 
 func (h *Handler) listCurrencies(w http.ResponseWriter, r *http.Request) {
@@ -1348,20 +1389,21 @@ func (h *Handler) fetchBudget(ctx context.Context, budgetID int64) (Budget, erro
 	return budget, err
 }
 
-func (h *Handler) fetchAssumptions(ctx context.Context, budgetID int64) (map[string]float64, error) {
+func (h *Handler) fetchAssumptionsWithEstimateCurrencies(ctx context.Context, budgetID int64) (map[string]float64, map[string]string, error) {
 	values := make(map[string]float64, len(defaultAssumptions))
 	for k, v := range defaultAssumptions {
 		values[k] = v
 	}
+	estimateCurrencies := make(map[string]string, len(estimateAssumptionKeys))
 	rows, err := h.db.Query(
 		ctx,
-		`SELECT key, value_num
+		`SELECT key, value_num, value_text
          FROM budget_assumptions
          WHERE budget_id = $1`,
 		budgetID,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var legacyFullLoadCount *float64
@@ -1369,8 +1411,17 @@ func (h *Handler) fetchAssumptions(ctx context.Context, budgetID int64) (map[str
 	for rows.Next() {
 		var key string
 		var val *float64
-		if err := rows.Scan(&key, &val); err != nil {
-			return nil, err
+		var valueText *string
+		if err := rows.Scan(&key, &val, &valueText); err != nil {
+			return nil, nil, err
+		}
+		for estimateKey := range estimateAssumptionKeys {
+			if key == assumptionCurrencyKey(estimateKey) {
+				if valueText != nil {
+					estimateCurrencies[estimateKey] = normalizeCurrency(*valueText)
+				}
+				goto nextRow
+			}
 		}
 		if key == fullLoadCountKey {
 			hasFullLoadCount = true
@@ -1380,22 +1431,28 @@ func (h *Handler) fetchAssumptions(ctx context.Context, budgetID int64) (map[str
 				v := *val
 				legacyFullLoadCount = &v
 			}
-			continue
+			goto nextRow
 		}
 		if _, ok := defaultAssumptions[key]; !ok {
-			continue
+			goto nextRow
 		}
 		if val != nil {
 			values[key] = *val
 		}
+	nextRow:
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !hasFullLoadCount && legacyFullLoadCount != nil {
 		values[fullLoadCountKey] = *legacyFullLoadCount
 	}
-	return values, nil
+	return values, estimateCurrencies, nil
+}
+
+func (h *Handler) fetchAssumptions(ctx context.Context, budgetID int64) (map[string]float64, error) {
+	values, _, err := h.fetchAssumptionsWithEstimateCurrencies(ctx, budgetID)
+	return values, err
 }
 
 func (h *Handler) fetchBudgetCurrencies(ctx context.Context, budgetID int64) ([]BudgetCurrency, error) {
@@ -1471,7 +1528,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if err != nil {
 		return BudgetSummary{}, err
 	}
-	assumptions, err := h.fetchAssumptions(ctx, budgetID)
+	assumptions, estimateCurrencies, err := h.fetchAssumptionsWithEstimateCurrencies(ctx, budgetID)
 	if err != nil {
 		return BudgetSummary{}, err
 	}
@@ -1534,6 +1591,16 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		liveRates = map[string]float64{}
 	}
 	liveRates[budget.BaseCurrency] = 1
+	toBaseAmountFromCurrency := func(amount float64, sourceCurrency string) float64 {
+		rate := liveRates[normalizeCurrency(sourceCurrency)]
+		if rate <= 0 {
+			rate = fallbackRates[normalizeCurrency(sourceCurrency)]
+		}
+		if rate <= 0 {
+			rate = 1
+		}
+		return amount / rate
+	}
 
 	aircraftPricePerMinute := clampNonNegative(assumptions["aircraft_price_per_minute"])
 	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
@@ -1665,10 +1732,22 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if budgetMethod > 2 {
 		budgetMethod = 2
 	}
-	estimateAccommodationPerPersonNight := clampNonNegative(assumptions["estimate_accommodation_per_person_night"])
-	estimateTransportPerDay := clampNonNegative(assumptions["estimate_transport_per_day"])
-	estimateFoodPerDay := clampNonNegative(assumptions["estimate_food_per_day"])
-	estimateStaffSalaryPerPersonDay := clampNonNegative(assumptions["estimate_staff_salary_per_person_day"])
+	estimateAccommodationPerPersonNight := clampNonNegative(toBaseAmountFromCurrency(
+		assumptions["estimate_accommodation_per_person_night"],
+		estimateCurrencies["estimate_accommodation_per_person_night"],
+	))
+	estimateTransportPerDay := clampNonNegative(toBaseAmountFromCurrency(
+		assumptions["estimate_transport_per_day"],
+		estimateCurrencies["estimate_transport_per_day"],
+	))
+	estimateFoodPerDay := clampNonNegative(toBaseAmountFromCurrency(
+		assumptions["estimate_food_per_day"],
+		estimateCurrencies["estimate_food_per_day"],
+	))
+	estimateStaffSalaryPerPersonDay := clampNonNegative(toBaseAmountFromCurrency(
+		assumptions["estimate_staff_salary_per_person_day"],
+		estimateCurrencies["estimate_staff_salary_per_person_day"],
+	))
 	buildEstimatedDailyNonAircraftCost := func(participants int, loads int) float64 {
 		crewCount := crewOnLoad * loads
 		return roundMoney(

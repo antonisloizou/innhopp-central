@@ -174,16 +174,27 @@ export const deleteBudgetLineItem = (budgetId: number, lineItemId: number) =>
   apiRequest<{ ok: boolean }>(`/budgets/${budgetId}/line-items/${lineItemId}`, { method: 'DELETE' });
 
 export const getBudgetAssumptions = (budgetId: number) =>
-  apiRequest<{ values: Record<string, number>; parameters?: Record<string, number> }>(
+  apiRequest<{
+    values: Record<string, number>;
+    parameters?: Record<string, number>;
+    estimate_currencies?: Record<string, string>;
+  }>(
     `/budgets/${budgetId}/assumptions`
   );
 
-export const updateBudgetAssumptions = (budgetId: number, values: Record<string, number>) =>
-  apiRequest<{ values: Record<string, number>; parameters?: Record<string, number> }>(
+export const updateBudgetAssumptions = (
+  budgetId: number,
+  payload: { values: Record<string, number>; estimate_currencies?: Record<string, string> }
+) =>
+  apiRequest<{
+    values: Record<string, number>;
+    parameters?: Record<string, number>;
+    estimate_currencies?: Record<string, string>;
+  }>(
     `/budgets/${budgetId}/assumptions`,
     {
     method: 'PUT',
-    body: JSON.stringify({ values })
+    body: JSON.stringify(payload)
     }
   );
 

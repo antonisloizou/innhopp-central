@@ -368,7 +368,7 @@ const EventBudgetPage = () => {
         currenciesResp.aircraft_currency || evtBudget.aircraft_currency || loadedBaseCurrency
       );
       setEstimateCurrencies((prev) => {
-        const next: Record<string, string> = { ...prev };
+        const next: Record<string, string> = { ...prev, ...(assumptionsResp.estimate_currencies || {}) };
         ESTIMATE_PARAMETER_KEYS.forEach((key) => {
           if (!next[key]) next[key] = loadedBaseCurrency;
         });
@@ -563,25 +563,16 @@ const EventBudgetPage = () => {
       });
       const currenciesResp = await updateBudgetCurrencies(budget.id, payload);
       const assumptionsPayload = { ...parameters };
+      const estimateCurrencyPayload: Record<string, string> = {};
       ESTIMATE_PARAMETER_KEYS.forEach((key) => {
         const rawAmount = Number(assumptionsPayload[key] || 0);
-        const sourceCurrency = (estimateCurrencies[key] || resolvedBaseCurrency).trim().toUpperCase();
-        if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
-          assumptionsPayload[key] = 0;
-          return;
-        }
-        if (sourceCurrency === resolvedBaseCurrency) {
-          assumptionsPayload[key] = rawAmount;
-          return;
-        }
-        const sourceRate = sourceCurrency === resolvedBaseCurrency ? 1 : liveRates[sourceCurrency] || 1;
-        if (sourceRate <= 0) {
-          assumptionsPayload[key] = rawAmount;
-          return;
-        }
-        assumptionsPayload[key] = rawAmount / sourceRate;
+        assumptionsPayload[key] = Number.isFinite(rawAmount) && rawAmount > 0 ? rawAmount : 0;
+        estimateCurrencyPayload[key] = (estimateCurrencies[key] || resolvedBaseCurrency).trim().toUpperCase();
       });
-      await updateBudgetAssumptions(budget.id, assumptionsPayload);
+      await updateBudgetAssumptions(budget.id, {
+        values: assumptionsPayload,
+        estimate_currencies: estimateCurrencyPayload
+      });
       const nextCurrencies = currenciesResp.currencies?.length
         ? dedupeCurrencies(currenciesResp.currencies)
         : [resolvedBaseCurrency];
