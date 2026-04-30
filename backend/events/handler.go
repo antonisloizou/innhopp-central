@@ -3400,6 +3400,7 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		return nil
 	}
 
+	airfieldIDsFromInnhopps := make(map[int64]struct{})
 	for index, innhopp := range innhopps {
 		landOwnersJSON, err := encodeLandOwners(innhopp.LandOwners)
 		if err != nil {
@@ -3458,6 +3459,24 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			innhopp.LandOwnerPermission,
 		); err != nil {
 			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
+		}
+
+		if innhopp.TakeoffAirfieldID != nil {
+			airfieldIDsFromInnhopps[*innhopp.TakeoffAirfieldID] = struct{}{}
+		}
+		if innhopp.LandingAirfieldID != nil {
+			airfieldIDsFromInnhopps[*innhopp.LandingAirfieldID] = struct{}{}
+		}
+	}
+
+	for airfieldID := range airfieldIDsFromInnhopps {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO event_airfields (event_id, airfield_id) VALUES ($1, $2)
+             ON CONFLICT (event_id, airfield_id) DO NOTHING`,
+			eventID,
+			airfieldID,
+		); err != nil {
+			return fmt.Errorf("failed to link innhopp airfield %d to event: %w", airfieldID, err)
 		}
 	}
 	return nil

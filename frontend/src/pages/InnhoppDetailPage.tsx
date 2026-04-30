@@ -32,52 +32,15 @@ import 'flatpickr/dist/flatpickr.css';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
+import { parseCoordinates } from '../utils/coordinates';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
-const dmsRegex = /(\d{1,3})°(\d{1,2})'(\d{1,2}(?:\.\d+)?)"?([NSEW])/i;
-
-const parseSingleDMS = (value: string): number | null => {
-  const match = value.trim().match(dmsRegex);
-  if (!match) return null;
-  const [, degStr, minStr, secStr, hemiRaw] = match;
-  const deg = Number(degStr);
-  const min = Number(minStr);
-  const sec = Number(secStr);
-  const hemi = hemiRaw.toUpperCase();
-  if (Number.isNaN(deg) || Number.isNaN(min) || Number.isNaN(sec)) return null;
-  const decimal = deg + min / 60 + sec / 3600;
-  if (hemi === 'S' || hemi === 'W') {
-    return -decimal;
-  }
-  return decimal;
-};
-
-const parseCoordinatePair = (raw?: string | null): { lat: number; lon: number } | null => {
-  if (!raw) return null;
-  const global = new RegExp(dmsRegex.source, 'ig');
-  const matches = Array.from(raw.matchAll(global));
-  if (matches.length < 2) return null;
-  const first = parseSingleDMS(matches[0][0]);
-  const second = parseSingleDMS(matches[1][0]);
-  if (first == null || second == null) return null;
-  // Determine which is lat vs lon by hemisphere
-  const firstHemi = matches[0][4].toUpperCase();
-  const secondHemi = matches[1][4].toUpperCase();
-  if ((firstHemi === 'N' || firstHemi === 'S') && (secondHemi === 'E' || secondHemi === 'W')) {
-    return { lat: first, lon: second };
-  }
-  if ((firstHemi === 'E' || firstHemi === 'W') && (secondHemi === 'N' || secondHemi === 'S')) {
-    return { lat: second, lon: first };
-  }
-  return { lat: first, lon: second };
-};
-
-const haversineKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+const haversineKm = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const toRad = (v: number) => (v * Math.PI) / 180;
   const R = 6371; // km
   const dLat = toRad(b.lat - a.lat);
-  const dLon = toRad(b.lon - a.lon);
+  const dLon = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
   const lat2 = toRad(b.lat);
   const h =
@@ -790,9 +753,9 @@ const InnhoppDetailPage = () => {
   };
 
   useEffect(() => {
-    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const innhoppCoords = parseCoordinates(form.coordinates);
     const takeoff = airfields.find((a) => a.id === form.takeoff_airfield_id);
-    const takeoffCoords = parseCoordinatePair(takeoff?.coordinates);
+    const takeoffCoords = parseCoordinates(takeoff?.coordinates);
     if (!innhoppCoords || !takeoffCoords) {
       return;
     }
@@ -816,9 +779,9 @@ const InnhoppDetailPage = () => {
       }));
       return;
     }
-    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const innhoppCoords = parseCoordinates(form.coordinates);
     const landing = airfields.find((a) => a.id === form.landing_airfield_id);
-    const landingCoords = parseCoordinatePair(landing?.coordinates);
+    const landingCoords = parseCoordinates(landing?.coordinates);
     if (!innhoppCoords || !landingCoords) {
       setLandingDrivingDurationMinutes(null);
       setLandingRoadRouteError(null);
@@ -842,8 +805,8 @@ const InnhoppDetailPage = () => {
         if (cancelled || routeRequestRef.current !== requestId) return;
         const service = new maps.DirectionsService();
         return service.route({
-          origin: { lat: landingCoords.lat, lng: landingCoords.lon },
-          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lon },
+          origin: { lat: landingCoords.lat, lng: landingCoords.lng },
+          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lng },
           travelMode: maps.TravelMode.DRIVING
         });
       })
@@ -887,9 +850,9 @@ const InnhoppDetailPage = () => {
       }));
       return;
     }
-    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const innhoppCoords = parseCoordinates(form.coordinates);
     const landing = airfields.find((a) => a.id === form.landing_airfield_id);
-    const landingCoords = parseCoordinatePair(landing?.coordinates);
+    const landingCoords = parseCoordinates(landing?.coordinates);
     if (!innhoppCoords || !landingCoords) return;
     const km = haversineKm(innhoppCoords, landingCoords);
     const rounded = Math.ceil(km);
@@ -901,9 +864,9 @@ const InnhoppDetailPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const innhoppCoords = parseCoordinates(form.coordinates);
     const takeoff = airfields.find((a) => a.id === form.takeoff_airfield_id);
-    const takeoffCoords = parseCoordinatePair(takeoff?.coordinates);
+    const takeoffCoords = parseCoordinates(takeoff?.coordinates);
     if (!innhoppCoords || !takeoffCoords) {
       setDrivingDurationMinutes(null);
       setRoadRouteError(null);
@@ -927,8 +890,8 @@ const InnhoppDetailPage = () => {
         if (cancelled || routeRequestRef.current !== requestId) return;
         const service = new maps.DirectionsService();
         return service.route({
-          origin: { lat: takeoffCoords.lat, lng: takeoffCoords.lon },
-          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lon },
+          origin: { lat: takeoffCoords.lat, lng: takeoffCoords.lng },
+          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lng },
           travelMode: maps.TravelMode.DRIVING
         });
       })
@@ -1794,7 +1757,7 @@ const InnhoppDetailPage = () => {
                       ? `${formatDurationMinutes(flyingDurationMinutes)} (${Math.round(
                           budgetAircraftSpeedKmh as number
                         )} km/h)`
-                      : `not available${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                      : `Unavailable${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
                   </span>
                 </span>
             </label>
@@ -1998,7 +1961,7 @@ const InnhoppDetailPage = () => {
                           ? `${formatDurationMinutes(landingFlyingDurationMinutes)} (${Math.round(
                               budgetAircraftSpeedKmh as number
                             )} km/h)`
-                          : `not available${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                          : `Unavailable${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
                       </span>
                     </span>
                   </label>
