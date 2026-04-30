@@ -119,6 +119,12 @@ const emptyLandingArea = (): LandingAreaForm => ({
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 const hasNumber = (value?: number | null) => value !== null && value !== undefined && Number.isFinite(value);
 const hasBoolean = (value?: boolean | null) => value !== null && value !== undefined;
+const isActionableTravelEstimateIssue = (reason: string) =>
+  reason.includes('Google Maps API key is not configured') ||
+  reason.includes('Failed to load Google Maps') ||
+  reason.includes('Could not calculate a driving route') ||
+  reason.includes('Failed to calculate driving route') ||
+  reason.includes('Route duration could not be calculated.');
 
 const toLandingAreaForm = (area?: LandingArea | null): LandingAreaForm => ({
   name: area?.name || '',
@@ -784,6 +790,7 @@ const InnhoppDetailPage = () => {
     }
     if (lastFlyingUnavailableReasonRef.current === reason) return;
     lastFlyingUnavailableReasonRef.current = reason;
+    if (!isActionableTravelEstimateIssue(reason)) return;
     console.warn(`[InnhoppDetail] Flying time estimate unavailable: ${reason}`);
   }, [flyingDurationMinutes, form.distance_by_air, budgetAircraftSpeedKmh, budgetFlightEstimateReason]);
 
@@ -821,25 +828,26 @@ const InnhoppDetailPage = () => {
     setLandingRoadRouteError(null);
 
     loadGoogleMapsApi()
-      .then((maps) => {
+      .then(async (maps) => {
         if (cancelled || routeRequestRef.current !== requestId) return;
-        const service = new maps.DirectionsService();
-        return service.route({
+        const { Route } = await maps.importLibrary('routes');
+        return Route.computeRoutes({
           origin: { lat: landingCoords.lat, lng: landingCoords.lng },
           destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lng },
-          travelMode: maps.TravelMode.DRIVING
+          travelMode: maps.TravelMode.DRIVING,
+          fields: ['legs']
         });
       })
       .then((result: any) => {
         if (!result || cancelled || routeRequestRef.current !== requestId) return;
         const leg = result.routes?.[0]?.legs?.[0];
-        const distanceMeters = leg?.distance?.value;
-        const durationSeconds = leg?.duration?.value;
-        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationSeconds)) {
+        const distanceMeters = leg?.distanceMeters;
+        const durationMillis = leg?.durationMillis;
+        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationMillis)) {
           throw new Error('Could not calculate a driving route.');
         }
         const roadKm = Math.ceil(distanceMeters / 1000);
-        const durationMin = Math.round(durationSeconds / 60);
+        const durationMin = Math.round(durationMillis / 60000);
         setForm((prev) => {
           if (prev.landing_distance_by_road === roadKm) return prev;
           return { ...prev, landing_distance_by_road: roadKm };
@@ -899,6 +907,7 @@ const InnhoppDetailPage = () => {
     }
     if (lastLandingFlyingUnavailableReasonRef.current === reason) return;
     lastLandingFlyingUnavailableReasonRef.current = reason;
+    if (!isActionableTravelEstimateIssue(reason)) return;
     console.warn(`[InnhoppDetail] Landing flying time estimate unavailable: ${reason}`);
   }, [
     sameLandingAsTakeoff,
@@ -932,25 +941,26 @@ const InnhoppDetailPage = () => {
     setRoadRouteError(null);
 
     loadGoogleMapsApi()
-      .then((maps) => {
+      .then(async (maps) => {
         if (cancelled || routeRequestRef.current !== requestId) return;
-        const service = new maps.DirectionsService();
-        return service.route({
+        const { Route } = await maps.importLibrary('routes');
+        return Route.computeRoutes({
           origin: { lat: takeoffCoords.lat, lng: takeoffCoords.lng },
           destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lng },
-          travelMode: maps.TravelMode.DRIVING
+          travelMode: maps.TravelMode.DRIVING,
+          fields: ['legs']
         });
       })
       .then((result: any) => {
         if (!result || cancelled || routeRequestRef.current !== requestId) return;
         const leg = result.routes?.[0]?.legs?.[0];
-        const distanceMeters = leg?.distance?.value;
-        const durationSeconds = leg?.duration?.value;
-        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationSeconds)) {
+        const distanceMeters = leg?.distanceMeters;
+        const durationMillis = leg?.durationMillis;
+        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationMillis)) {
           throw new Error('Could not calculate a driving route.');
         }
         const roadKm = Math.ceil(distanceMeters / 1000);
-        const durationMin = Math.round(durationSeconds / 60);
+        const durationMin = Math.round(durationMillis / 60000);
         setForm((prev) => {
           if (prev.distance_by_road === roadKm) return prev;
           return { ...prev, distance_by_road: roadKm };
@@ -992,6 +1002,7 @@ const InnhoppDetailPage = () => {
             : 'Route duration could not be calculated.');
     if (lastDrivingUnavailableReasonRef.current === reason) return;
     lastDrivingUnavailableReasonRef.current = reason;
+    if (!isActionableTravelEstimateIssue(reason)) return;
     console.warn(`[InnhoppDetail] Driving time estimate unavailable: ${reason}`);
   }, [
     roadRouteLoading,
@@ -1026,6 +1037,7 @@ const InnhoppDetailPage = () => {
             : 'Route duration could not be calculated.');
     if (lastLandingDrivingUnavailableReasonRef.current === reason) return;
     lastLandingDrivingUnavailableReasonRef.current = reason;
+    if (!isActionableTravelEstimateIssue(reason)) return;
     console.warn(`[InnhoppDetail] Landing driving time estimate unavailable: ${reason}`);
   }, [
     sameLandingAsTakeoff,
