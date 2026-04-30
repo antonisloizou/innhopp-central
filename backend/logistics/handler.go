@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -2456,67 +2455,107 @@ type Transport struct {
 	CreatedAt          time.Time          `json:"created_at"`
 }
 
-type directionsAPIResponse struct {
-	Status       string `json:"status"`
-	ErrorMessage string `json:"error_message"`
+type routesAPIRequest struct {
+	Origin      routesAPIWaypoint `json:"origin"`
+	Destination routesAPIWaypoint `json:"destination"`
+	TravelMode  string            `json:"travelMode"`
+}
+
+type routesAPIWaypoint struct {
+	Address string `json:"address"`
+}
+
+type routesAPIResponse struct {
 	Routes       []struct {
 		Legs []struct {
-			Duration struct {
-				Value int `json:"value"`
-			} `json:"duration"`
+			Duration string `json:"duration"`
 		} `json:"legs"`
 	} `json:"routes"`
 }
 
+type routesAPIErrorResponse struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error"`
+}
+
 func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, destination string) (*int, error) {
-	if strings.TrimSpace(origin) == "" || strings.TrimSpace(destination) == "" || h.mapsAPIKey == "" {
+	if strings.TrimSpace(origin) == "" || strings.TrimSpace(destination) == "" {
+		log.Printf("route duration skipped: empty origin or destination (origin=%q,destination=%q)", origin, destination)
+		return nil, nil
+	}
+	if h.mapsAPIKey == "" {
+		log.Printf("route duration skipped: GOOGLE_MAPS_API_KEY is not set")
 		return nil, nil
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 	defer cancel()
 
-	q := url.Values{}
-	q.Set("origin", origin)
-	q.Set("destination", destination)
-	q.Set("mode", "driving")
-	q.Set("key", h.mapsAPIKey)
-	endpoint := "https://maps.googleapis.com/maps/api/directions/json?" + q.Encode()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+	body, err := json.Marshal(routesAPIRequest{
+		Origin: routesAPIWaypoint{
+			Address: origin,
+		},
+		Destination: routesAPIWaypoint{
+			Address: destination,
+		},
+		TravelMode: "DRIVE",
+	})
 	if err != nil {
 		return nil, err
 	}
+	endpoint := "https://routes.googleapis.com/directions/v2:computeRoutes"
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Goog-Api-Key", h.mapsAPIKey)
+	req.Header.Set("X-Goog-FieldMask", "routes.legs.duration")
+
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var payload directionsAPIResponse
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr routesAPIErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil && strings.TrimSpace(apiErr.Error.Status) != "" {
+			if apiErr.Error.Status == "NOT_FOUND" {
+				log.Printf("route duration unavailable: route not found (origin=%q,destination=%q)", origin, destination)
+				return nil, nil
+			}
+			return nil, fmt.Errorf("%s: %s", apiErr.Error.Status, apiErr.Error.Message)
+		}
+		return nil, fmt.Errorf("routes api request failed: status=%d", resp.StatusCode)
+	}
+
+	var payload routesAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return nil, err
 	}
-	if payload.Status != "OK" {
-		if payload.Status == "ZERO_RESULTS" || payload.Status == "NOT_FOUND" {
-			return nil, nil
-		}
-		if payload.ErrorMessage != "" {
-			return nil, fmt.Errorf("%s: %s", payload.Status, payload.ErrorMessage)
-		}
-		return nil, fmt.Errorf(payload.Status)
-	}
 	if len(payload.Routes) == 0 || len(payload.Routes[0].Legs) == 0 {
+		log.Printf("route duration unavailable: no routes/legs returned (origin=%q,destination=%q)", origin, destination)
 		return nil, nil
 	}
 
-	totalSeconds := 0
+	totalSeconds := time.Duration(0)
 	for _, leg := range payload.Routes[0].Legs {
-		totalSeconds += leg.Duration.Value
+		legDuration, err := time.ParseDuration(strings.TrimSpace(leg.Duration))
+		if err != nil {
+			return nil, err
+		}
+		totalSeconds += legDuration
 	}
 	if totalSeconds <= 0 {
+		log.Printf("route duration unavailable: non-positive computed duration (origin=%q,destination=%q)", origin, destination)
 		return nil, nil
 	}
-	minutes := (totalSeconds + 59) / 60
+	seconds := int(totalSeconds / time.Second)
+	minutes := (seconds + 59) / 60
 	return &minutes, nil
 }
 
