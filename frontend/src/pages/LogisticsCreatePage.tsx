@@ -33,6 +33,9 @@ type LocationOption = {
 const LogisticsCreatePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const returnTo = typeof (location.state as any)?.returnTo === 'string'
+    ? (location.state as any).returnTo.trim()
+    : '';
   const copyTransport = (location.state as any)?.copyTransport;
   const copyTransportVehicles =
     Array.isArray(copyTransport?.vehicles) && copyTransport.vehicles.length
@@ -226,7 +229,11 @@ const LogisticsCreatePage = () => {
           // ignore highlight persistence errors
         }
       }
-      navigate(isCopy ? -2 : -1);
+      if (returnTo) {
+        navigate(returnTo);
+      } else {
+        navigate(isCopy ? -2 : -1);
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create transport');
     } finally {

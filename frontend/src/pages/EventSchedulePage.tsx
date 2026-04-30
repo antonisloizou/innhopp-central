@@ -1667,6 +1667,7 @@ const EventSchedulePage = () => {
     if (type === 'Transport') {
       navigate('/logistics/new', {
         state: {
+          returnTo: `/events/${eventId}`,
           copyTransport: {
             event_id: eventNumericId,
             scheduled_at: scheduledAt

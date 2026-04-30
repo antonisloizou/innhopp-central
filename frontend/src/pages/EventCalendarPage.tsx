@@ -20,6 +20,20 @@ const formatDate = (value?: string | null) =>
     ? formatEventLocal(value, { month: 'short', day: 'numeric', year: 'numeric' })
     : 'TBD';
 
+const compareEventsChronologically = (a: Event, b: Event) => {
+  const startA = parseEventLocal(a.starts_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+  const startB = parseEventLocal(b.starts_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+  if (startA !== startB) return startA - startB;
+
+  const endA = parseEventLocal(a.ends_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+  const endB = parseEventLocal(b.ends_at)?.getTime() ?? Number.POSITIVE_INFINITY;
+  if (endA !== endB) return endA - endB;
+
+  const nameCmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  if (nameCmp !== 0) return nameCmp;
+  return a.id - b.id;
+};
+
 const EventCalendarPage = () => {
   const { user, refreshSession } = useAuth();
   const navigate = useNavigate();
@@ -185,7 +199,7 @@ const EventCalendarPage = () => {
       .map(([seasonId, group]) => ({
         seasonId,
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
-        events: group
+        events: [...group].sort(compareEventsChronologically)
       }));
   }, [visibleEvents, seasonLookup]);
 
@@ -210,7 +224,7 @@ const EventCalendarPage = () => {
       .map(([seasonId, group]) => ({
         seasonId,
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
-        events: group
+        events: [...group].sort(compareEventsChronologically)
       }));
   }, [myEvents, seasonLookup]);
 
