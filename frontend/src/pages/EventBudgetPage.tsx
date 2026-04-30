@@ -175,6 +175,11 @@ const EventBudgetPage = () => {
   });
   const [openScenarioMenuFor, setOpenScenarioMenuFor] = useState<OverviewScenarioCardKey | null>(null);
   useEffect(() => {
+    if (costSplitTab !== 'innhopp' && isTimeSplitMode) {
+      setCostSplitMode('amount');
+    }
+  }, [costSplitTab, isTimeSplitMode]);
+  useEffect(() => {
     if (!openScenarioMenuFor) return;
     const onDocumentMouseDown = (event: globalThis.MouseEvent) => {
       const target = event.target;
@@ -2092,16 +2097,18 @@ const EventBudgetPage = () => {
                 >
                   Percentage
                 </button>
-                <button
-                  type="button"
-                  className={costSplitMode === 'time' ? 'primary' : 'ghost'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCostSplitMode('time');
-                  }}
-                >
-                  Time
-                </button>
+                {costSplitTab === 'innhopp' ? (
+                  <button
+                    type="button"
+                    className={costSplitMode === 'time' ? 'primary' : 'ghost'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCostSplitMode('time');
+                    }}
+                  >
+                    Time
+                  </button>
+                ) : null}
               </div>
               </div>}
             </header>
