@@ -1177,7 +1177,27 @@ const EventBudgetPage = () => {
     const rect = event.currentTarget.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const localX = ((event.clientX - rect.left) / rect.width) * marginCurve.chartWidth;
-    const x = clamp(localX, marginCurve.plotLeft, marginCurve.plotRight);
+    const pointerX = clamp(localX, marginCurve.plotLeft, marginCurve.plotRight);
+    const pointerXRatio =
+      (pointerX - marginCurve.plotLeft) / (marginCurve.plotRight - marginCurve.plotLeft || 1);
+    const pointerParticipants = marginCurve.xMin + pointerXRatio * (marginCurve.xMax - marginCurve.xMin);
+    const confirmParticipants = summary?.scenarios?.confirm_case?.participants;
+    const fullParticipants = summary?.scenarios?.full_capacity_case?.participants;
+    if (
+      typeof confirmParticipants === 'number' &&
+      typeof fullParticipants === 'number' &&
+      (pointerParticipants < confirmParticipants || pointerParticipants > fullParticipants)
+    ) {
+      setCurveHover(null);
+      return;
+    }
+    const participants = Math.round(pointerParticipants);
+    const guideXRatio = (participants - marginCurve.xMin) / (marginCurve.xMax - marginCurve.xMin || 1);
+    const x = clamp(
+      marginCurve.plotLeft + guideXRatio * (marginCurve.plotRight - marginCurve.plotLeft),
+      marginCurve.plotLeft,
+      marginCurve.plotRight
+    );
     const margin = getCurveMarginAtX(x);
     const yRatio = (marginCurve.axisMax - margin) / (marginCurve.axisMax - marginCurve.axisMin || 1);
     const y = clamp(
@@ -1185,8 +1205,6 @@ const EventBudgetPage = () => {
       marginCurve.plotTop,
       marginCurve.plotBottom
     );
-    const xRatio = (x - marginCurve.plotLeft) / (marginCurve.plotRight - marginCurve.plotLeft || 1);
-    const participants = marginCurve.xMin + xRatio * (marginCurve.xMax - marginCurve.xMin);
     setCurveHover({ x, y, participants, margin });
   };
   const clearCurveHover = () => setCurveHover(null);

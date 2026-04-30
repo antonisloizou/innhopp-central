@@ -349,6 +349,26 @@ button.ghost {
   grid-column: 1 / -1;
 }
 
+.accommodation-create-booked-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: fit-content;
+}
+
+.accommodation-create-booked-checkbox {
+  appearance: auto;
+  -webkit-appearance: checkbox;
+  display: inline-block;
+  width: auto;
+  min-width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  justify-self: start;
+  flex: 0 0 auto;
+}
+
 .registration-settings-row--link .registration-link-preview {
   grid-column: auto;
 }

@@ -177,14 +177,14 @@ const LogisticsAccommodationCreatePage = () => {
             />
           </label>
           <label className="form-field">
-            <span>Booked</span>
-            <div className="checkbox-field">
+            <div className="accommodation-create-booked-row">
+              <span>Booked</span>
               <input
+                className="accommodation-create-booked-checkbox"
                 type="checkbox"
                 checked={form.booked}
                 onChange={(e) => setForm((prev) => ({ ...prev, booked: e.target.checked }))}
               />
-              <span>Mark as booked</span>
             </div>
           </label>
           <label className="form-field form-field-full-span">

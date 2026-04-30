@@ -98,7 +98,7 @@ const LogisticsMealCreatePage = () => {
     <section className="stack">
       <header className="page-header">
         <div>
-          <h2>{isCopy ? 'Copy meal' : 'Create meal'}</h2>
+          <h2>Create meal</h2>
         </div>
         <div className="card-actions">
           <button
