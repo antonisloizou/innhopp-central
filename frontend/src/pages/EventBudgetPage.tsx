@@ -84,6 +84,11 @@ const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = 
   full: 'full_capacity_case'
 };
 const AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER = ':missing-distance';
+const formatQty = (value: number) => {
+  if (!Number.isFinite(value)) return '0';
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(2).replace(/\.?0+$/, '');
+};
 
 const EventBudgetPage = () => {
   const { eventId } = useParams();
@@ -1064,11 +1069,16 @@ const EventBudgetPage = () => {
         const isFoodAccommodation = sectionCode === 'food_accommodation';
         const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode) ? lineItemsScales.aircraftScale : 1;
         const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
+        const scaledQuantity = Number(item.quantity || 0) * loadScale;
+        const scenarioQuantity = isAircraft ? Math.ceil(scaledQuantity) : scaledQuantity;
         const scenarioScale = loadScale * paxScale * lineItemsScales.driftScale;
+        const scenarioLineTotal = isAircraft
+          ? scenarioQuantity * Number(item.unit_cost || 0) * lineItemsScales.driftScale
+          : Number(item.line_total || 0) * scenarioScale;
         return {
           ...item,
-          scenario_quantity: Number(item.quantity || 0) * loadScale,
-          scenario_line_total: Number(item.line_total || 0) * scenarioScale
+          scenario_quantity: scenarioQuantity,
+          scenario_line_total: scenarioLineTotal
         };
       }),
     [lineItems, lineItemsScales.aircraftScale, lineItemsScales.participantScale, lineItemsScales.driftScale, isLoadBasedCrewMode, isEstimateOrHybridMode]
@@ -1992,7 +2002,6 @@ const EventBudgetPage = () => {
               {parametersTab === 'aircraft' && (
                 <div className="budget-assumptions-row budget-assumptions-row--aircraft">
                   {renderNumericParameterField('aircraft_price_per_minute')}
-                  {renderNumericParameterField('minimum_load_duration')}
                   <label className="form-field">
                     <span>Aircraft currency</span>
                     <select
@@ -2007,6 +2016,7 @@ const EventBudgetPage = () => {
                     </select>
                   </label>
                   {renderNumericParameterField('aircraft_cruising_speed_kmh')}
+                  {renderNumericParameterField('minimum_load_duration')}
                 </div>
               )}
               {parametersTab === 'pricing' && (
@@ -2173,7 +2183,7 @@ const EventBudgetPage = () => {
 
           <article className="card budget-line-items-card">
             <header
-              className="card-header event-detail-section-header"
+              className="card-header event-detail-section-header budget-cost-split-header"
               onClick={() => toggleSection('lineItems')}
             >
               <div className="event-detail-section-header-main">
@@ -2355,7 +2365,7 @@ const EventBudgetPage = () => {
                       <td>{item.service_date ? item.service_date.slice(0, 10) : '-'}</td>
                       <td>{item.location_label || '-'}</td>
                       <td>
-                        {item.scenario_quantity.toFixed(2)}
+                        {formatQty(item.scenario_quantity)}
                         {hasMissingDistanceWarning(item.notes) ? (
                           <sup
                             className="nav-user-warning budget-warning-sup"

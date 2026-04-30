@@ -2090,7 +2090,7 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		if roundTripMinutes < minimumLoadDuration {
 			roundTripMinutes = minimumLoadDuration
 		}
-		totalMinutes := roundMoney(roundTripMinutes * float64(fullLoadCount))
+		totalMinutes := math.Ceil(roundTripMinutes * float64(fullLoadCount))
 		if totalMinutes <= 0 {
 			continue
 		}
@@ -2261,7 +2261,7 @@ func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int6
 		if roundTripMinutes < minimumLoadDuration {
 			roundTripMinutes = minimumLoadDuration
 		}
-		aggregateMinutes += roundTripMinutes * float64(loadCount)
+		aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
 	}
 	if err := rows.Err(); err != nil {
 		return 0, 0, err
