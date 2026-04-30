@@ -136,6 +136,14 @@ const EventBudgetPage = () => {
     participants: number;
     margin: number;
   } | null>(null);
+  const [curvePopup, setCurvePopup] = useState<{
+    x: number;
+    y: number;
+    participants: number;
+    margin: number;
+    costWithDrift: number;
+    revenue: number;
+  } | null>(null);
   const [openSections, setOpenSections] = useState<Record<BudgetSectionKey, boolean>>({
     overview: true,
     parameters: true,
@@ -796,7 +804,15 @@ const EventBudgetPage = () => {
     isEstimateOrHybridMode,
     scenarioDriftScale
   ]);
-  const marginCurve = useMemo(() => buildMarginCurveModel(summary), [summary]);
+  const targetMarkupPercent =
+    parameters.target_markup_percent ??
+    summary?.parameters?.target_markup_percent ??
+    summary?.assumptions?.target_markup_percent ??
+    0;
+  const marginCurve = useMemo(
+    () => buildMarginCurveModel(summary, targetMarkupPercent),
+    [summary, targetMarkupPercent]
+  );
   const worstCaseGreen = useMemo(() => isWorstCaseGreen(summary), [summary]);
   const innhoppsByID = useMemo(
     () => new Map((activeEventData?.innhopps || []).map((innhopp) => [innhopp.id, innhopp])),
@@ -1073,11 +1089,6 @@ const EventBudgetPage = () => {
       }),
     [lineItems, lineItemsScales.aircraftScale, lineItemsScales.participantScale, lineItemsScales.driftScale, isLoadBasedCrewMode, isEstimateOrHybridMode]
   );
-  const targetMarkupPercent =
-    parameters.target_markup_percent ??
-    summary?.parameters?.target_markup_percent ??
-    summary?.assumptions?.target_markup_percent ??
-    0;
   const scenarioForCard = (card: OverviewScenarioCardKey) =>
     summary?.scenarios?.[scenarioSummaryKeyByLabel[overviewScenarios[card]]] || null;
   const expectedCostScenario = scenarioForCard('expectedCost');
@@ -1172,10 +1183,10 @@ const EventBudgetPage = () => {
     }
     return points[points.length - 1].margin;
   };
-  const handleCurveMouseMove = (event: MouseEvent<SVGSVGElement>) => {
-    if (!marginCurve) return;
+  const getCurvePointerPoint = (event: MouseEvent<SVGSVGElement>) => {
+    if (!marginCurve) return null;
     const rect = event.currentTarget.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
+    if (!rect.width || !rect.height) return null;
     const localX = ((event.clientX - rect.left) / rect.width) * marginCurve.chartWidth;
     const pointerX = clamp(localX, marginCurve.plotLeft, marginCurve.plotRight);
     const pointerXRatio =
@@ -1188,8 +1199,7 @@ const EventBudgetPage = () => {
       typeof fullParticipants === 'number' &&
       (pointerParticipants < confirmParticipants || pointerParticipants > fullParticipants)
     ) {
-      setCurveHover(null);
-      return;
+      return null;
     }
     const participants = Math.round(pointerParticipants);
     const guideXRatio = (participants - marginCurve.xMin) / (marginCurve.xMax - marginCurve.xMin || 1);
@@ -1205,7 +1215,65 @@ const EventBudgetPage = () => {
       marginCurve.plotTop,
       marginCurve.plotBottom
     );
-    setCurveHover({ x, y, participants, margin });
+    return { x, y, participants, margin };
+  };
+  const interpolateScenarioValueAtParticipants = (
+    participants: number,
+    selector: (scenario: NonNullable<BudgetSummary['scenarios']>['confirm_case']) => number
+  ) => {
+    const scenarios = summary?.scenarios;
+    if (!scenarios) return 0;
+    const points = [scenarios.confirm_case, scenarios.worst_case_gate, scenarios.full_capacity_case]
+      .filter((scenario): scenario is NonNullable<typeof scenario> => Boolean(scenario))
+      .map((scenario) => ({
+        participants: Number(scenario.participants || 0),
+        value: Number(selector(scenario) || 0)
+      }))
+      .filter((point) => Number.isFinite(point.participants))
+      .sort((a, b) => a.participants - b.participants);
+    if (!points.length) return 0;
+    if (participants <= points[0].participants) return points[0].value;
+    if (participants >= points[points.length - 1].participants) return points[points.length - 1].value;
+    for (let i = 1; i < points.length; i += 1) {
+      const left = points[i - 1];
+      const right = points[i];
+      if (participants <= right.participants) {
+        const span = right.participants - left.participants || 1;
+        const ratio = (participants - left.participants) / span;
+        return left.value + ratio * (right.value - left.value);
+      }
+    }
+    return points[points.length - 1].value;
+  };
+  const handleCurveMouseMove = (event: MouseEvent<SVGSVGElement>) => {
+    const point = getCurvePointerPoint(event);
+    if (!point) {
+      setCurveHover(null);
+      return;
+    }
+    setCurveHover(point);
+  };
+  const handleCurveClick = (event: MouseEvent<SVGSVGElement>) => {
+    if (curvePopup) {
+      setCurvePopup(null);
+      return;
+    }
+    const point = getCurvePointerPoint(event);
+    if (!point) {
+      setCurvePopup(null);
+      return;
+    }
+    const costWithDrift = interpolateScenarioValueAtParticipants(point.participants, (scenario) =>
+      Number(scenario.cost_with_drift || 0)
+    );
+    const revenue = interpolateScenarioValueAtParticipants(point.participants, (scenario) =>
+      Number(scenario.revenue || 0)
+    );
+    setCurvePopup({
+      ...point,
+      costWithDrift,
+      revenue
+    });
   };
   const clearCurveHover = () => setCurveHover(null);
 
@@ -1502,6 +1570,18 @@ const EventBudgetPage = () => {
             <div className="budget-bars-grid">
               {scenarioBars.map((entry) => (
                 <div className="budget-bar-card" key={entry.key}>
+                  {(() => {
+                    const scenarioTargetRevenue = entry.costWithDrift * (1 + targetMarkupPercent / 100);
+                    const scenarioTargetMargin = scenarioTargetRevenue - entry.costWithDrift;
+                    const targetRevenuePctRaw =
+                      entry.costWithDrift > 0
+                        ? entry.costPct * (1 + targetMarkupPercent / 100)
+                        : entry.revenue > 0
+                          ? entry.revenuePct * (scenarioTargetRevenue / entry.revenue)
+                          : 0;
+                    const targetRevenuePct = Math.max(0, Math.min(100, targetRevenuePctRaw));
+                    return (
+                      <>
                   <div className="budget-bar-header">
                     <strong>{entry.label}</strong>
                     <span className="muted">{entry.participants} pax</span>
@@ -1521,6 +1601,12 @@ const EventBudgetPage = () => {
                     <div className="budget-grouped-bar-wrap">
                       <span className="field-label">Revenue</span>
                       <div className="budget-bar-track">
+                        <span
+                          className="budget-bar-target-line"
+                          style={{ left: `${targetRevenuePct}%` }}
+                          title={`Target Revenue: ${formatMoney(scenarioTargetRevenue || 0)}`}
+                          aria-hidden="true"
+                        />
                         <div
                           className="budget-bar budget-bar-green"
                           style={{ width: `${entry.revenuePct}%` }}
@@ -1528,23 +1614,41 @@ const EventBudgetPage = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="budget-bar-values muted">
-                    <span>
-                      Cost: <span className="budget-bar-value-amount">{formatMoney(entry.costWithDrift || 0)}</span>
-                    </span>
-                    <span>
-                      Revenue: <span className="budget-bar-value-amount">{formatMoney(entry.revenue || 0)}</span>
-                    </span>
+                  <div className="budget-bar-table muted" role="table" aria-label={`${entry.label} cost revenue margin summary`}>
+                    <div className="budget-bar-table-row budget-bar-table-row-labels" role="row">
+                      <span className="field-label" role="cell">Cost</span>
+                      <span className="field-label" role="cell">Target</span>
+                      <span className="field-label" role="cell">Revenue</span>
+                    </div>
+                    <div className="budget-bar-table-row" role="row">
+                      <span role="cell" className="budget-bar-value-amount">{formatMoney(entry.costWithDrift || 0)}</span>
+                      <span role="cell" className="budget-bar-value-amount">{formatMoney(scenarioTargetRevenue || 0)}</span>
+                      <span role="cell" className="budget-bar-value-amount">{formatMoney(entry.revenue || 0)}</span>
+                    </div>
+                    <div className="budget-bar-table-row budget-bar-table-row-spacer" role="row" aria-hidden="true">
+                      <span role="cell" />
+                      <span role="cell" />
+                      <span role="cell" />
+                    </div>
+                    <div className="budget-bar-table-row budget-bar-table-row-two-col budget-bar-table-row-labels" role="row">
+                      <span className="field-label" role="cell">{`Target Margin ${targetMarkupPercent}%`}</span>
+                      <span className="field-label" role="cell">Margin</span>
+                    </div>
+                    <div className="budget-bar-table-row budget-bar-table-row-two-col" role="row">
+                      <span role="cell" className="budget-bar-value-amount">{formatMoney(scenarioTargetMargin || 0)}</span>
+                      <span role="cell" className="budget-bar-value-amount">{formatMoney(entry.marginWithoutTip || 0)}</span>
+                    </div>
+                    <div className="budget-bar-table-row budget-bar-table-row-single-col" role="row">
+                      <span role="cell">
+                        <span className={`badge ${entry.status === 'green' ? 'success' : 'danger'}`}>
+                          {entry.status === 'green' ? 'Green' : 'Red'}
+                        </span>
+                      </span>
+                    </div>
                   </div>
-                  <div className="budget-bar-values budget-bar-values-margin-row">
-                    <span className="muted">
-                      Margin:{' '}
-                      <span className="budget-bar-value-amount">{formatMoney(entry.marginWithoutTip || 0)}</span>
-                    </span>
-                    <span className={`badge ${entry.status === 'green' ? 'success' : 'danger'}`}>
-                      {entry.status === 'green' ? 'Green' : 'Red'}
-                    </span>
-                  </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -1574,14 +1678,16 @@ const EventBudgetPage = () => {
             <>
             {marginCurve ? (
               <div className="budget-curve-wrap">
-                <svg
-                  className="budget-curve-chart"
-                  viewBox={`0 0 ${marginCurve.chartWidth} ${marginCurve.chartHeight}`}
-                  role="img"
-                  aria-label="Margin across participants"
-                  onMouseMove={handleCurveMouseMove}
-                  onMouseLeave={clearCurveHover}
-                >
+                <div className="budget-curve-chart-wrap">
+                  <svg
+                    className="budget-curve-chart"
+                    viewBox={`0 0 ${marginCurve.chartWidth} ${marginCurve.chartHeight}`}
+                    role="img"
+                    aria-label="Margin across participants"
+                    onMouseMove={handleCurveMouseMove}
+                    onMouseLeave={clearCurveHover}
+                    onClick={handleCurveClick}
+                  >
                   <rect
                     x={marginCurve.plotLeft}
                     y={marginCurve.plotTop}
@@ -1710,7 +1816,88 @@ const EventBudgetPage = () => {
                       </text>
                     </g>
                   ))}
-                </svg>
+                  </svg>
+                  {curvePopup ? (
+                    <div
+                      className="budget-curve-popup"
+                    >
+                      <button
+                        type="button"
+                        className="ghost budget-curve-popup-close"
+                        aria-label="Close profitability popup"
+                        onClick={() => setCurvePopup(null)}
+                      >
+                        ×
+                      </button>
+                      {(() => {
+                        const scenarioTargetRevenue =
+                          curvePopup.costWithDrift * (1 + targetMarkupPercent / 100);
+                        const scenarioTargetMargin = scenarioTargetRevenue - curvePopup.costWithDrift;
+                        const status = curvePopup.margin >= 0 ? 'green' : 'red';
+                        return (
+                          <div className="budget-bar-card">
+                            <div className="budget-bar-header">
+                              <strong>{`${curvePopup.participants} participants`}</strong>
+                            </div>
+                            <div
+                              className="budget-bar-table muted"
+                              role="table"
+                              aria-label={`${curvePopup.participants} participants summary`}
+                            >
+                              <div className="budget-bar-table-row budget-bar-table-row-labels" role="row">
+                                <span className="field-label" role="cell">Cost</span>
+                                <span className="field-label" role="cell">Target</span>
+                                <span className="field-label" role="cell">Revenue</span>
+                              </div>
+                              <div className="budget-bar-table-row" role="row">
+                                <span role="cell" className="budget-bar-value-amount">
+                                  {formatMoney(curvePopup.costWithDrift || 0)}
+                                </span>
+                                <span role="cell" className="budget-bar-value-amount">
+                                  {formatMoney(scenarioTargetRevenue || 0)}
+                                </span>
+                                <span role="cell" className="budget-bar-value-amount">
+                                  {formatMoney(curvePopup.revenue || 0)}
+                                </span>
+                              </div>
+                              <div
+                                className="budget-bar-table-row budget-bar-table-row-spacer"
+                                role="row"
+                                aria-hidden="true"
+                              >
+                                <span role="cell" />
+                                <span role="cell" />
+                                <span role="cell" />
+                              </div>
+                              <div
+                                className="budget-bar-table-row budget-bar-table-row-two-col budget-bar-table-row-labels"
+                                role="row"
+                              >
+                                <span className="field-label" role="cell">{`Target Margin ${targetMarkupPercent}%`}</span>
+                                <span className="field-label" role="cell">Margin</span>
+                              </div>
+                              <div className="budget-bar-table-row budget-bar-table-row-two-col" role="row">
+                                <span role="cell" className="budget-bar-value-amount">
+                                  {formatMoney(scenarioTargetMargin || 0)}
+                                </span>
+                                <span role="cell" className="budget-bar-value-amount">
+                                  {formatMoney(curvePopup.margin || 0)}
+                                </span>
+                              </div>
+                              <div className="budget-bar-table-row budget-bar-table-row-single-col" role="row">
+                                <span role="cell">
+                                  <span className={`badge ${status === 'green' ? 'success' : 'danger'}`}>
+                                    {status === 'green' ? 'Green' : 'Red'}
+                                  </span>
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <p className="muted">No curve data available yet.</p>

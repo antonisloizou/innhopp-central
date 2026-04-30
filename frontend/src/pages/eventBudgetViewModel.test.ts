@@ -150,7 +150,7 @@ describe('eventBudgetViewModel', () => {
       }
     });
 
-    const curve = buildMarginCurveModel(summary);
+    const curve = buildMarginCurveModel(summary, 20);
     expect(curve).not.toBeNull();
     expect(curve?.targetMarginPolylinePoints.split(' ').length).toBe(3);
     const targetPoints = curve?.targetMarginPolylinePoints

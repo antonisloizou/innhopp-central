@@ -123,7 +123,10 @@ export const buildCostSplit = (
   });
 };
 
-export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurveModel | null => {
+export const buildMarginCurveModel = (
+  summary: BudgetSummary | null,
+  targetMarkupPercent: number
+): MarginCurveModel | null => {
   const isNonNull = <T>(value: T | null): value is T => value !== null;
   const rawCurve = summary?.margin_curve;
   const scenarioCurvePoints = scenarioSpecs
@@ -201,7 +204,6 @@ export const buildMarginCurveModel = (summary: BudgetSummary | null): MarginCurv
     x: toX(point.participants),
     y: toY(point.margin)
   }));
-  const targetMarkupPercent = Math.max(0, Number(summary?.parameters?.target_markup_percent || 0));
   const targetMarginPoints = sourceCurvePoints.map((point) => {
     const scenarioCostWithDrift = Number.isFinite(point.costWithDrift)
       ? point.costWithDrift
