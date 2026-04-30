@@ -2086,19 +2086,19 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		}
 
 		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
-		// If landing airfield differs but landing->innhopp is effectively zero,
-		// use takeoff->innhopp distance for both legs instead of falling back to minimum duration.
-		effectiveLandingDistanceByAirKm := landingDistanceByAirKm
-		if !sameAirfield && effectiveLandingDistanceByAirKm <= 0 && distanceByAirKm > 0 {
-			effectiveLandingDistanceByAirKm = distanceByAirKm
-		}
-		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && effectiveLandingDistanceByAirKm <= 0)
+		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && landingDistanceByAirKm < 0)
 		totalDistanceKm := 0.0
 		if sameAirfield {
 			totalDistanceKm = distanceByAirKm * 2 * float64(fullLoadCount)
 		} else {
-			perLoadedTripKm := distanceByAirKm + effectiveLandingDistanceByAirKm
-			totalDistanceKm = perLoadedTripKm*float64(fullLoadCount) + perLoadedTripKm*math.Max(float64(fullLoadCount-1), 0)
+			// Different landing field:
+			// - each load requires takeoff -> innhopp
+			// - loads except the last require return innhopp -> takeoff (approximated by distance_by_air)
+			// - final leg is innhopp -> landing once
+			outboundKm := distanceByAirKm * float64(fullLoadCount)
+			returnToTakeoffKm := distanceByAirKm * math.Max(float64(fullLoadCount-1), 0)
+			finalLandingKm := math.Max(landingDistanceByAirKm, 0)
+			totalDistanceKm = outboundKm + returnToTakeoffKm + finalLandingKm
 		}
 		totalMinutes := 0.0
 		if !missingDistance {
@@ -2286,15 +2286,13 @@ func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int6
 			aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
 			continue
 		}
-		effectiveLandingDistanceByAirKm := landingDistanceByAirKm
-		if effectiveLandingDistanceByAirKm <= 0 && distanceByAirKm > 0 {
-			effectiveLandingDistanceByAirKm = distanceByAirKm
-		}
-		perLoadedTripKm := distanceByAirKm + effectiveLandingDistanceByAirKm
-		totalDistanceKm := perLoadedTripKm*float64(loadCount) + perLoadedTripKm*math.Max(float64(loadCount-1), 0)
+		outboundKm := distanceByAirKm * float64(loadCount)
+		returnToTakeoffKm := distanceByAirKm * math.Max(float64(loadCount-1), 0)
+		finalLandingKm := math.Max(landingDistanceByAirKm, 0)
+		totalDistanceKm := outboundKm + returnToTakeoffKm + finalLandingKm
 		aggregateDistance += totalDistanceKm
 		totalMinutes := 0.0
-		if perLoadedTripKm > 0 {
+		if totalDistanceKm > 0 {
 			totalMinutes = (totalDistanceKm / cruisingSpeedKmh) * 60
 		}
 		minimumMinutes := minimumLoadDuration * float64(loadCount)

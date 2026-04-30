@@ -177,10 +177,13 @@ func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *te
 		t.Fatalf("load generated line item failed: %v", err)
 	}
 
-	// full_load_count=2, perLoadedTripKm=(10+15)=25, totalDistanceKm=25*2 + 25*(2-1)=75
-	// speed=60km/h => 75 minutes, minimum total=2 minutes, so quantity should be 75.
-	if qty != 75 {
-		t.Fatalf("quantity mismatch: got %.2f want 75.00", qty)
+	// full_load_count=2:
+	// - outbound: 10*2 = 20
+	// - return to takeoff between loads: 10*(2-1) = 10
+	// - final innhopp->landing: 15
+	// totalDistanceKm = 45; speed=60km/h => 45 minutes.
+	if qty != 45 {
+		t.Fatalf("quantity mismatch: got %.2f want 45.00", qty)
 	}
 	if strings.Contains(notes, ":missing-distance") {
 		t.Fatalf("unexpected missing-distance marker in notes: %q", notes)
