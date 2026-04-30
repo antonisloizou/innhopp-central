@@ -1135,9 +1135,21 @@ const EventBudgetPage = () => {
           const aDate = a.service_date ? a.service_date.slice(0, 10) : '9999-12-31';
           const bDate = b.service_date ? b.service_date.slice(0, 10) : '9999-12-31';
           if (aDate !== bDate) return aDate.localeCompare(bDate);
+
           const aSection = a.section_name || a.section_code || '';
           const bSection = b.section_name || b.section_code || '';
-          if (aSection !== bSection) return aSection.localeCompare(bSection);
+          if (aSection !== bSection) return aSection.localeCompare(bSection, undefined, { sensitivity: 'base' });
+
+          const aItem = a.name || '';
+          const bItem = b.name || '';
+          if (aItem !== bItem) return aItem.localeCompare(bItem, undefined, { sensitivity: 'base' });
+
+          const aDescription = a.description || '';
+          const bDescription = b.description || '';
+          if (aDescription !== bDescription) {
+            return aDescription.localeCompare(bDescription, undefined, { sensitivity: 'base' });
+          }
+
           return a.id - b.id;
         })
         .map((item) => {
