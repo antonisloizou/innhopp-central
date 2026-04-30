@@ -117,6 +117,7 @@ const EventBudgetPage = () => {
   const [costSplitMode, setCostSplitMode] = useState<CostSplitMode>('amount');
   const [costSplitTab, setCostSplitTab] = useState<CostSplitTabKey>('section');
   const [costSplitScenario, setCostSplitScenario] = useState<LabelScenarioKey>('full');
+  const [lineItemsScenario, setLineItemsScenario] = useState<LabelScenarioKey>('full');
   const [parametersTab, setParametersTab] = useState<ParametersTabKey>('load');
   const [estimateCurrencies, setEstimateCurrencies] = useState<Record<string, string>>({
     estimate_accommodation_per_person_night: 'EUR',
@@ -254,7 +255,7 @@ const EventBudgetPage = () => {
       <span>{parameterLabels[key] || key}</span>
       <input
         type="number"
-        step="0.01"
+        step="1"
         value={parameters[key] ?? ''}
         onChange={(e) =>
           setParameters((prev) => ({
@@ -283,7 +284,7 @@ const EventBudgetPage = () => {
           </span>
           <input
             type="number"
-            step="0.01"
+            step="1"
             value={parameters[key] ?? ''}
             onChange={(e) =>
               setParameters((prev) => ({
@@ -737,26 +738,31 @@ const EventBudgetPage = () => {
         0
     )
   );
-  const scenarioAircraftLoads =
-    costSplitScenario === 'confirm' ? confirmLoads : costSplitScenario === 'worst' ? confirmLoads + 1 : fullLoads;
-  const aircraftLoadScale = useMemo(() => {
-    if (fullLoads <= 0 || scenarioAircraftLoads <= 0) return 1;
-    return scenarioAircraftLoads / fullLoads;
-  }, [fullLoads, scenarioAircraftLoads]);
-  const selectedScenarioParticipants =
-    summary?.scenarios?.[scenarioSummaryKeyByLabel[costSplitScenario]]?.participants || 0;
-  const selectedCostSplitScenario = summary?.scenarios?.[scenarioSummaryKeyByLabel[costSplitScenario]] || null;
   const fullScenarioParticipants = summary?.scenarios?.full_capacity_case?.participants || 0;
-  const scenarioDriftScale = useMemo(() => {
-    const expected = selectedCostSplitScenario?.expected_cost || 0;
-    const withDrift = selectedCostSplitScenario?.cost_with_drift || 0;
-    if (expected <= 0 || withDrift <= 0) return 1;
-    return withDrift / expected;
-  }, [selectedCostSplitScenario?.expected_cost, selectedCostSplitScenario?.cost_with_drift]);
-  const participantScale = useMemo(() => {
-    if (fullScenarioParticipants <= 0 || selectedScenarioParticipants <= 0) return 1;
-    return selectedScenarioParticipants / fullScenarioParticipants;
-  }, [selectedScenarioParticipants, fullScenarioParticipants]);
+  const getScenarioScales = (scenario: LabelScenarioKey) => {
+    const scenarioAircraftLoads = scenario === 'confirm' ? confirmLoads : scenario === 'worst' ? confirmLoads + 1 : fullLoads;
+    const selectedScenario = summary?.scenarios?.[scenarioSummaryKeyByLabel[scenario]] || null;
+    const selectedScenarioParticipants = selectedScenario?.participants || 0;
+    const aircraftScale = fullLoads <= 0 || scenarioAircraftLoads <= 0 ? 1 : scenarioAircraftLoads / fullLoads;
+    const participantScaleValue =
+      fullScenarioParticipants <= 0 || selectedScenarioParticipants <= 0
+        ? 1
+        : selectedScenarioParticipants / fullScenarioParticipants;
+    const expected = selectedScenario?.expected_cost || 0;
+    const withDrift = selectedScenario?.cost_with_drift || 0;
+    const driftScale = expected <= 0 || withDrift <= 0 ? 1 : withDrift / expected;
+    return {
+      selectedScenario,
+      aircraftScale,
+      participantScale: participantScaleValue,
+      driftScale
+    };
+  };
+  const costSplitScales = getScenarioScales(costSplitScenario);
+  const selectedCostSplitScenario = costSplitScales.selectedScenario;
+  const aircraftLoadScale = costSplitScales.aircraftScale;
+  const participantScale = costSplitScales.participantScale;
+  const scenarioDriftScale = costSplitScales.driftScale;
   const isLoadBasedCrewMode = budgetMethod === BUDGET_METHOD_ESTIMATES || budgetMethod === BUDGET_METHOD_HYBRID;
   const isEstimateOrHybridMode = budgetMethod === BUDGET_METHOD_ESTIMATES || budgetMethod === BUDGET_METHOD_HYBRID;
   const costSplit = useMemo(() => {
@@ -1046,6 +1052,27 @@ const EventBudgetPage = () => {
     activeEventData?.starts_at,
     activeEventData?.ends_at
   ]);
+  const lineItemsScales = getScenarioScales(lineItemsScenario);
+  const scenarioLineItems = useMemo<
+    Array<BudgetLineItem & { scenario_quantity: number; scenario_line_total: number }>
+  >(
+    () =>
+      lineItems.map((item) => {
+        const sectionCode = (item.section_code || '').trim().toLowerCase();
+        const isAircraft = sectionCode === 'aircraft';
+        const isPayableCrew = sectionCode === 'payable_crew';
+        const isFoodAccommodation = sectionCode === 'food_accommodation';
+        const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode) ? lineItemsScales.aircraftScale : 1;
+        const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
+        const scenarioScale = loadScale * paxScale * lineItemsScales.driftScale;
+        return {
+          ...item,
+          scenario_quantity: Number(item.quantity || 0) * loadScale,
+          scenario_line_total: Number(item.line_total || 0) * scenarioScale
+        };
+      }),
+    [lineItems, lineItemsScales.aircraftScale, lineItemsScales.participantScale, lineItemsScales.driftScale, isLoadBasedCrewMode, isEstimateOrHybridMode]
+  );
   const targetMarkupPercent =
     parameters.target_markup_percent ??
     summary?.parameters?.target_markup_percent ??
@@ -1994,7 +2021,7 @@ const EventBudgetPage = () => {
                       <span>Event Registration</span>
                       <input
                         type="number"
-                        step="0.01"
+                        step="1"
                         min="0"
                         value={eventRegistrationTotal}
                         onChange={(e) => setEventRegistrationTotal(e.target.value)}
@@ -2162,6 +2189,24 @@ const EventBudgetPage = () => {
                 </button>
                 <h3 className="event-detail-section-title">Line Items</h3>
               </div>
+              {openSections.lineItems && (
+                <div className="budget-cost-split-controls">
+                  <div className="budget-cost-split-scenario-row">
+                    <label className="form-field budget-cost-split-scenario-field">
+                      <span>Scenario</span>
+                      <select
+                        value={lineItemsScenario}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setLineItemsScenario(e.target.value as LabelScenarioKey)}
+                      >
+                        <option value="confirm">Confirm</option>
+                        <option value="worst">Worst</option>
+                        <option value="full">Full</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              )}
             </header>
             {openSections.lineItems && (
             <>
@@ -2213,7 +2258,7 @@ const EventBudgetPage = () => {
                 <span>Qty</span>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   value={newLineItem.quantity}
                   onChange={(e) =>
                     setNewLineItem((prev) => ({ ...prev, quantity: e.target.value }))
@@ -2224,7 +2269,7 @@ const EventBudgetPage = () => {
                 <span>Unit Cost</span>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   value={newLineItem.unit_cost}
                   onChange={(e) =>
                     setNewLineItem((prev) => ({ ...prev, unit_cost: e.target.value }))
@@ -2301,7 +2346,7 @@ const EventBudgetPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {lineItems.map((item) => (
+                  {scenarioLineItems.map((item) => (
                     <tr key={item.id}>
                       <td>{item.section_name || item.section_code || '-'}</td>
                       <td>
@@ -2310,7 +2355,7 @@ const EventBudgetPage = () => {
                       <td>{item.service_date ? item.service_date.slice(0, 10) : '-'}</td>
                       <td>{item.location_label || '-'}</td>
                       <td>
-                        {item.quantity}
+                        {item.scenario_quantity.toFixed(2)}
                         {hasMissingDistanceWarning(item.notes) ? (
                           <sup
                             className="nav-user-warning budget-warning-sup"
@@ -2323,7 +2368,12 @@ const EventBudgetPage = () => {
                       </td>
                       <td>{formatBaseMoney(item.unit_cost || 0, item.cost_currency || baseCurrency)}</td>
                       <td>{item.cost_currency || baseCurrency}</td>
-                      <td>{formatBaseMoney(item.line_total || 0, item.cost_currency || baseCurrency)}</td>
+                      <td>
+                        {formatBaseMoney(
+                          item.scenario_line_total || 0,
+                          item.cost_currency || baseCurrency
+                        )}
+                      </td>
                       <td>
                         <button
                           type="button"

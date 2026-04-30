@@ -1817,7 +1817,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   <input
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="1"
                     value={eventForm.deposit_amount}
                     onChange={(e) =>
                       setEventForm((prev) => ({ ...prev, deposit_amount: e.target.value }))
@@ -1831,7 +1831,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   <input
                     type="number"
                     min={0}
-                    step="0.01"
+                    step="1"
                     value={eventForm.main_invoice_amount}
                     onChange={(e) =>
                       setEventForm((prev) => ({ ...prev, main_invoice_amount: e.target.value }))

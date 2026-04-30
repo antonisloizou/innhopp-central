@@ -1449,7 +1449,7 @@ const InnhoppDetailPage = () => {
                 <input
                   type="number"
                   min={0}
-                  step="0.1"
+                  step="1"
                   value={form.distance_by_air ?? ''}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -1464,7 +1464,7 @@ const InnhoppDetailPage = () => {
                 <input
                   type="number"
                   min={0}
-                  step="0.1"
+                  step="1"
                   value={form.distance_by_road ?? ''}
                   onChange={(e) =>
                     setForm((prev) => ({

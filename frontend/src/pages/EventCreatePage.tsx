@@ -326,7 +326,7 @@ const EventCreatePage = () => {
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="1"
                   value={form.deposit_amount}
                   onChange={(e) => setForm((prev) => ({ ...prev, deposit_amount: e.target.value }))}
                   placeholder="0.00"
@@ -338,7 +338,7 @@ const EventCreatePage = () => {
                 <input
                   type="number"
                   min="0"
-                  step="0.01"
+                  step="1"
                   value={form.main_invoice_amount}
                   onChange={(e) => setForm((prev) => ({ ...prev, main_invoice_amount: e.target.value }))}
                   placeholder="0.00"
