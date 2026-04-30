@@ -237,6 +237,10 @@ const InnhoppDetailPage = () => {
   const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [budgetFlightEstimateReason, setBudgetFlightEstimateReason] = useState<string | null>(null);
   const routeRequestRef = useRef(0);
+  const lastFlyingUnavailableReasonRef = useRef<string | null>(null);
+  const lastLandingFlyingUnavailableReasonRef = useRef<string | null>(null);
+  const lastDrivingUnavailableReasonRef = useRef<string | null>(null);
+  const lastLandingDrivingUnavailableReasonRef = useRef<string | null>(null);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const flyingDurationMinutes = useMemo(() => {
     if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) <= 0) return null;
@@ -768,6 +772,22 @@ const InnhoppDetailPage = () => {
   }, [form.coordinates, form.takeoff_airfield_id, airfields]);
 
   useEffect(() => {
+    if (flyingDurationMinutes !== null) {
+      lastFlyingUnavailableReasonRef.current = null;
+      return;
+    }
+    let reason = 'Unknown reason.';
+    if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) <= 0) {
+      reason = 'distance_by_air is missing or zero.';
+    } else if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) {
+      reason = budgetFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
+    }
+    if (lastFlyingUnavailableReasonRef.current === reason) return;
+    lastFlyingUnavailableReasonRef.current = reason;
+    console.warn(`[InnhoppDetail] Flying time estimate unavailable: ${reason}`);
+  }, [flyingDurationMinutes, form.distance_by_air, budgetAircraftSpeedKmh, budgetFlightEstimateReason]);
+
+  useEffect(() => {
     let cancelled = false;
     if (sameLandingAsTakeoff) {
       setLandingDrivingDurationMinutes(drivingDurationMinutes);
@@ -863,6 +883,32 @@ const InnhoppDetailPage = () => {
   }, [sameLandingAsTakeoff, form.coordinates, form.landing_airfield_id, airfields]);
 
   useEffect(() => {
+    if (sameLandingAsTakeoff) {
+      lastLandingFlyingUnavailableReasonRef.current = null;
+      return;
+    }
+    if (landingFlyingDurationMinutes !== null) {
+      lastLandingFlyingUnavailableReasonRef.current = null;
+      return;
+    }
+    let reason = 'Unknown reason.';
+    if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) <= 0) {
+      reason = 'landing_distance_by_air is missing or zero.';
+    } else if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) {
+      reason = budgetFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
+    }
+    if (lastLandingFlyingUnavailableReasonRef.current === reason) return;
+    lastLandingFlyingUnavailableReasonRef.current = reason;
+    console.warn(`[InnhoppDetail] Landing flying time estimate unavailable: ${reason}`);
+  }, [
+    sameLandingAsTakeoff,
+    landingFlyingDurationMinutes,
+    form.landing_distance_by_air,
+    budgetAircraftSpeedKmh,
+    budgetFlightEstimateReason
+  ]);
+
+  useEffect(() => {
     let cancelled = false;
     const innhoppCoords = parseCoordinates(form.coordinates);
     const takeoff = airfields.find((a) => a.id === form.takeoff_airfield_id);
@@ -925,6 +971,71 @@ const InnhoppDetailPage = () => {
       cancelled = true;
     };
   }, [form.coordinates, form.takeoff_airfield_id, airfields]);
+
+  useEffect(() => {
+    if (roadRouteLoading) return;
+    if (drivingDurationMinutes !== null) {
+      lastDrivingUnavailableReasonRef.current = null;
+      return;
+    }
+    const innhoppCoords = parseCoordinates(form.coordinates);
+    const takeoff = airfields.find((a) => a.id === form.takeoff_airfield_id);
+    const takeoffCoords = parseCoordinates(takeoff?.coordinates);
+    const reason =
+      roadRouteError ||
+      (!innhoppCoords
+        ? 'Innhopp coordinates are missing or invalid.'
+        : !takeoffCoords
+          ? 'Takeoff airfield coordinates are missing or invalid.'
+          : !hasConfiguredGoogleMapsApiKey
+            ? 'Google Maps API key is not configured.'
+            : 'Route duration could not be calculated.');
+    if (lastDrivingUnavailableReasonRef.current === reason) return;
+    lastDrivingUnavailableReasonRef.current = reason;
+    console.warn(`[InnhoppDetail] Driving time estimate unavailable: ${reason}`);
+  }, [
+    roadRouteLoading,
+    drivingDurationMinutes,
+    roadRouteError,
+    form.coordinates,
+    form.takeoff_airfield_id,
+    airfields
+  ]);
+
+  useEffect(() => {
+    if (sameLandingAsTakeoff) {
+      lastLandingDrivingUnavailableReasonRef.current = null;
+      return;
+    }
+    if (landingRoadRouteLoading) return;
+    if (landingDrivingDurationMinutes !== null) {
+      lastLandingDrivingUnavailableReasonRef.current = null;
+      return;
+    }
+    const innhoppCoords = parseCoordinates(form.coordinates);
+    const landing = airfields.find((a) => a.id === form.landing_airfield_id);
+    const landingCoords = parseCoordinates(landing?.coordinates);
+    const reason =
+      landingRoadRouteError ||
+      (!innhoppCoords
+        ? 'Innhopp coordinates are missing or invalid.'
+        : !landingCoords
+          ? 'Landing airfield coordinates are missing or invalid.'
+          : !hasConfiguredGoogleMapsApiKey
+            ? 'Google Maps API key is not configured.'
+            : 'Route duration could not be calculated.');
+    if (lastLandingDrivingUnavailableReasonRef.current === reason) return;
+    lastLandingDrivingUnavailableReasonRef.current = reason;
+    console.warn(`[InnhoppDetail] Landing driving time estimate unavailable: ${reason}`);
+  }, [
+    sameLandingAsTakeoff,
+    landingRoadRouteLoading,
+    landingDrivingDurationMinutes,
+    landingRoadRouteError,
+    form.coordinates,
+    form.landing_airfield_id,
+    airfields
+  ]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
