@@ -2056,7 +2056,8 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 
 	rows, err := h.db.Query(
 		ctx,
-		`SELECT id, COALESCE(sequence, 0), COALESCE(name, ''), scheduled_at, COALESCE(distance_by_air, 0)
+		`SELECT id, COALESCE(sequence, 0), COALESCE(name, ''), scheduled_at,
+                COALESCE(distance_by_air, 0), COALESCE(takeoff_airfield_id, 0), COALESCE(landing_airfield_id, 0), COALESCE(landing_distance_by_air, 0)
          FROM event_innhopps
          WHERE event_id = $1
          ORDER BY sequence ASC, id ASC`,
@@ -2074,23 +2075,34 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		var name string
 		var scheduledAt *time.Time
 		var distanceByAirKm float64
-		if err := rows.Scan(&innhoppID, &sequence, &name, &scheduledAt, &distanceByAirKm); err != nil {
+		var takeoffAirfieldID int64
+		var landingAirfieldID int64
+		var landingDistanceByAirKm float64
+		if err := rows.Scan(&innhoppID, &sequence, &name, &scheduledAt, &distanceByAirKm, &takeoffAirfieldID, &landingAirfieldID, &landingDistanceByAirKm); err != nil {
 			return err
 		}
 		if fullLoadCount <= 0 {
 			continue
 		}
 
-		roundTripDistanceKm := distanceByAirKm * 2
-		roundTripMinutes := 0.0
-		missingDistance := distanceByAirKm <= 0
+		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
+		missingDistance := distanceByAirKm <= 0 || (!sameAirfield && landingDistanceByAirKm <= 0)
+		totalDistanceKm := 0.0
+		if sameAirfield {
+			totalDistanceKm = distanceByAirKm * 2 * float64(fullLoadCount)
+		} else {
+			perLoadedTripKm := distanceByAirKm + landingDistanceByAirKm
+			totalDistanceKm = perLoadedTripKm*float64(fullLoadCount) + perLoadedTripKm*math.Max(float64(fullLoadCount-1), 0)
+		}
+		totalMinutes := 0.0
 		if !missingDistance {
-			roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
+			totalMinutes = (totalDistanceKm / cruisingSpeedKmh) * 60
 		}
-		if roundTripMinutes < minimumLoadDuration {
-			roundTripMinutes = minimumLoadDuration
+		minimumMinutes := minimumLoadDuration * float64(fullLoadCount)
+		if totalMinutes < minimumMinutes {
+			totalMinutes = minimumMinutes
 		}
-		totalMinutes := math.Ceil(roundTripMinutes * float64(fullLoadCount))
+		totalMinutes = math.Ceil(totalMinutes)
 		if totalMinutes <= 0 {
 			continue
 		}
@@ -2221,7 +2233,7 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int64, assumptions map[string]float64, loadCount int) (minutes float64, totalDistance float64, err error) {
 	rows, err := h.db.Query(
 		ctx,
-		`SELECT COALESCE(distance_by_air, 0)
+		`SELECT COALESCE(distance_by_air, 0), COALESCE(takeoff_airfield_id, 0), COALESCE(landing_airfield_id, 0), COALESCE(landing_distance_by_air, 0)
          FROM event_innhopps
          WHERE event_id = $1
          ORDER BY sequence ASC, id ASC`,
@@ -2245,23 +2257,41 @@ func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int6
 	aggregateDistance := 0.0
 	for rows.Next() {
 		var distanceByAirKm float64
-		if err := rows.Scan(&distanceByAirKm); err != nil {
+		var takeoffAirfieldID int64
+		var landingAirfieldID int64
+		var landingDistanceByAirKm float64
+		if err := rows.Scan(&distanceByAirKm, &takeoffAirfieldID, &landingAirfieldID, &landingDistanceByAirKm); err != nil {
 			return 0, 0, err
 		}
 		if loadCount <= 0 {
 			continue
 		}
-		// One load is takeoff->innhopp->takeoff, so each load is one round trip.
-		roundTripDistanceKm := distanceByAirKm * 2
-		aggregateDistance += roundTripDistanceKm * float64(loadCount)
-		roundTripMinutes := 0.0
-		if distanceByAirKm > 0 {
-			roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
+		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
+		if sameAirfield {
+			roundTripDistanceKm := distanceByAirKm * 2
+			aggregateDistance += roundTripDistanceKm * float64(loadCount)
+			roundTripMinutes := 0.0
+			if distanceByAirKm > 0 {
+				roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
+			}
+			if roundTripMinutes < minimumLoadDuration {
+				roundTripMinutes = minimumLoadDuration
+			}
+			aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
+			continue
 		}
-		if roundTripMinutes < minimumLoadDuration {
-			roundTripMinutes = minimumLoadDuration
+		perLoadedTripKm := distanceByAirKm + landingDistanceByAirKm
+		totalDistanceKm := perLoadedTripKm*float64(loadCount) + perLoadedTripKm*math.Max(float64(loadCount-1), 0)
+		aggregateDistance += totalDistanceKm
+		totalMinutes := 0.0
+		if perLoadedTripKm > 0 {
+			totalMinutes = (totalDistanceKm / cruisingSpeedKmh) * 60
 		}
-		aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
+		minimumMinutes := minimumLoadDuration * float64(loadCount)
+		if totalMinutes < minimumMinutes {
+			totalMinutes = minimumMinutes
+		}
+		aggregateMinutes += math.Ceil(totalMinutes)
 	}
 	if err := rows.Err(); err != nil {
 		return 0, 0, err

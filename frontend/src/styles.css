@@ -320,6 +320,31 @@ button.ghost {
   justify-self: start;
 }
 
+.innhopp-detail-checkbox-field {
+  align-self: start;
+}
+
+.innhopp-detail-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  width: auto;
+}
+
+.innhopp-detail-checkbox-row input[type='checkbox'] {
+  width: auto;
+  min-width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+
+.innhopp-detail-checkbox-label {
+  margin: 0;
+}
+
 .registration-link-preview {
   grid-column: 1 / -1;
 }
@@ -3647,7 +3672,7 @@ iframe {
 }
 
 .innhopp-detail-sequence-grid {
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: minmax(140px, max-content) minmax(0, 1fr);
   gap: 1rem;
   align-items: end;
 }
@@ -3691,11 +3716,17 @@ iframe {
   flex-wrap: wrap;
 }
 
-.innhopp-detail-compact-input {
+.form-field .innhopp-detail-compact-input {
   width: 100%;
   min-width: 0;
   max-width: 24ch;
   flex: 1 1 24ch;
+}
+
+@media (max-width: 760px) {
+  .innhopp-detail-sequence-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .innhopp-detail-map-link {
@@ -4006,6 +4037,13 @@ iframe {
 .innhopp-detail-route-action {
   display: flex;
   align-items: flex-end;
+}
+
+.form-field .innhopp-detail-estimate-value {
+  font-size: 1rem;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-strong);
 }
 
 .innhopp-detail-landing-pair {

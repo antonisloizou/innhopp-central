@@ -43,6 +43,7 @@ export interface Innhopp {
   coordinates?: string | null;
   elevation?: number | null;
   takeoff_airfield_id?: number | null;
+  landing_airfield_id?: number | null;
   scheduled_at?: string | null;
   notes?: string | null;
   reason_for_choice?: string | null;
@@ -50,6 +51,8 @@ export interface Innhopp {
   notam?: string | null;
   distance_by_air?: number | null;
   distance_by_road?: number | null;
+  landing_distance_by_air?: number | null;
+  landing_distance_by_road?: number | null;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string | null;
@@ -187,6 +190,7 @@ export interface InnhoppInput {
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
+  landing_airfield_id?: number;
   scheduled_at?: string;
   notes?: string;
   reason_for_choice?: string;
@@ -194,6 +198,8 @@ export interface InnhoppInput {
   notam?: string;
   distance_by_air?: number;
   distance_by_road?: number;
+  landing_distance_by_air?: number;
+  landing_distance_by_road?: number;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string;
@@ -213,6 +219,7 @@ export interface UpdateInnhoppPayload {
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
+  landing_airfield_id?: number;
   scheduled_at?: string;
   notes?: string;
   reason_for_choice?: string;
@@ -220,6 +227,8 @@ export interface UpdateInnhoppPayload {
   notam?: string;
   distance_by_air?: number;
   distance_by_road?: number;
+  landing_distance_by_air?: number;
+  landing_distance_by_road?: number;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string;

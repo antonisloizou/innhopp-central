@@ -157,7 +157,10 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             id SERIAL PRIMARY KEY,
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             sequence INTEGER NOT NULL DEFAULT 0,
-            distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0
+            takeoff_airfield_id INTEGER,
+            landing_airfield_id INTEGER,
+            distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
+            landing_distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0
         )`,
 		`CREATE TABLE IF NOT EXISTS event_budgets (
             id SERIAL PRIMARY KEY,

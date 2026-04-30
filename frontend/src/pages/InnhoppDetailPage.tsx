@@ -30,6 +30,8 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
+import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -83,6 +85,52 @@ const haversineKm = (a: { lat: number; lon: number }, b: { lat: number; lon: num
     Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
   const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
   return R * c;
+};
+
+let googleMapsLoader: Promise<any> | null = null;
+
+const loadGoogleMapsApi = () => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Google Maps can only load in the browser.'));
+  }
+  if ((window as any).google?.maps) {
+    return Promise.resolve((window as any).google.maps);
+  }
+  if (!hasConfiguredGoogleMapsApiKey) {
+    return Promise.reject(new Error('Google Maps API key is not configured.'));
+  }
+  if (googleMapsLoader) return googleMapsLoader;
+
+  googleMapsLoader = new Promise((resolve, reject) => {
+    const callbackName = '__innhoppInitGoogleMapsInnhoppDetail';
+    (window as any)[callbackName] = () => {
+      resolve((window as any).google.maps);
+      delete (window as any)[callbackName];
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsApiKey)}&v=weekly&loading=async&callback=${callbackName}`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      googleMapsLoader = null;
+      delete (window as any)[callbackName];
+      reject(new Error('Failed to load Google Maps.'));
+    };
+    document.head.appendChild(script);
+  });
+
+  return googleMapsLoader;
+};
+
+const formatDurationMinutes = (minutes?: number | null) => {
+  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Unavailable';
+  const total = Math.round(minutes as number);
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours <= 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
 };
 
 type LandingAreaForm = {
@@ -166,6 +214,8 @@ const InnhoppDetailPage = () => {
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [takeoffSelectValue, setTakeoffSelectValue] = useState<string>('');
+  const [landingSelectValue, setLandingSelectValue] = useState<string>('');
+  const [sameLandingAsTakeoff, setSameLandingAsTakeoff] = useState(true);
   const initialFormState: InnhoppFormState = {
     name: '',
     sequence: 1,
@@ -173,12 +223,15 @@ const InnhoppDetailPage = () => {
     scheduled_at: '',
     notes: '',
     takeoff_airfield_id: undefined,
+    landing_airfield_id: undefined,
     elevation: undefined,
     reason_for_choice: '',
     adjust_altimeter_aad: '',
     notam: '',
     distance_by_air: undefined,
     distance_by_road: undefined,
+    landing_distance_by_air: undefined,
+    landing_distance_by_road: undefined,
     primary_landing_area: emptyLandingArea(),
     secondary_landing_area: emptyLandingArea(),
     risk_assessment: '',
@@ -198,7 +251,7 @@ const InnhoppDetailPage = () => {
     coordinates: '',
     description: ''
   });
-  const [showNewAirfieldForm, setShowNewAirfieldForm] = useState(false);
+  const [showNewAirfieldFormFor, setShowNewAirfieldFormFor] = useState<'takeoff' | 'landing' | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -212,7 +265,26 @@ const InnhoppDetailPage = () => {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [drivingDurationMinutes, setDrivingDurationMinutes] = useState<number | null>(null);
+  const [roadRouteLoading, setRoadRouteLoading] = useState(false);
+  const [roadRouteError, setRoadRouteError] = useState<string | null>(null);
+  const [landingDrivingDurationMinutes, setLandingDrivingDurationMinutes] = useState<number | null>(null);
+  const [landingRoadRouteLoading, setLandingRoadRouteLoading] = useState(false);
+  const [landingRoadRouteError, setLandingRoadRouteError] = useState<string | null>(null);
+  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
+  const [budgetFlightEstimateReason, setBudgetFlightEstimateReason] = useState<string | null>(null);
+  const routeRequestRef = useRef(0);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
+  const flyingDurationMinutes = useMemo(() => {
+    if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) <= 0) return null;
+    if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
+    return Math.round(((form.distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
+  }, [form.distance_by_air, budgetAircraftSpeedKmh]);
+  const landingFlyingDurationMinutes = useMemo(() => {
+    if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) <= 0) return null;
+    if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
+    return Math.round(((form.landing_distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
+  }, [form.landing_distance_by_air, budgetAircraftSpeedKmh]);
 
   const extractImageFiles = (dt?: DataTransfer | null): File[] => {
     if (!dt) return [];
@@ -297,8 +369,13 @@ const InnhoppDetailPage = () => {
       elevation: !hasNumber(form.elevation),
       scheduled_at: !hasText(form.scheduled_at),
       takeoff_airfield_id: !hasNumber(form.takeoff_airfield_id),
+      landing_airfield_id: !sameLandingAsTakeoff && !hasNumber(form.landing_airfield_id),
       distance_by_air: !hasNumber(form.distance_by_air),
       distance_by_road: !hasNumber(form.distance_by_road),
+      landing_distance_by_air:
+        !sameLandingAsTakeoff && !hasNumber(form.landing_distance_by_air),
+      landing_distance_by_road:
+        !sameLandingAsTakeoff && !hasNumber(form.landing_distance_by_road),
       jumprun: !hasText(form.jumprun),
       primary_name: !hasText(form.primary_landing_area.name),
       primary_description: !hasText(form.primary_landing_area.description),
@@ -310,7 +387,7 @@ const InnhoppDetailPage = () => {
       hospital: !hasText(form.hospital),
       rescue_boat: !hasBoolean(form.rescue_boat)
     }),
-    [form]
+    [form, sameLandingAsTakeoff]
   );
   const ready = useMemo(() => Object.values(missingRequired).every((v) => !v), [missingRequired]);
 
@@ -327,6 +404,8 @@ const InnhoppDetailPage = () => {
         setInnhopp(null);
         setForm(initialFormState);
         setTakeoffSelectValue('');
+        setLandingSelectValue('');
+        setSameLandingAsTakeoff(true);
         setImagesDirty(false);
       }
       setLoading(true);
@@ -358,11 +437,14 @@ const InnhoppDetailPage = () => {
             scheduled_at: toInputDateTime(target.scheduled_at) || defaultStart,
             notes: target.notes || '',
             takeoff_airfield_id: target.takeoff_airfield_id || undefined,
+            landing_airfield_id: target.landing_airfield_id || undefined,
             reason_for_choice: target.reason_for_choice || '',
             adjust_altimeter_aad: target.adjust_altimeter_aad || '',
             notam: target.notam || '',
             distance_by_air: target.distance_by_air ?? undefined,
             distance_by_road: target.distance_by_road ?? undefined,
+            landing_distance_by_air: target.landing_distance_by_air ?? undefined,
+            landing_distance_by_road: target.landing_distance_by_road ?? undefined,
             primary_landing_area: toLandingAreaForm(target.primary_landing_area),
             secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
             risk_assessment: target.risk_assessment || '',
@@ -377,6 +459,11 @@ const InnhoppDetailPage = () => {
           });
           setImagesDirty(false);
           setTakeoffSelectValue(target.takeoff_airfield_id ? String(target.takeoff_airfield_id) : '');
+          setLandingSelectValue(target.landing_airfield_id ? String(target.landing_airfield_id) : '');
+          setSameLandingAsTakeoff(
+            !target.landing_airfield_id ||
+              target.landing_airfield_id === target.takeoff_airfield_id
+          );
           // fetch event for context
           if (target.event_id) {
             try {
@@ -426,11 +513,14 @@ const InnhoppDetailPage = () => {
               scheduled_at: toInputDateTime(copy.scheduled_at),
               notes: copy.notes || '',
               takeoff_airfield_id: copy.takeoff_airfield_id || undefined,
+              landing_airfield_id: copy.landing_airfield_id || undefined,
               reason_for_choice: copy.reason_for_choice || '',
               adjust_altimeter_aad: copy.adjust_altimeter_aad || '',
               notam: copy.notam || '',
               distance_by_air: copy.distance_by_air ?? undefined,
               distance_by_road: copy.distance_by_road ?? undefined,
+              landing_distance_by_air: copy.landing_distance_by_air ?? undefined,
+              landing_distance_by_road: copy.landing_distance_by_road ?? undefined,
               primary_landing_area: toLandingAreaForm(copy.primary_landing_area),
               secondary_landing_area: toLandingAreaForm(copy.secondary_landing_area),
               risk_assessment: copy.risk_assessment || '',
@@ -445,6 +535,10 @@ const InnhoppDetailPage = () => {
             });
             setImagesDirty(false);
             setTakeoffSelectValue(copy.takeoff_airfield_id ? String(copy.takeoff_airfield_id) : '');
+            setLandingSelectValue(copy.landing_airfield_id ? String(copy.landing_airfield_id) : '');
+            setSameLandingAsTakeoff(
+              !copy.landing_airfield_id || copy.landing_airfield_id === copy.takeoff_airfield_id
+            );
           }
         }
       } catch (err) {
@@ -462,6 +556,42 @@ const InnhoppDetailPage = () => {
       cancelled = true;
     };
   }, [eventId, innhoppId, isCreateMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadBudgetSpeed = async () => {
+      if (!eventId) return;
+      setBudgetAircraftSpeedKmh(null);
+      setBudgetFlightEstimateReason('No budget linked to this event.');
+      try {
+        const budget = await getEventBudget(Number(eventId));
+        const assumptions = await getBudgetAssumptions(budget.id);
+        if (cancelled) return;
+        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
+        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
+          setBudgetAircraftSpeedKmh(speed);
+          setBudgetFlightEstimateReason(null);
+          return;
+        }
+        setBudgetAircraftSpeedKmh(null);
+        setBudgetFlightEstimateReason('Aircraft cruising speed is not set in the associated budget.');
+      } catch (err) {
+        if (cancelled) return;
+        const status = (err as Error & { status?: number })?.status;
+        if (status === 404) {
+          setBudgetAircraftSpeedKmh(null);
+          setBudgetFlightEstimateReason('No budget linked to this event.');
+          return;
+        }
+        setBudgetAircraftSpeedKmh(null);
+        setBudgetFlightEstimateReason('Could not load budget assumptions.');
+      }
+    };
+    loadBudgetSpeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -492,11 +622,20 @@ const InnhoppDetailPage = () => {
       notes: state.notes?.trim() || '',
       elevation: state.elevation,
       takeoff_airfield_id: state.takeoff_airfield_id,
+      landing_airfield_id: sameLandingAsTakeoff
+        ? state.takeoff_airfield_id
+        : state.landing_airfield_id,
       reason_for_choice: state.reason_for_choice?.trim() || '',
       adjust_altimeter_aad: state.adjust_altimeter_aad?.trim() || '',
       notam: state.notam?.trim() || '',
       distance_by_air: state.distance_by_air,
       distance_by_road: state.distance_by_road,
+      landing_distance_by_air: sameLandingAsTakeoff
+        ? state.distance_by_air
+        : state.landing_distance_by_air,
+      landing_distance_by_road: sameLandingAsTakeoff
+        ? state.distance_by_road
+        : state.landing_distance_by_road,
       primary_landing_area: toLandingAreaPayload(state.primary_landing_area),
       secondary_landing_area: toLandingAreaPayload(state.secondary_landing_area),
       risk_assessment: state.risk_assessment?.trim() || '',
@@ -658,11 +797,170 @@ const InnhoppDetailPage = () => {
       return;
     }
     const km = haversineKm(innhoppCoords, takeoffCoords);
-    const rounded = Math.round(km * 10) / 10;
+    const rounded = Math.ceil(km);
     setForm((prev) => {
       if (prev.distance_by_air === rounded) return prev;
       return { ...prev, distance_by_air: rounded };
     });
+  }, [form.coordinates, form.takeoff_airfield_id, airfields]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (sameLandingAsTakeoff) {
+      setLandingDrivingDurationMinutes(drivingDurationMinutes);
+      setLandingRoadRouteLoading(false);
+      setLandingRoadRouteError(null);
+      setForm((prev) => ({
+        ...prev,
+        landing_distance_by_road: prev.distance_by_road
+      }));
+      return;
+    }
+    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const landing = airfields.find((a) => a.id === form.landing_airfield_id);
+    const landingCoords = parseCoordinatePair(landing?.coordinates);
+    if (!innhoppCoords || !landingCoords) {
+      setLandingDrivingDurationMinutes(null);
+      setLandingRoadRouteError(null);
+      setLandingRoadRouteLoading(false);
+      return;
+    }
+    if (!hasConfiguredGoogleMapsApiKey) {
+      setLandingDrivingDurationMinutes(null);
+      setLandingRoadRouteLoading(false);
+      setLandingRoadRouteError('Google Maps API key is not configured.');
+      return;
+    }
+
+    const requestId = routeRequestRef.current + 1;
+    routeRequestRef.current = requestId;
+    setLandingRoadRouteLoading(true);
+    setLandingRoadRouteError(null);
+
+    loadGoogleMapsApi()
+      .then((maps) => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        const service = new maps.DirectionsService();
+        return service.route({
+          origin: { lat: landingCoords.lat, lng: landingCoords.lon },
+          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lon },
+          travelMode: maps.TravelMode.DRIVING
+        });
+      })
+      .then((result: any) => {
+        if (!result || cancelled || routeRequestRef.current !== requestId) return;
+        const leg = result.routes?.[0]?.legs?.[0];
+        const distanceMeters = leg?.distance?.value;
+        const durationSeconds = leg?.duration?.value;
+        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationSeconds)) {
+          throw new Error('Could not calculate a driving route.');
+        }
+        const roadKm = Math.ceil(distanceMeters / 1000);
+        const durationMin = Math.round(durationSeconds / 60);
+        setForm((prev) => {
+          if (prev.landing_distance_by_road === roadKm) return prev;
+          return { ...prev, landing_distance_by_road: roadKm };
+        });
+        setLandingDrivingDurationMinutes(durationMin);
+      })
+      .catch((err) => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        setLandingDrivingDurationMinutes(null);
+        setLandingRoadRouteError(err instanceof Error ? err.message : 'Failed to calculate driving route.');
+      })
+      .finally(() => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        setLandingRoadRouteLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sameLandingAsTakeoff, drivingDurationMinutes, form.coordinates, form.landing_airfield_id, airfields]);
+
+  useEffect(() => {
+    if (sameLandingAsTakeoff) {
+      setForm((prev) => ({
+        ...prev,
+        landing_airfield_id: prev.takeoff_airfield_id,
+        landing_distance_by_air: prev.distance_by_air
+      }));
+      return;
+    }
+    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const landing = airfields.find((a) => a.id === form.landing_airfield_id);
+    const landingCoords = parseCoordinatePair(landing?.coordinates);
+    if (!innhoppCoords || !landingCoords) return;
+    const km = haversineKm(innhoppCoords, landingCoords);
+    const rounded = Math.ceil(km);
+    setForm((prev) => {
+      if (prev.landing_distance_by_air === rounded) return prev;
+      return { ...prev, landing_distance_by_air: rounded };
+    });
+  }, [sameLandingAsTakeoff, form.coordinates, form.landing_airfield_id, airfields]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const innhoppCoords = parseCoordinatePair(form.coordinates);
+    const takeoff = airfields.find((a) => a.id === form.takeoff_airfield_id);
+    const takeoffCoords = parseCoordinatePair(takeoff?.coordinates);
+    if (!innhoppCoords || !takeoffCoords) {
+      setDrivingDurationMinutes(null);
+      setRoadRouteError(null);
+      setRoadRouteLoading(false);
+      return;
+    }
+    if (!hasConfiguredGoogleMapsApiKey) {
+      setDrivingDurationMinutes(null);
+      setRoadRouteLoading(false);
+      setRoadRouteError('Google Maps API key is not configured.');
+      return;
+    }
+
+    const requestId = routeRequestRef.current + 1;
+    routeRequestRef.current = requestId;
+    setRoadRouteLoading(true);
+    setRoadRouteError(null);
+
+    loadGoogleMapsApi()
+      .then((maps) => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        const service = new maps.DirectionsService();
+        return service.route({
+          origin: { lat: takeoffCoords.lat, lng: takeoffCoords.lon },
+          destination: { lat: innhoppCoords.lat, lng: innhoppCoords.lon },
+          travelMode: maps.TravelMode.DRIVING
+        });
+      })
+      .then((result: any) => {
+        if (!result || cancelled || routeRequestRef.current !== requestId) return;
+        const leg = result.routes?.[0]?.legs?.[0];
+        const distanceMeters = leg?.distance?.value;
+        const durationSeconds = leg?.duration?.value;
+        if (!Number.isFinite(distanceMeters) || !Number.isFinite(durationSeconds)) {
+          throw new Error('Could not calculate a driving route.');
+        }
+        const roadKm = Math.ceil(distanceMeters / 1000);
+        const durationMin = Math.round(durationSeconds / 60);
+        setForm((prev) => {
+          if (prev.distance_by_road === roadKm) return prev;
+          return { ...prev, distance_by_road: roadKm };
+        });
+        setDrivingDurationMinutes(durationMin);
+      })
+      .catch((err) => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        setDrivingDurationMinutes(null);
+        setRoadRouteError(err instanceof Error ? err.message : 'Failed to calculate driving route.');
+      })
+      .finally(() => {
+        if (cancelled || routeRequestRef.current !== requestId) return;
+        setRoadRouteLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [form.coordinates, form.takeoff_airfield_id, airfields]);
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
@@ -749,16 +1047,36 @@ const InnhoppDetailPage = () => {
         description: draftAirfield.description?.trim() || undefined
       });
       setAirfields((prev) => [...prev, created]);
-      setForm((prev) => ({ ...prev, takeoff_airfield_id: created.id }));
-      setTakeoffSelectValue(String(created.id));
-      setShowNewAirfieldForm(false);
+      const target = showNewAirfieldFormFor || 'takeoff';
+      if (target === 'takeoff') {
+        setForm((prev) => ({
+          ...prev,
+          takeoff_airfield_id: created.id,
+          landing_airfield_id: sameLandingAsTakeoff ? created.id : prev.landing_airfield_id
+        }));
+        setTakeoffSelectValue(String(created.id));
+        if (sameLandingAsTakeoff) {
+          setLandingSelectValue(String(created.id));
+        }
+      } else {
+        setForm((prev) => ({ ...prev, landing_airfield_id: created.id }));
+        setLandingSelectValue(String(created.id));
+      }
+      setShowNewAirfieldFormFor(null);
       setDraftAirfield({ name: '', elevation: 0, coordinates: '', description: '' });
       if (!innhopp) {
       } else {
-        const payload = buildPayload({ takeoff_airfield_id: created.id });
+        const payload =
+          target === 'takeoff'
+            ? buildPayload({ takeoff_airfield_id: created.id })
+            : buildPayload({ landing_airfield_id: created.id });
         const updated = await updateInnhopp(innhopp.id, payload);
         setInnhopp(updated);
-        setForm((prev) => ({ ...prev, takeoff_airfield_id: updated.takeoff_airfield_id || created.id }));
+        setForm((prev) => ({
+          ...prev,
+          takeoff_airfield_id: updated.takeoff_airfield_id || created.id,
+          landing_airfield_id: updated.landing_airfield_id || prev.landing_airfield_id
+        }));
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create airfield');
@@ -1293,18 +1611,28 @@ const InnhoppDetailPage = () => {
             <label className={`form-field ${missingRequired.takeoff_airfield_id ? 'field-missing' : ''}`}>
               <span>Takeoff airfield</span>
               <select
-                value={takeoffSelectValue || (showNewAirfieldForm ? '__new__' : '')}
+                value={takeoffSelectValue || (showNewAirfieldFormFor === 'takeoff' ? '__new__' : '')}
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === '__new__') {
-                    setShowNewAirfieldForm(true);
+                    setShowNewAirfieldFormFor('takeoff');
                     setTakeoffSelectValue('__new__');
                     setForm((prev) => ({ ...prev, takeoff_airfield_id: undefined }));
                     return;
                   }
-                  setShowNewAirfieldForm(false);
+                  setShowNewAirfieldFormFor(null);
                   setTakeoffSelectValue(val);
-                  setForm((prev) => ({ ...prev, takeoff_airfield_id: val ? Number(val) : undefined }));
+                  setForm((prev) => {
+                    const takeoff = val ? Number(val) : undefined;
+                    return {
+                      ...prev,
+                      takeoff_airfield_id: takeoff,
+                      landing_airfield_id: sameLandingAsTakeoff ? takeoff : prev.landing_airfield_id
+                    };
+                  });
+                  if (sameLandingAsTakeoff) {
+                    setLandingSelectValue(val);
+                  }
                 }}
               >
                 <option value="">Select airfield</option>
@@ -1320,7 +1648,7 @@ const InnhoppDetailPage = () => {
                 ))}
               </select>
             </label>
-            {showNewAirfieldForm && (
+            {showNewAirfieldFormFor === 'takeoff' && (
               <div
                 className="form-grid form-field-full-span innhopp-detail-airfield-create-grid"
               >
@@ -1393,7 +1721,7 @@ const InnhoppDetailPage = () => {
                     type="button"
                     className="ghost"
                     onClick={() => {
-                      setShowNewAirfieldForm(false);
+                      setShowNewAirfieldFormFor(null);
                       setTakeoffSelectValue(form.takeoff_airfield_id ? String(form.takeoff_airfield_id) : '');
                     }}
                     disabled={saving}
@@ -1444,12 +1772,13 @@ const InnhoppDetailPage = () => {
             <div
               className="form-grid form-field-full-span innhopp-detail-distance-grid"
             >
-              <label className={`form-field ${missingRequired.distance_by_air ? 'field-missing' : ''}`}>
+              <label className={`form-field form-field-full-span ${missingRequired.distance_by_air ? 'field-missing' : ''}`}>
                 <span>Distance by air (km)</span>
                 <input
                   type="number"
                   min={0}
                   step="1"
+                  className="innhopp-detail-compact-input"
                   value={form.distance_by_air ?? ''}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -1458,45 +1787,75 @@ const InnhoppDetailPage = () => {
                   }))
                 }
               />
+                <span className="muted">
+                  <span className="field-label">Flying time estimate:</span>{' '}
+                  <span className="innhopp-detail-estimate-value">
+                    {flyingDurationMinutes !== null
+                      ? `${formatDurationMinutes(flyingDurationMinutes)} (${Math.round(
+                          budgetAircraftSpeedKmh as number
+                        )} km/h)`
+                      : `not available${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                  </span>
+                </span>
             </label>
-              <label className={`form-field ${missingRequired.distance_by_road ? 'field-missing' : ''}`}>
+              <label className={`form-field form-field-full-span ${missingRequired.distance_by_road ? 'field-missing' : ''}`}>
                 <span>Distance by road (km)</span>
-                <input
-                  type="number"
-                  min={0}
-                  step="1"
-                  value={form.distance_by_road ?? ''}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      distance_by_road: e.target.value ? Number(e.target.value) : undefined
-                    }))
-                  }
-                />
-              </label>
-              <div className="form-field innhopp-detail-route-action">
-                <span>&nbsp;</span>
-                {form.coordinates?.trim() &&
-                airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim() ? (
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={() => {
-                      const innCoords = form.coordinates?.trim();
-                      const takeoffCoords = airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim();
-                      if (!innCoords || !takeoffCoords) return;
-                      window.open(
-                        `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
-                          takeoffCoords
-                        )}&destination=${encodeURIComponent(innCoords)}&travelmode=driving`,
-                        '_blank'
-                      );
-                    }}
-                  >
-                    Open route in Maps
-                  </button>
+                <div className="innhopp-detail-input-with-button">
+                  <input
+                    type="number"
+                    min={0}
+                    step="1"
+                    className="innhopp-detail-compact-input"
+                    value={form.distance_by_road ?? ''}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        distance_by_road: e.target.value ? Number(e.target.value) : undefined
+                      }))
+                    }
+                  />
+                  {form.coordinates?.trim() &&
+                  airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim() ? (
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => {
+                        const innCoords = form.coordinates?.trim();
+                        const takeoffCoords = airfields.find((a) => a.id === form.takeoff_airfield_id)?.coordinates?.trim();
+                        if (!innCoords || !takeoffCoords) return;
+                        window.open(
+                          `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+                            takeoffCoords
+                          )}&destination=${encodeURIComponent(innCoords)}&travelmode=driving`,
+                          '_blank'
+                        );
+                      }}
+                    >
+                      Open route in Maps
+                    </button>
+                  ) : null}
+                </div>
+                {roadRouteLoading ? (
+                  <span className="muted">
+                    <span className="field-label">Driving time estimate:</span>{' '}
+                    <span className="innhopp-detail-estimate-value">calculating…</span>
+                  </span>
                 ) : null}
-              </div>
+                {!roadRouteLoading && roadRouteError ? (
+                  <span className="muted">
+                    <span className="field-label">Driving time estimate:</span>{' '}
+                    <span className="innhopp-detail-estimate-value">unavailable</span>
+                  </span>
+                ) : null}
+                {!roadRouteLoading && !roadRouteError && drivingDurationMinutes !== null ? (
+                  <span className="muted">
+                    <span className="field-label">Driving time estimate:</span>{' '}
+                    <span className="innhopp-detail-estimate-value">
+                      {formatDurationMinutes(drivingDurationMinutes)}
+                    </span>
+                  </span>
+                ) : null}
+              </label>
             </div>
             <label className={`form-field ${missingRequired.jumprun ? 'field-missing' : ''}`}>
               <span>Jumprun</span>
@@ -1508,6 +1867,204 @@ const InnhoppDetailPage = () => {
                 placeholder="Heading, offset, wind notes"
               />
             </label>
+            <div className="form-field form-field-full-span">
+              <span>Landing airfield</span>
+            </div>
+            <label className="form-field form-field-full-span innhopp-detail-checkbox-field">
+              <span className="innhopp-detail-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={sameLandingAsTakeoff}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSameLandingAsTakeoff(checked);
+                    if (checked) {
+                      setForm((prev) => ({
+                        ...prev,
+                        landing_airfield_id: prev.takeoff_airfield_id,
+                        landing_distance_by_air: prev.distance_by_air,
+                        landing_distance_by_road: prev.distance_by_road
+                      }));
+                      setLandingSelectValue(takeoffSelectValue);
+                    }
+                  }}
+                />{' '}
+                <span className="innhopp-detail-checkbox-label">Same as take off</span>
+              </span>
+            </label>
+            {!sameLandingAsTakeoff ? (
+              <>
+                <label className={`form-field ${missingRequired.landing_airfield_id ? 'field-missing' : ''}`}>
+                  <span>Landing airfield</span>
+                  <select
+                    value={landingSelectValue || (showNewAirfieldFormFor === 'landing' ? '__new__' : '')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '__new__') {
+                        setShowNewAirfieldFormFor('landing');
+                        setLandingSelectValue('__new__');
+                        setForm((prev) => ({ ...prev, landing_airfield_id: undefined }));
+                        return;
+                      }
+                      setShowNewAirfieldFormFor(null);
+                      setLandingSelectValue(val);
+                      setForm((prev) => ({ ...prev, landing_airfield_id: val ? Number(val) : undefined }));
+                    }}
+                  >
+                    <option value="">Select airfield</option>
+                    <option value="__new__">Create new airfield…</option>
+                    {groupedTakeoffAirfields.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((option) => (
+                          <option key={`landing-${option.key}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                {showNewAirfieldFormFor === 'landing' && (
+                  <div className="form-grid form-field-full-span innhopp-detail-airfield-create-grid">
+                    <label className="form-field">
+                      <span>Name</span>
+                      <input
+                        type="text"
+                        value={draftAirfield.name}
+                        onChange={(e) => setDraftAirfield((prev) => ({ ...prev, name: e.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Elevation (m)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={draftAirfield.elevation}
+                        onChange={(e) => setDraftAirfield((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Coordinates</span>
+                      <input
+                        type="text"
+                        value={draftAirfield.coordinates}
+                        onChange={(e) => setDraftAirfield((prev) => ({ ...prev, coordinates: e.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Description</span>
+                      <input
+                        type="text"
+                        value={draftAirfield.description || ''}
+                        onChange={(e) => setDraftAirfield((prev) => ({ ...prev, description: e.target.value }))}
+                      />
+                    </label>
+                    <div className="form-actions form-field-full-span">
+                      <button type="button" className="ghost" onClick={handleCreateAirfield} disabled={saving}>
+                        {saving ? 'Creating…' : 'Create & attach'}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={() => {
+                          setShowNewAirfieldFormFor(null);
+                          setLandingSelectValue(form.landing_airfield_id ? String(form.landing_airfield_id) : '');
+                        }}
+                        disabled={saving}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="form-grid form-field-full-span innhopp-detail-distance-grid">
+                  <label className={`form-field form-field-full-span ${missingRequired.landing_distance_by_air ? 'field-missing' : ''}`}>
+                    <span>Landing distance by air (km)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      className="innhopp-detail-compact-input"
+                      value={form.landing_distance_by_air ?? ''}
+                      readOnly
+                    />
+                    <span className="muted">
+                      <span className="field-label">Flying time estimate:</span>{' '}
+                      <span className="innhopp-detail-estimate-value">
+                        {landingFlyingDurationMinutes !== null
+                          ? `${formatDurationMinutes(landingFlyingDurationMinutes)} (${Math.round(
+                              budgetAircraftSpeedKmh as number
+                            )} km/h)`
+                          : `not available${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                      </span>
+                    </span>
+                  </label>
+                  <label className={`form-field form-field-full-span ${missingRequired.landing_distance_by_road ? 'field-missing' : ''}`}>
+                    <span>Landing distance by road (km)</span>
+                    <div className="innhopp-detail-input-with-button">
+                      <input
+                        type="number"
+                        min={0}
+                        step="1"
+                        className="innhopp-detail-compact-input"
+                        value={form.landing_distance_by_road ?? ''}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            landing_distance_by_road: e.target.value ? Number(e.target.value) : undefined
+                          }))
+                        }
+                      />
+                      {form.coordinates?.trim() &&
+                      airfields.find((a) => a.id === form.landing_airfield_id)?.coordinates?.trim() ? (
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            const innCoords = form.coordinates?.trim();
+                            const landingCoords = airfields.find((a) => a.id === form.landing_airfield_id)?.coordinates?.trim();
+                            if (!innCoords || !landingCoords) return;
+                            window.open(
+                              `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+                                landingCoords
+                              )}&destination=${encodeURIComponent(innCoords)}&travelmode=driving`,
+                              '_blank'
+                            );
+                          }}
+                        >
+                          Open route in Maps
+                        </button>
+                      ) : null}
+                    </div>
+                    {landingRoadRouteLoading ? (
+                      <span className="muted">
+                        <span className="field-label">Driving time estimate:</span>{' '}
+                        <span className="innhopp-detail-estimate-value">calculating…</span>
+                      </span>
+                    ) : null}
+                    {!landingRoadRouteLoading && landingRoadRouteError ? (
+                      <span className="muted">
+                        <span className="field-label">Driving time estimate:</span>{' '}
+                        <span className="innhopp-detail-estimate-value">unavailable</span>
+                      </span>
+                    ) : null}
+                    {!landingRoadRouteLoading &&
+                    !landingRoadRouteError &&
+                    landingDrivingDurationMinutes !== null ? (
+                      <span className="muted">
+                        <span className="field-label">Driving time estimate:</span>{' '}
+                        <span className="innhopp-detail-estimate-value">
+                          {formatDurationMinutes(landingDrivingDurationMinutes)}
+                        </span>
+                      </span>
+                    ) : null}
+                  </label>
+                </div>
+              </>
+            ) : null}
           </div>
           <div className="form-actions innhopp-detail-save-actions">
             <button type="submit" className={saveButtonClass} disabled={saving}>
