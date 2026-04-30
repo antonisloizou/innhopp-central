@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"github.com/innhopp/central/backend/airfields"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
+	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/rbac"
 	"github.com/innhopp/central/backend/registrations"
 )
@@ -1473,6 +1475,9 @@ func (h *Handler) updateAccommodation(w http.ResponseWriter, r *http.Request) {
 		val := coordsOut.String
 		acc.Coordinates = &val
 	}
+	if err := logistics.RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Accommodation", acc.ID); err != nil {
+		log.Printf("route duration recalculation failed (type=Accommodation id=%d): %v", acc.ID, err)
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, acc)
 }
@@ -2414,6 +2419,9 @@ func (h *Handler) updateAirfield(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Coordinates = strings.TrimSpace(a.Latitude + " " + a.Longitude)
+	if err := logistics.RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Airfield", a.ID); err != nil {
+		log.Printf("route duration recalculation failed (type=Airfield id=%d): %v", a.ID, err)
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, a)
 }

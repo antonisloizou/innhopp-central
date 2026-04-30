@@ -176,6 +176,67 @@ func (h *Handler) hydrateTransportLabels(ctx context.Context, q dbQuerier, trans
 	return nil
 }
 
+func (h *Handler) routeWaypointByReference(ctx context.Context, q dbQuerier, refType *string, refID *int64, fallback string) (string, error) {
+	fallback = strings.TrimSpace(fallback)
+	if refType == nil || refID == nil || *refID <= 0 {
+		return fallback, nil
+	}
+
+	switch *refType {
+	case "Innhopp":
+		var coords sql.NullString
+		if err := q.QueryRow(ctx, `SELECT coordinates FROM event_innhopps WHERE id = $1`, *refID).Scan(&coords); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		if coords.Valid && strings.TrimSpace(coords.String) != "" {
+			return strings.TrimSpace(coords.String), nil
+		}
+	case "Airfield":
+		var latitude, longitude string
+		if err := q.QueryRow(ctx, `SELECT latitude, longitude FROM airfields WHERE id = $1`, *refID).Scan(&latitude, &longitude); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		lat := strings.TrimSpace(latitude)
+		lng := strings.TrimSpace(longitude)
+		if lat != "" && lng != "" {
+			return lat + "," + lng, nil
+		}
+	case "Accommodation":
+		var coords sql.NullString
+		if err := q.QueryRow(ctx, `SELECT coordinates FROM event_accommodation WHERE id = $1`, *refID).Scan(&coords); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		if coords.Valid && strings.TrimSpace(coords.String) != "" {
+			return strings.TrimSpace(coords.String), nil
+		}
+	case "Other":
+		var coords sql.NullString
+		if err := q.QueryRow(ctx, `SELECT coordinates FROM logistics_other WHERE id = $1`, *refID).Scan(&coords); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fallback, nil
+			}
+			return "", err
+		}
+		if coords.Valid && strings.TrimSpace(coords.String) != "" {
+			return strings.TrimSpace(coords.String), nil
+		}
+	case "Meal":
+		// Meals may reference another location, but the meal table itself stores a free-form location label.
+		// Keep label fallback behavior to avoid recursive cross-entity lookups here.
+		return fallback, nil
+	}
+	return fallback, nil
+}
+
 func (h *Handler) resolveLocationReference(ctx context.Context, q dbQuerier, eventID int64, label string, preferredType string) (*string, *int64, error) {
 	normalizedLabel := normalizeLegacyLabel(label)
 	if normalizedLabel == "" || eventID <= 0 {
@@ -768,6 +829,9 @@ func (h *Handler) updateOther(w http.ResponseWriter, r *http.Request) {
 		val := seasonResult.Int64
 		o.SeasonID = &val
 	}
+	if err := RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Other", o.ID); err != nil {
+		log.Printf("route duration recalculation failed (type=Other id=%d): %v", o.ID, err)
+	}
 	httpx.WriteJSON(w, http.StatusOK, o)
 }
 
@@ -1082,6 +1146,9 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 		val := seasonResult.Int64
 		m.SeasonID = &val
 	}
+	if err := RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Meal", m.ID); err != nil {
+		log.Printf("route duration recalculation failed (type=Meal id=%d): %v", m.ID, err)
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, m)
 }
@@ -1307,12 +1374,23 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	originWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, pickupLocationType, pickupLocationID, pickup)
+	if waypointErr != nil {
+		log.Printf("transport origin waypoint resolve failed (transport_id=%d): %v", id, waypointErr)
+		originWaypoint = pickup
+	}
+	destinationWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, destinationType, destinationID, dest)
+	if waypointErr != nil {
+		log.Printf("transport destination waypoint resolve failed (transport_id=%d): %v", id, waypointErr)
+		destinationWaypoint = dest
+	}
+
 	durationMinutes := payload.DurationMin
 	if durationMinutes == nil {
 		var durationErr error
-		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originWaypoint, destinationWaypoint)
 		if durationErr != nil {
-			log.Printf("transport duration lookup failed (transport_id=%d): %v", id, durationErr)
+			log.Printf("transport duration lookup failed (transport_id=%d,origin=%q,destination=%q): %v", id, originWaypoint, destinationWaypoint, durationErr)
 		}
 	}
 
@@ -1595,9 +1673,19 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var groundCrew Transport
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	originWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, pickupLocationType, pickupLocationID, pickup)
+	if waypointErr != nil {
+		log.Printf("ground crew origin waypoint resolve failed (pickup=%q,destination=%q): %v", pickup, dest, waypointErr)
+		originWaypoint = pickup
+	}
+	destinationWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, destinationType, destinationID, dest)
+	if waypointErr != nil {
+		log.Printf("ground crew destination waypoint resolve failed (pickup=%q,destination=%q): %v", pickup, dest, waypointErr)
+		destinationWaypoint = dest
+	}
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), originWaypoint, destinationWaypoint)
 	if durationErr != nil {
-		log.Printf("ground crew duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+		log.Printf("ground crew duration lookup failed (origin=%q,destination=%q): %v", originWaypoint, destinationWaypoint, durationErr)
 	}
 	row := tx.QueryRow(r.Context(),
 		`INSERT INTO logistics_ground_crews (pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)
@@ -1849,12 +1937,23 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	originWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, pickupLocationType, pickupLocationID, pickup)
+	if waypointErr != nil {
+		log.Printf("ground crew origin waypoint resolve failed (ground_crew_id=%d): %v", id, waypointErr)
+		originWaypoint = pickup
+	}
+	destinationWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, destinationType, destinationID, dest)
+	if waypointErr != nil {
+		log.Printf("ground crew destination waypoint resolve failed (ground_crew_id=%d): %v", id, waypointErr)
+		destinationWaypoint = dest
+	}
+
 	durationMinutes := payload.DurationMin
 	if durationMinutes == nil {
 		var durationErr error
-		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+		durationMinutes, durationErr = h.calculateRouteDurationMinutes(r.Context(), originWaypoint, destinationWaypoint)
 		if durationErr != nil {
-			log.Printf("ground crew duration lookup failed (ground_crew_id=%d): %v", id, durationErr)
+			log.Printf("ground crew duration lookup failed (ground_crew_id=%d,origin=%q,destination=%q): %v", id, originWaypoint, destinationWaypoint, durationErr)
 		}
 	}
 
@@ -2188,13 +2287,19 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 		return nil
 	}
 	type row struct {
-		id          int64
-		origin      string
-		destination string
+		id              int64
+		originLabel     string
+		originType      sql.NullString
+		originID        sql.NullInt64
+		destinationLabel string
+		destinationType sql.NullString
+		destinationID   sql.NullInt64
 	}
 	backfill := func(table string) error {
 		query := fmt.Sprintf(
-			`SELECT id, pickup_location, destination FROM %s WHERE duration_minutes IS NULL AND pickup_location <> '' AND destination <> ''`,
+			`SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id
+             FROM %s
+             WHERE duration_minutes IS NULL AND pickup_location <> '' AND destination <> ''`,
 			table,
 		)
 		rows, err := h.db.Query(ctx, query)
@@ -2206,7 +2311,15 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 		var pending []row
 		for rows.Next() {
 			var item row
-			if err := rows.Scan(&item.id, &item.origin, &item.destination); err != nil {
+			if err := rows.Scan(
+				&item.id,
+				&item.originLabel,
+				&item.originType,
+				&item.originID,
+				&item.destinationLabel,
+				&item.destinationType,
+				&item.destinationID,
+			); err != nil {
 				return err
 			}
 			pending = append(pending, item)
@@ -2217,7 +2330,39 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 
 		updated := 0
 		for _, item := range pending {
-			minutes, err := h.calculateRouteDurationMinutes(ctx, item.origin, item.destination)
+			originType := (*string)(nil)
+			originID := (*int64)(nil)
+			destinationType := (*string)(nil)
+			destinationID := (*int64)(nil)
+			if item.originType.Valid {
+				val := item.originType.String
+				originType = &val
+			}
+			if item.originID.Valid {
+				val := item.originID.Int64
+				originID = &val
+			}
+			if item.destinationType.Valid {
+				val := item.destinationType.String
+				destinationType = &val
+			}
+			if item.destinationID.Valid {
+				val := item.destinationID.Int64
+				destinationID = &val
+			}
+
+			originWaypoint, waypointErr := h.routeWaypointByReference(ctx, h.db, originType, originID, item.originLabel)
+			if waypointErr != nil {
+				log.Printf("route duration backfill origin waypoint resolve failed (%s id=%d): %v", table, item.id, waypointErr)
+				originWaypoint = item.originLabel
+			}
+			destinationWaypoint, waypointErr := h.routeWaypointByReference(ctx, h.db, destinationType, destinationID, item.destinationLabel)
+			if waypointErr != nil {
+				log.Printf("route duration backfill destination waypoint resolve failed (%s id=%d): %v", table, item.id, waypointErr)
+				destinationWaypoint = item.destinationLabel
+			}
+
+			minutes, err := h.calculateRouteDurationMinutes(ctx, originWaypoint, destinationWaypoint)
 			if err != nil {
 				log.Printf("route duration backfill failed (%s id=%d): %v", table, item.id, err)
 				continue
@@ -2240,6 +2385,118 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 		return err
 	}
 	if err := backfill("logistics_ground_crews"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RecalculateRouteDurationsForLocationReference recomputes duration_minutes for any
+// transport/ground-crew route that references the given location entity.
+func RecalculateRouteDurationsForLocationReference(ctx context.Context, db *pgxpool.Pool, refType string, refID int64) error {
+	refType = strings.TrimSpace(refType)
+	if refType == "" || refID <= 0 {
+		return errors.New("invalid location reference")
+	}
+	h := NewHandler(db)
+	if h.mapsAPIKey == "" {
+		return nil
+	}
+
+	type routeRow struct {
+		id               int64
+		originLabel      string
+		originType       sql.NullString
+		originID         sql.NullInt64
+		destinationLabel string
+		destinationType  sql.NullString
+		destinationID    sql.NullInt64
+	}
+
+	recalcTable := func(table string) error {
+		query := fmt.Sprintf(
+			`SELECT id, pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id
+             FROM %s
+             WHERE (pickup_location_type = $1 AND pickup_location_id = $2)
+                OR (destination_type = $1 AND destination_id = $2)`,
+			table,
+		)
+		rows, err := h.db.Query(ctx, query, refType, refID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		var pending []routeRow
+		for rows.Next() {
+			var item routeRow
+			if err := rows.Scan(
+				&item.id,
+				&item.originLabel,
+				&item.originType,
+				&item.originID,
+				&item.destinationLabel,
+				&item.destinationType,
+				&item.destinationID,
+			); err != nil {
+				return err
+			}
+			pending = append(pending, item)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		for _, item := range pending {
+			originType := (*string)(nil)
+			originID := (*int64)(nil)
+			destinationType := (*string)(nil)
+			destinationID := (*int64)(nil)
+			if item.originType.Valid {
+				val := item.originType.String
+				originType = &val
+			}
+			if item.originID.Valid {
+				val := item.originID.Int64
+				originID = &val
+			}
+			if item.destinationType.Valid {
+				val := item.destinationType.String
+				destinationType = &val
+			}
+			if item.destinationID.Valid {
+				val := item.destinationID.Int64
+				destinationID = &val
+			}
+
+			originWaypoint, waypointErr := h.routeWaypointByReference(ctx, h.db, originType, originID, item.originLabel)
+			if waypointErr != nil {
+				log.Printf("route duration recalc origin waypoint resolve failed (%s id=%d): %v", table, item.id, waypointErr)
+				originWaypoint = item.originLabel
+			}
+			destinationWaypoint, waypointErr := h.routeWaypointByReference(ctx, h.db, destinationType, destinationID, item.destinationLabel)
+			if waypointErr != nil {
+				log.Printf("route duration recalc destination waypoint resolve failed (%s id=%d): %v", table, item.id, waypointErr)
+				destinationWaypoint = item.destinationLabel
+			}
+
+			minutes, err := h.calculateRouteDurationMinutes(ctx, originWaypoint, destinationWaypoint)
+			if err != nil {
+				log.Printf("route duration recalc failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+			updateQuery := fmt.Sprintf(`UPDATE %s SET duration_minutes = $1 WHERE id = $2`, table)
+			if _, err := h.db.Exec(ctx, updateQuery, minutes, item.id); err != nil {
+				log.Printf("route duration recalc update failed (%s id=%d): %v", table, item.id, err)
+				continue
+			}
+		}
+		return nil
+	}
+
+	if err := recalcTable("logistics_transports"); err != nil {
+		return err
+	}
+	if err := recalcTable("logistics_ground_crews"); err != nil {
 		return err
 	}
 	return nil
@@ -2748,9 +3005,19 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var transport Transport
-	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), pickup, dest)
+	originWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, pickupLocationType, pickupLocationID, pickup)
+	if waypointErr != nil {
+		log.Printf("transport origin waypoint resolve failed (pickup=%q,destination=%q): %v", pickup, dest, waypointErr)
+		originWaypoint = pickup
+	}
+	destinationWaypoint, waypointErr := h.routeWaypointByReference(r.Context(), tx, destinationType, destinationID, dest)
+	if waypointErr != nil {
+		log.Printf("transport destination waypoint resolve failed (pickup=%q,destination=%q): %v", pickup, dest, waypointErr)
+		destinationWaypoint = dest
+	}
+	durationMinutes, durationErr := h.calculateRouteDurationMinutes(r.Context(), originWaypoint, destinationWaypoint)
 	if durationErr != nil {
-		log.Printf("transport duration lookup failed (pickup=%q,destination=%q): %v", pickup, dest, durationErr)
+		log.Printf("transport duration lookup failed (origin=%q,destination=%q): %v", originWaypoint, destinationWaypoint, durationErr)
 	}
 	row := tx.QueryRow(r.Context(),
 		`INSERT INTO logistics_transports (pickup_location, pickup_location_type, pickup_location_id, destination, destination_type, destination_id, passenger_count, duration_minutes, scheduled_at, notes, event_id, season_id)

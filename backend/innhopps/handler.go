@@ -16,6 +16,7 @@ import (
 
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
+	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/rbac"
 )
 
@@ -582,6 +583,9 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusInternalServerError, "failed to link airfield to event")
 			return
 		}
+	}
+	if err := logistics.RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Innhopp", innhopp.ID); err != nil {
+		logUpdateFailure(innhoppID, p, err, "recalculate_route_durations")
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, innhopp)
