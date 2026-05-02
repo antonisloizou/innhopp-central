@@ -9,6 +9,9 @@ import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/event
 const LogisticsOtherCreatePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const returnTo = typeof (location.state as any)?.returnTo === 'string'
+    ? (location.state as any).returnTo.trim()
+    : '';
   const [events, setEvents] = useState<Event[]>([]);
   const [form, setForm] = useState(() => {
     const state = (location.state as any)?.initialValues as
@@ -63,7 +66,11 @@ const LogisticsOtherCreatePage = () => {
         notes: form.notes.trim() || undefined,
         event_id: Number(form.event_id)
       });
-      navigate('/logistics/others');
+      if (returnTo) {
+        navigate(returnTo);
+      } else {
+        navigate('/logistics/others');
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create entry');
     } finally {
@@ -84,7 +91,13 @@ const LogisticsOtherCreatePage = () => {
           <button
             className="ghost logistics-list-back-link"
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => {
+              if (returnTo) {
+                navigate(returnTo);
+                return;
+              }
+              navigate(-1);
+            }}
           >
             Back
           </button>

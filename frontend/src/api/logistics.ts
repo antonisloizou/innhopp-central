@@ -27,7 +27,11 @@ export const getTransport = (id: number) => apiRequest<Transport>(`/logistics/tr
 
 export type CreateTransportPayload = {
   pickup_location: string;
+  pickup_location_type?: string;
+  pickup_location_id?: number;
   destination: string;
+  destination_type?: string;
+  destination_id?: number;
   passenger_count: number;
   duration_minutes?: number;
   scheduled_at?: string;

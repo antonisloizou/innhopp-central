@@ -186,16 +186,16 @@ const EventCalendarPage = () => {
       map.set(event.season_id, list);
     });
 
-    const sortNameDesc = (a: number, b: number) => {
+    const sortNameAsc = (a: number, b: number) => {
       const nameA = seasonLookup.get(a)?.name || `Season ${a}`;
       const nameB = seasonLookup.get(b)?.name || `Season ${b}`;
-      const cmp = nameB.localeCompare(nameA);
+      const cmp = nameA.localeCompare(nameB);
       if (cmp !== 0) return cmp;
-      return b - a;
+      return a - b;
     };
 
     return Array.from(map.entries())
-      .sort(([a], [b]) => sortNameDesc(a, b))
+      .sort(([a], [b]) => sortNameAsc(a, b))
       .map(([seasonId, group]) => ({
         seasonId,
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
@@ -211,16 +211,16 @@ const EventCalendarPage = () => {
       map.set(event.season_id, list);
     });
 
-    const sortNameDesc = (a: number, b: number) => {
+    const sortNameAsc = (a: number, b: number) => {
       const nameA = seasonLookup.get(a)?.name || `Season ${a}`;
       const nameB = seasonLookup.get(b)?.name || `Season ${b}`;
-      const cmp = nameB.localeCompare(nameA);
+      const cmp = nameA.localeCompare(nameB);
       if (cmp !== 0) return cmp;
-      return b - a;
+      return a - b;
     };
 
     return Array.from(map.entries())
-      .sort(([a], [b]) => sortNameDesc(a, b))
+      .sort(([a], [b]) => sortNameAsc(a, b))
       .map(([seasonId, group]) => ({
         seasonId,
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
@@ -410,7 +410,7 @@ const EventCalendarPage = () => {
                       <span>All seasons</span>
                     </button>
                     {[...seasons]
-                      .sort((a, b) => b.name.localeCompare(a.name))
+                      .sort((a, b) => a.name.localeCompare(b.name))
                       .map((season) => (
                         <div
                           key={season.id}

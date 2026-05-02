@@ -439,6 +439,8 @@ const [transportForm, setTransportForm] = useState({
     passenger_count: '',
     scheduled_at: ''
   });
+  const [transportPickupKey, setTransportPickupKey] = useState('');
+  const [transportDestinationKey, setTransportDestinationKey] = useState('');
   const [showGroundCrewForm, setShowGroundCrewForm] = useState(false);
   const [groundCrewForm, setGroundCrewForm] = useState({
     pickup_location: '',
@@ -446,6 +448,8 @@ const [transportForm, setTransportForm] = useState({
     passenger_count: '',
     scheduled_at: ''
   });
+  const [groundCrewPickupKey, setGroundCrewPickupKey] = useState('');
+  const [groundCrewDestinationKey, setGroundCrewDestinationKey] = useState('');
   const [showOtherForm, setShowOtherForm] = useState(false);
   const [otherForm, setOtherForm] = useState({
     name: '',
@@ -555,6 +559,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         .find((option) => option.label === label)?.value || '',
     [transportLocationGroups]
   );
+  const parseTransportLocationRef = useCallback((value: string): { type?: string; id?: number } => {
+    const [type, rawId] = value.split('::');
+    if (!type || !rawId) return {};
+    const id = Number(rawId);
+    if (!Number.isFinite(id) || id <= 0) return {};
+    return { type, id };
+  }, []);
   type SectionKey =
     | 'details'
     | 'registration'
@@ -694,14 +705,27 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     if (!eventId) return;
     if (!transportForm.pickup_location.trim() || !transportForm.destination.trim()) return;
     try {
-      const created = await createTransport({
+      const payload: CreateTransportPayload = {
         pickup_location: transportForm.pickup_location.trim(),
         destination: transportForm.destination.trim(),
         passenger_count: Number(transportForm.passenger_count) || 0,
         scheduled_at: transportForm.scheduled_at || undefined,
         event_id: Number(eventId),
         vehicle_ids: []
-      } as CreateTransportPayload);
+      };
+      const pickupRef = parseTransportLocationRef(transportPickupKey || findTransportLocationValue(transportForm.pickup_location));
+      if (pickupRef.type && pickupRef.id) {
+        payload.pickup_location_type = pickupRef.type;
+        payload.pickup_location_id = pickupRef.id;
+      }
+      const destinationRef = parseTransportLocationRef(
+        transportDestinationKey || findTransportLocationValue(transportForm.destination)
+      );
+      if (destinationRef.type && destinationRef.id) {
+        payload.destination_type = destinationRef.type;
+        payload.destination_id = destinationRef.id;
+      }
+      const created = await createTransport(payload);
       setTransports((prev) => [created, ...prev]);
       setTransportForm({
         pickup_location: '',
@@ -709,6 +733,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         passenger_count: '',
         scheduled_at: ''
       });
+      setTransportPickupKey('');
+      setTransportDestinationKey('');
       setShowTransportForm(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create transport');
@@ -719,14 +745,29 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     if (!eventId) return;
     if (!groundCrewForm.pickup_location.trim() || !groundCrewForm.destination.trim()) return;
     try {
-      const created = await createGroundCrew({
+      const payload: CreateGroundCrewPayload = {
         pickup_location: groundCrewForm.pickup_location.trim(),
         destination: groundCrewForm.destination.trim(),
         passenger_count: Number(groundCrewForm.passenger_count) || 0,
         scheduled_at: groundCrewForm.scheduled_at || undefined,
         event_id: Number(eventId),
         vehicle_ids: []
-      } as CreateGroundCrewPayload);
+      };
+      const pickupRef = parseTransportLocationRef(
+        groundCrewPickupKey || findTransportLocationValue(groundCrewForm.pickup_location)
+      );
+      if (pickupRef.type && pickupRef.id) {
+        payload.pickup_location_type = pickupRef.type;
+        payload.pickup_location_id = pickupRef.id;
+      }
+      const destinationRef = parseTransportLocationRef(
+        groundCrewDestinationKey || findTransportLocationValue(groundCrewForm.destination)
+      );
+      if (destinationRef.type && destinationRef.id) {
+        payload.destination_type = destinationRef.type;
+        payload.destination_id = destinationRef.id;
+      }
+      const created = await createGroundCrew(payload);
       setGroundCrews((prev) => [created, ...prev]);
       setGroundCrewForm({
         pickup_location: '',
@@ -734,6 +775,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         passenger_count: '',
         scheduled_at: ''
       });
+      setGroundCrewPickupKey('');
+      setGroundCrewDestinationKey('');
       setShowGroundCrewForm(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to create ground crew');
@@ -3296,11 +3339,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Pickup location</span>
                   <select
-                    value={findTransportLocationValue(transportForm.pickup_location)}
+                    value={transportPickupKey || findTransportLocationValue(transportForm.pickup_location)}
                     onChange={(e) => {
+                      const key = e.target.value;
                       const selected = transportLocationGroups
                         .flatMap((group) => group.options)
-                        .find((opt) => opt.value === e.target.value);
+                        .find((opt) => opt.value === key);
+                      setTransportPickupKey(key);
                       setTransportForm((prev) => ({
                         ...prev,
                         pickup_location: selected?.label || ''
@@ -3326,11 +3371,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Destination</span>
                   <select
-                    value={findTransportLocationValue(transportForm.destination)}
+                    value={transportDestinationKey || findTransportLocationValue(transportForm.destination)}
                     onChange={(e) => {
+                      const key = e.target.value;
                       const selected = transportLocationGroups
                         .flatMap((group) => group.options)
-                        .find((opt) => opt.value === e.target.value);
+                        .find((opt) => opt.value === key);
+                      setTransportDestinationKey(key);
                       setTransportForm((prev) => ({
                         ...prev,
                         destination: selected?.label || ''
@@ -3503,11 +3550,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Start location</span>
                   <select
-                    value={findTransportLocationValue(groundCrewForm.pickup_location)}
+                    value={groundCrewPickupKey || findTransportLocationValue(groundCrewForm.pickup_location)}
                     onChange={(e) => {
+                      const key = e.target.value;
                       const selected = transportLocationGroups
                         .flatMap((group) => group.options)
-                        .find((opt) => opt.value === e.target.value);
+                        .find((opt) => opt.value === key);
+                      setGroundCrewPickupKey(key);
                       setGroundCrewForm((prev) => ({
                         ...prev,
                         pickup_location: selected?.label || ''
@@ -3533,11 +3582,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <label className="form-field">
                   <span>Destination</span>
                   <select
-                    value={findTransportLocationValue(groundCrewForm.destination)}
+                    value={groundCrewDestinationKey || findTransportLocationValue(groundCrewForm.destination)}
                     onChange={(e) => {
+                      const key = e.target.value;
                       const selected = transportLocationGroups
                         .flatMap((group) => group.options)
-                        .find((opt) => opt.value === e.target.value);
+                        .find((opt) => opt.value === key);
+                      setGroundCrewDestinationKey(key);
                       setGroundCrewForm((prev) => ({
                         ...prev,
                         destination: selected?.label || ''

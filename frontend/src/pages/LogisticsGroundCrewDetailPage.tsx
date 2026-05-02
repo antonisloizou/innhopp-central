@@ -233,6 +233,13 @@ const LogisticsGroundCrewDetailPage = () => {
   const buildOptionKey = (type: LocationOption['type'], id: number | string, label: string) =>
     `${type}#${id ?? label}`;
   const normalizeLocationValue = (val: string) => val.toLowerCase().replace(/^#?\s*\d+\s*/, '').trim();
+  const parseLocationKey = (key: string): { type?: string; id?: number } => {
+    const [type, rawId] = key.split('#');
+    if (!type || !rawId) return {};
+    const id = Number(rawId);
+    if (!Number.isFinite(id) || id <= 0) return {};
+    return { type, id };
+  };
 
   const pickupOptions = (() => {
     const options: LocationOption[] = [];
@@ -344,6 +351,16 @@ const LogisticsGroundCrewDetailPage = () => {
         notes: form.notes.trim() || undefined,
         event_id: Number(selectedEventId)
       };
+      const pickupRef = parseLocationKey(pickupOptionKey);
+      if (pickupRef.type && pickupRef.id) {
+        payload.pickup_location_type = pickupRef.type;
+        payload.pickup_location_id = pickupRef.id;
+      }
+      const destinationRef = parseLocationKey(destinationOptionKey);
+      if (destinationRef.type && destinationRef.id) {
+        payload.destination_type = destinationRef.type;
+        payload.destination_id = destinationRef.id;
+      }
       const durationValue = form.duration_minutes.trim();
       if (durationValue !== '') {
         const parsedDuration = Number(durationValue);

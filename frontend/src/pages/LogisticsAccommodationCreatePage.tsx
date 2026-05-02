@@ -8,6 +8,9 @@ import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/event
 const LogisticsAccommodationCreatePage = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const returnTo = typeof (location.state as any)?.returnTo === 'string'
+    ? (location.state as any).returnTo.trim()
+    : '';
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +80,11 @@ const LogisticsAccommodationCreatePage = () => {
             // ignore
           }
         }
-        navigate(-2);
+        if (returnTo) {
+          navigate(returnTo);
+        } else {
+          navigate(-1);
+        }
       } else {
         navigate('/logistics/accommodations', { state: { highlightAccommodationId: created.id } });
       }
@@ -98,7 +105,17 @@ const LogisticsAccommodationCreatePage = () => {
           <h2>Create accommodation</h2>
         </div>
         <div className="card-actions">
-          <button className="ghost" type="button" onClick={() => navigate('/logistics/accommodations')}>
+          <button
+            className="ghost"
+            type="button"
+            onClick={() => {
+              if ((location.state as any)?.copyAccommodation && returnTo) {
+                navigate(returnTo);
+                return;
+              }
+              navigate('/logistics/accommodations');
+            }}
+          >
             Back to accommodations
           </button>
         </div>

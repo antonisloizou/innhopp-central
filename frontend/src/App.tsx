@@ -28,6 +28,7 @@ import LogisticsMealsPage from './pages/LogisticsMealsPage';
 import LogisticsMealCreatePage from './pages/LogisticsMealCreatePage';
 import LogisticsMealDetailPage from './pages/LogisticsMealDetailPage';
 import LogisticsOthersPage from './pages/LogisticsOthersPage';
+import LogisticsAirfieldsPage from './pages/LogisticsAirfieldsPage';
 import LogisticsOtherCreatePage from './pages/LogisticsOtherCreatePage';
 import LogisticsOtherDetailPage from './pages/LogisticsOtherDetailPage';
 import EventSchedulePage from './pages/EventSchedulePage';
@@ -94,6 +95,7 @@ const App = () => (
           <Route path="logistics/others" element={<ParticipantRouteGuard><LogisticsOthersPage /></ParticipantRouteGuard>} />
           <Route path="logistics/others/new" element={<ParticipantRouteGuard><LogisticsOtherCreatePage /></ParticipantRouteGuard>} />
           <Route path="logistics/others/:otherId" element={<ParticipantRouteGuard><LogisticsOtherDetailPage /></ParticipantRouteGuard>} />
+          <Route path="logistics/airfields" element={<ParticipantRouteGuard><LogisticsAirfieldsPage /></ParticipantRouteGuard>} />
           <Route path="logistics/new" element={<ParticipantRouteGuard><LogisticsCreatePage /></ParticipantRouteGuard>} />
           <Route path="logistics/:transportId" element={<ParticipantRouteGuard><LogisticsDetailPage /></ParticipantRouteGuard>} />
           <Route path="logistics/vehicles/:vehicleId" element={<ParticipantRouteGuard><VehicleDetailPage /></ParticipantRouteGuard>} />

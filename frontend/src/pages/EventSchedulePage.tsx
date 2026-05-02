@@ -1690,6 +1690,7 @@ const EventSchedulePage = () => {
     if (type === 'Accommodation') {
       navigate('/logistics/accommodations/new', {
         state: {
+          returnTo: `/events/${eventId}`,
           copyAccommodation: {
             event_id: eventNumericId,
             check_in_at: dayKeyToScheduledAt(dayKey, 15, 0),
@@ -1713,6 +1714,7 @@ const EventSchedulePage = () => {
     if (type === 'Other') {
       navigate('/logistics/others/new', {
         state: {
+          returnTo: `/events/${eventId}`,
           initialValues: {
             event_id: eventNumericId,
             scheduled_at: scheduledAt

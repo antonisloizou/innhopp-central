@@ -207,6 +207,16 @@ const LogisticsGroundCrewCreatePage = () => {
         event_id: Number(selectedEventId),
         vehicle_ids: [...vehicleIds]
       };
+      const pickupRef = parseLocationKey(pickupOptionKey);
+      if (pickupRef.type && pickupRef.id) {
+        payload.pickup_location_type = pickupRef.type;
+        payload.pickup_location_id = pickupRef.id;
+      }
+      const destinationRef = parseLocationKey(destinationOptionKey);
+      if (destinationRef.type && destinationRef.id) {
+        payload.destination_type = destinationRef.type;
+        payload.destination_id = destinationRef.id;
+      }
       if (showVehicleForm && newVehicle.name.trim()) {
         const created = await createEventVehicle({
           event_id: Number(selectedEventId),
@@ -357,6 +367,13 @@ const LogisticsGroundCrewCreatePage = () => {
 
   const normalizeLocationValue = (val: string) =>
     val.toLowerCase().replace(/^#?\s*\d+\s*/, '').trim();
+  const parseLocationKey = (key: string): { type?: string; id?: number } => {
+    const [type, rawId] = key.split('::');
+    if (!type || !rawId) return {};
+    const id = Number(rawId);
+    if (!Number.isFinite(id) || id <= 0) return {};
+    return { type, id };
+  };
 
   const findOptionByKey = (key: string) => {
     const all = locationGroups.flatMap((group) => group.options);

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season, Accommodation, listAllAccommodations } from '../api/events';
 import { listTransports, Transport, listOthers, OtherLogistic, listMeals, Meal, listGroundCrews, GroundCrew } from '../api/logistics';
 import { listEventVehicles, EventVehicle } from '../api/logistics';
+import { listAirfields, Airfield } from '../api/airfields';
 
 const LogisticsSummaryPage = () => {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ const LogisticsSummaryPage = () => {
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
+  const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [vehicles, setVehicles] = useState<EventVehicle[]>([]);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [selectedEvent, setSelectedEvent] = useState<string>('');
@@ -25,7 +27,7 @@ const LogisticsSummaryPage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [seasonResp, eventResp, transportResp, groundCrewResp, accResp, vehResp, otherResp, mealsResp] = await Promise.all([
+        const [seasonResp, eventResp, transportResp, groundCrewResp, accResp, vehResp, otherResp, mealsResp, airfieldResp] = await Promise.all([
           listSeasons(),
           listEvents(),
           listTransports(),
@@ -33,7 +35,8 @@ const LogisticsSummaryPage = () => {
           listAllAccommodations(),
           listEventVehicles(),
           listOthers(),
-          listMeals()
+          listMeals(),
+          listAirfields()
         ]);
         if (cancelled) return;
         setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
@@ -44,6 +47,7 @@ const LogisticsSummaryPage = () => {
         setVehicles(Array.isArray(vehResp) ? vehResp : []);
         setOthers(Array.isArray(otherResp) ? otherResp : []);
         setMeals(Array.isArray(mealsResp) ? mealsResp : []);
+        setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load logistics');
       } finally {
@@ -126,6 +130,21 @@ const LogisticsSummaryPage = () => {
       return true;
     });
   }, [meals, selectedEvent, selectedSeason, events]);
+
+  const filteredAirfields = useMemo(() => {
+    if (!selectedSeason && !selectedEvent) return airfields;
+    const activeEventIds = selectedEvent
+      ? new Set([Number(selectedEvent)])
+      : new Set(events.filter((ev) => ev.season_id === Number(selectedSeason)).map((ev) => ev.id));
+    return airfields.filter((airfield) =>
+      events.some(
+        (event) =>
+          activeEventIds.has(event.id) &&
+          Array.isArray(event.airfield_ids) &&
+          event.airfield_ids.includes(airfield.id)
+      )
+    );
+  }, [airfields, events, selectedEvent, selectedSeason]);
 
   return (
     <section className="stack">
@@ -218,6 +237,17 @@ const LogisticsSummaryPage = () => {
             <span className="badge neutral">{filteredMeals.length}</span>
           </header>
           <p className="muted">Plan meals and service times.</p>
+        </article>
+
+        <article
+          className="card clickable"
+          onClick={() => navigate('/logistics/airfields')}
+        >
+          <header className="card-header">
+            <h3>Airfields</h3>
+            <span className="badge neutral">{filteredAirfields.length}</span>
+          </header>
+          <p className="muted">View and manage airfields.</p>
         </article>
 
         <article

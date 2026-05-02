@@ -242,7 +242,8 @@ const InnhoppDetailPage = () => {
   const [landingRoadRouteError, setLandingRoadRouteError] = useState<string | null>(null);
   const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [budgetFlightEstimateReason, setBudgetFlightEstimateReason] = useState<string | null>(null);
-  const routeRequestRef = useRef(0);
+  const takeoffRouteRequestRef = useRef(0);
+  const landingRouteRequestRef = useRef(0);
   const lastFlyingUnavailableReasonRef = useRef<string | null>(null);
   const lastLandingFlyingUnavailableReasonRef = useRef<string | null>(null);
   const lastDrivingUnavailableReasonRef = useRef<string | null>(null);
@@ -837,14 +838,14 @@ const InnhoppDetailPage = () => {
       return;
     }
 
-    const requestId = routeRequestRef.current + 1;
-    routeRequestRef.current = requestId;
+    const requestId = landingRouteRequestRef.current + 1;
+    landingRouteRequestRef.current = requestId;
     setLandingRoadRouteLoading(true);
     setLandingRoadRouteError(null);
 
     loadGoogleMapsApi()
       .then(async (maps) => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || landingRouteRequestRef.current !== requestId) return;
         const { Route } = await maps.importLibrary('routes');
         return Route.computeRoutes({
           origin: { lat: landingCoords.lat, lng: landingCoords.lng },
@@ -854,7 +855,7 @@ const InnhoppDetailPage = () => {
         });
       })
       .then((result: any) => {
-        if (!result || cancelled || routeRequestRef.current !== requestId) return;
+        if (!result || cancelled || landingRouteRequestRef.current !== requestId) return;
         const leg = result.routes?.[0]?.legs?.[0];
         const distanceMeters = leg?.distanceMeters;
         const durationMillis = leg?.durationMillis;
@@ -870,12 +871,12 @@ const InnhoppDetailPage = () => {
         setLandingDrivingDurationMinutes(durationMin);
       })
       .catch((err) => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || landingRouteRequestRef.current !== requestId) return;
         setLandingDrivingDurationMinutes(null);
         setLandingRoadRouteError(err instanceof Error ? err.message : 'Failed to calculate driving route.');
       })
       .finally(() => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || landingRouteRequestRef.current !== requestId) return;
         setLandingRoadRouteLoading(false);
       });
 
@@ -960,14 +961,14 @@ const InnhoppDetailPage = () => {
       return;
     }
 
-    const requestId = routeRequestRef.current + 1;
-    routeRequestRef.current = requestId;
+    const requestId = takeoffRouteRequestRef.current + 1;
+    takeoffRouteRequestRef.current = requestId;
     setRoadRouteLoading(true);
     setRoadRouteError(null);
 
     loadGoogleMapsApi()
       .then(async (maps) => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || takeoffRouteRequestRef.current !== requestId) return;
         const { Route } = await maps.importLibrary('routes');
         return Route.computeRoutes({
           origin: { lat: takeoffCoords.lat, lng: takeoffCoords.lng },
@@ -977,7 +978,7 @@ const InnhoppDetailPage = () => {
         });
       })
       .then((result: any) => {
-        if (!result || cancelled || routeRequestRef.current !== requestId) return;
+        if (!result || cancelled || takeoffRouteRequestRef.current !== requestId) return;
         const leg = result.routes?.[0]?.legs?.[0];
         const distanceMeters = leg?.distanceMeters;
         const durationMillis = leg?.durationMillis;
@@ -993,12 +994,12 @@ const InnhoppDetailPage = () => {
         setDrivingDurationMinutes(durationMin);
       })
       .catch((err) => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || takeoffRouteRequestRef.current !== requestId) return;
         setDrivingDurationMinutes(null);
         setRoadRouteError(err instanceof Error ? err.message : 'Failed to calculate driving route.');
       })
       .finally(() => {
-        if (cancelled || routeRequestRef.current !== requestId) return;
+        if (cancelled || takeoffRouteRequestRef.current !== requestId) return;
         setRoadRouteLoading(false);
       });
 
