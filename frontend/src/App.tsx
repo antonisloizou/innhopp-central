@@ -63,7 +63,7 @@ const App = () => (
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
           <Route path="events/:eventId/route" element={<ParticipantRouteGuard eventParam="eventId"><EventRoutePlannerPage /></ParticipantRouteGuard>} />
-          <Route path="events/airfields-usage" element={<ParticipantRouteGuard><EventAirfieldsUsagePage /></ParticipantRouteGuard>} />
+          <Route path="events/airfields" element={<ParticipantRouteGuard><EventAirfieldsUsagePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/comms" element={<ParticipantRouteGuard eventParam="eventId"><EventCommsPage /></ParticipantRouteGuard>} />
