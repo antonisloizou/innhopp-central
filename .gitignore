@@ -7,3 +7,4 @@ frontend/dist
 /.gocache
 backend/.env
 frontend/.env
+innhopp_live.dump

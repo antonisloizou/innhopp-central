@@ -44,6 +44,7 @@ import EventCommsPage from './pages/EventCommsPage';
 import CommunicationsPage from './pages/CommunicationsPage';
 import EventRoutePlannerPage from './pages/EventRoutePlannerPage';
 import EventBudgetPage from './pages/EventBudgetPage';
+import EventAirfieldsUsagePage from './pages/EventAirfieldsUsagePage';
 import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
@@ -62,6 +63,7 @@ const App = () => (
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
           <Route path="events/:eventId/route" element={<ParticipantRouteGuard eventParam="eventId"><EventRoutePlannerPage /></ParticipantRouteGuard>} />
+          <Route path="events/airfields-usage" element={<ParticipantRouteGuard><EventAirfieldsUsagePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/comms" element={<ParticipantRouteGuard eventParam="eventId"><EventCommsPage /></ParticipantRouteGuard>} />
