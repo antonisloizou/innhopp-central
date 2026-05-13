@@ -37,6 +37,7 @@ import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { formatMetersWithFeet } from '../utils/units';
 import EventGearMenu from '../components/EventGearMenu';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
+import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import {
   formatEventLocal,
   fromEventLocalPickerDate,
@@ -102,6 +103,8 @@ type ScheduleEntry = {
   innhoppElevation?: number | null;
   innhoppCoordinates?: string | null;
   innhoppTakeoffName?: string | null;
+  innhoppLandingName?: string | null;
+  innhoppDistanceByAir?: number | null;
   innhoppElevationDiff?: number | null;
   innhoppPrimaryName?: string | null;
   innhoppPrimarySize?: string | null;
@@ -142,6 +145,13 @@ const formatDateTime = (iso?: string | null) => {
   const day = formatEventLocal(iso, { year: 'numeric', month: 'short', day: 'numeric' });
   if (!day) return '';
   return `${day}, ${pad(parts.hour)}:${pad(parts.minute)}`;
+};
+
+const computeFlightTimeMinutes = (distanceByAirKm?: number | null, aircraftSpeedKmh?: number | null): number | null => {
+  if (!Number.isFinite(distanceByAirKm) || (distanceByAirKm as number) < 0) return null;
+  if ((distanceByAirKm as number) === 0) return 0;
+  if (!Number.isFinite(aircraftSpeedKmh) || (aircraftSpeedKmh as number) <= 0) return null;
+  return Math.round(((distanceByAirKm as number) / (aircraftSpeedKmh as number)) * 60);
 };
 
 const extractDateKey = (iso?: string | null) => {
@@ -212,6 +222,7 @@ const EventSchedulePage = () => {
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
+  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -272,6 +283,31 @@ const EventSchedulePage = () => {
   const [previewClosing, setPreviewClosing] = useState(false);
   const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
   const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadBudgetSpeed = async () => {
+      if (!eventId) return;
+      setBudgetAircraftSpeedKmh(null);
+      try {
+        const budget = await getEventBudget(Number(eventId));
+        const assumptions = await getBudgetAssumptions(budget.id);
+        if (cancelled) return;
+        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
+        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
+          setBudgetAircraftSpeedKmh(speed);
+          return;
+        }
+        setBudgetAircraftSpeedKmh(null);
+      } catch {
+        if (!cancelled) setBudgetAircraftSpeedKmh(null);
+      }
+    };
+    loadBudgetSpeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
 
   useEffect(() => {
     if (previewEntry) {
@@ -879,6 +915,10 @@ const EventSchedulePage = () => {
       const entries: ScheduleEntry[] = [];
       day.innhopps.forEach((i) => {
         const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
+        const landing = airfields.find((af) => af.id === i.landing_airfield_id);
+        const landingName =
+          landing?.name ||
+          ((i.landing_airfield_id == null || i.landing_airfield_id === i.takeoff_airfield_id) ? takeoff?.name || null : null);
         const elevationDiff =
           typeof i.elevation === 'number' && typeof takeoff?.elevation === 'number' ? i.elevation - takeoff.elevation : null;
         entries.push({
@@ -900,6 +940,8 @@ const EventSchedulePage = () => {
           innhoppElevation: i.elevation ?? null,
           innhoppCoordinates: i.coordinates || null,
           innhoppTakeoffName: takeoff?.name || null,
+          innhoppLandingName: landingName,
+          innhoppDistanceByAir: i.distance_by_air ?? null,
           innhoppElevationDiff: elevationDiff,
           innhoppPrimaryName: i.primary_landing_area?.name || null,
           innhoppPrimarySize: i.primary_landing_area?.size || null,
@@ -2366,7 +2408,6 @@ const EventSchedulePage = () => {
                   if (previewOverlayEntry.entry.scheduledAt) {
                     fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(previewOverlayEntry.entry.scheduledAt)));
                   }
-                  fields.push(renderField('reason', 'REASON FOR CHOICE', previewOverlayEntry.entry.innhoppReason || '—'));
                   fields.push(
                     renderField(
                       'elevation',
@@ -2375,6 +2416,13 @@ const EventSchedulePage = () => {
                         ? formatMetersWithFeet(previewOverlayEntry.entry.innhoppElevation)
                         : '—'
                     )
+                  );
+                  const flightTimeMinutes = computeFlightTimeMinutes(
+                    previewOverlayEntry.entry.innhoppDistanceByAir,
+                    budgetAircraftSpeedKmh
+                  );
+                  fields.push(
+                    renderField('flight_time', 'FLIGHT TIME', flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : '—')
                   );
                   fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', previewOverlayEntry.entry.innhoppTakeoffName || '—'));
                   fields.push(
@@ -2388,13 +2436,9 @@ const EventSchedulePage = () => {
                   );
                   fields.push(
                     renderField(
-                      'rescue_boat',
-                      'RESCUE BOAT',
-                      previewOverlayEntry.entry.innhoppRescueBoat == null
-                        ? '—'
-                        : previewOverlayEntry.entry.innhoppRescueBoat
-                        ? 'Yes'
-                        : 'No'
+                      'landing_airfield',
+                      'LANDING AIRFIELD',
+                      previewOverlayEntry.entry.innhoppLandingName || '—'
                     )
                   );
                   fields.push(
