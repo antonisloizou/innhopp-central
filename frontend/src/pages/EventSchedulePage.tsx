@@ -154,6 +154,12 @@ const computeFlightTimeMinutes = (distanceByAirKm?: number | null, aircraftSpeed
   return Math.round(((distanceByAirKm as number) / (aircraftSpeedKmh as number)) * 60);
 };
 
+const applyMinimumLoadDuration = (minutes: number | null, minimumLoadDuration?: number | null): number | null => {
+  if (minutes == null) return null;
+  if (!Number.isFinite(minimumLoadDuration) || (minimumLoadDuration as number) <= 0) return minutes;
+  return Math.max(minutes, Math.ceil(minimumLoadDuration as number));
+};
+
 const extractDateKey = (iso?: string | null) => {
   return getEventLocalDateKey(iso);
 };
@@ -283,24 +289,35 @@ const EventSchedulePage = () => {
   const [previewClosing, setPreviewClosing] = useState(false);
   const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
   const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
+  const [budgetMinimumLoadDuration, setBudgetMinimumLoadDuration] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const loadBudgetSpeed = async () => {
       if (!eventId) return;
       setBudgetAircraftSpeedKmh(null);
+      setBudgetMinimumLoadDuration(null);
       try {
         const budget = await getEventBudget(Number(eventId));
         const assumptions = await getBudgetAssumptions(budget.id);
         if (cancelled) return;
         const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
+        const minLoadDuration = assumptions?.values?.minimum_load_duration;
         if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
           setBudgetAircraftSpeedKmh(speed);
-          return;
+        } else {
+          setBudgetAircraftSpeedKmh(null);
         }
-        setBudgetAircraftSpeedKmh(null);
+        if (typeof minLoadDuration === 'number' && Number.isFinite(minLoadDuration) && minLoadDuration > 0) {
+          setBudgetMinimumLoadDuration(minLoadDuration);
+        } else {
+          setBudgetMinimumLoadDuration(null);
+        }
       } catch {
-        if (!cancelled) setBudgetAircraftSpeedKmh(null);
+        if (!cancelled) {
+          setBudgetAircraftSpeedKmh(null);
+          setBudgetMinimumLoadDuration(null);
+        }
       }
     };
     loadBudgetSpeed();
@@ -916,7 +933,10 @@ const EventSchedulePage = () => {
       day.innhopps.forEach((i) => {
         const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
         const landing = airfields.find((af) => af.id === i.landing_airfield_id);
-        const flightTimeMinutes = computeFlightTimeMinutes(i.distance_by_air, budgetAircraftSpeedKmh);
+        const flightTimeMinutes = applyMinimumLoadDuration(
+          computeFlightTimeMinutes(i.distance_by_air, budgetAircraftSpeedKmh),
+          budgetMinimumLoadDuration
+        );
         const flightDurationLabel = flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : 'Unavailable';
         const landingName =
           landing?.name ||
@@ -1146,7 +1166,16 @@ const EventSchedulePage = () => {
           return a.sortValue - b.sortValue;
         });
     },
-    [airfields, budgetAircraftSpeedKmh, eventData, eventId, locationCoordinates, participantOnly, typeFilters]
+    [
+      airfields,
+      budgetAircraftSpeedKmh,
+      budgetMinimumLoadDuration,
+      eventData,
+      eventId,
+      locationCoordinates,
+      participantOnly,
+      typeFilters
+    ]
   );
 
   const resolveDropTarget = useCallback(
