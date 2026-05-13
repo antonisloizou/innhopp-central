@@ -916,6 +916,8 @@ const EventSchedulePage = () => {
       day.innhopps.forEach((i) => {
         const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
         const landing = airfields.find((af) => af.id === i.landing_airfield_id);
+        const flightTimeMinutes = computeFlightTimeMinutes(i.distance_by_air, budgetAircraftSpeedKmh);
+        const flightDurationLabel = flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : 'Unavailable';
         const landingName =
           landing?.name ||
           ((i.landing_airfield_id == null || i.landing_airfield_id === i.takeoff_airfield_id) ? takeoff?.name || null : null);
@@ -951,6 +953,7 @@ const EventSchedulePage = () => {
           innhoppMinimumRequirements: i.minimum_requirements || null,
           innhoppRescueBoat: i.rescue_boat ?? null,
           innhoppLandOwnerPermission: i.land_owner_permission ?? null,
+          routeDurationLabel: flightDurationLabel,
           scheduledAt: i.scheduled_at
         });
       });
@@ -1143,7 +1146,7 @@ const EventSchedulePage = () => {
           return a.sortValue - b.sortValue;
         });
     },
-    [airfields, eventData, eventId, locationCoordinates, participantOnly, typeFilters]
+    [airfields, budgetAircraftSpeedKmh, eventData, eventId, locationCoordinates, participantOnly, typeFilters]
   );
 
   const resolveDropTarget = useCallback(
@@ -2054,16 +2057,18 @@ const EventSchedulePage = () => {
                         </span>
                       </div>
                     </div>
-                    {entry.routeDurationLabel && entry.routeVehiclesLabel ? (
+                    {entry.routeDurationLabel && (entry.routeVehiclesLabel || entry.type === 'Innhopp') ? (
                       <div className="muted event-schedule-route-meta">
                         <span className="event-schedule-meta-chip">
-                          <span>⏱</span>
+                          <span>{entry.type === 'Innhopp' ? '✈️' : '⏱'}</span>
                           <span>{entry.routeDurationLabel}</span>
                         </span>
-                        <span className="event-schedule-meta-chip event-schedule-meta-chip-grow">
-                          <span>🚐︎</span>
-                          <span className="event-schedule-meta-text">{entry.routeVehiclesLabel}</span>
-                        </span>
+                        {entry.routeVehiclesLabel ? (
+                          <span className="event-schedule-meta-chip event-schedule-meta-chip-grow">
+                            <span>🚐︎</span>
+                            <span className="event-schedule-meta-text">{entry.routeVehiclesLabel}</span>
+                          </span>
+                        ) : null}
                       </div>
                     ) : (
                       entry.subtitle && <div className="muted event-schedule-wrap-text">{entry.subtitle}</div>
