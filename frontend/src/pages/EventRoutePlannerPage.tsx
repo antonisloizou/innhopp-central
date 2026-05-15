@@ -3,14 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Accommodation, Event, copyEvent, deleteEvent, getEvent, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
 import { GroundCrew, listGroundCrews, listMeals, listOthers, listTransports, Meal, OtherLogistic, Transport } from '../api/logistics';
+import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import { useAuth } from '../auth/AuthProvider';
-import { isParticipantOnlySession } from '../auth/access';
+import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import { formatEventLocal, getEventLocalDateKey, getEventLocalTimeParts, parseEventLocal } from '../utils/eventDate';
 import { parseCoordinates } from '../utils/coordinates';
+import { isInnhoppReady } from '../utils/innhoppReadiness';
 import EventGearMenu from '../components/EventGearMenu';
-
-type EntryType = 'Innhopp' | 'Transport' | 'Ground Crew' | 'Accommodation' | 'Other' | 'Meal';
+import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
+import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 
 type DayBucket = {
   date: Date;
@@ -24,13 +26,7 @@ type DayBucket = {
   meals: Meal[];
 };
 
-type RoutePlannerEntry = {
-  id: string;
-  title: string;
-  subtitle?: string;
-  type: EntryType;
-  hourKey: string;
-  sortValue: number;
+type RoutePlannerEntry = ScheduleEntry & {
   routePoints: RouteStop[];
   disabled: boolean;
 };
@@ -39,10 +35,13 @@ type StopVisualType = 'innhopp' | 'accommodation' | 'meal' | 'other' | 'generic'
 
 type RouteStop = {
   id: string;
+  entryId: string;
   label: string;
   coordinates: string;
   visualType: StopVisualType;
 };
+
+const OVERLAY_EXIT_MS = 180;
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -202,6 +201,7 @@ const EventRoutePlannerPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
+  const canOpenMapsActions = canUseStaffMapsActions(user);
   const [eventData, setEventData] = useState<Event | null>(null);
   const [transports, setTransports] = useState<Transport[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
@@ -210,6 +210,7 @@ const EventRoutePlannerPage = () => {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [loading, setLoading] = useState(true);
+  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
@@ -227,6 +228,34 @@ const EventRoutePlannerPage = () => {
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [mapOverlay, setMapOverlay] = useState<RouteMapOverlay>('hybrid');
   const mapOverlayRef = useRef<RouteMapOverlay>('hybrid');
+  const [previewEntry, setPreviewEntry] = useState<RoutePlannerEntry | null>(null);
+  const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<RoutePlannerEntry | null>(null);
+  const [previewClosing, setPreviewClosing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadBudgetSpeed = async () => {
+      if (!eventId) return;
+      setBudgetAircraftSpeedKmh(null);
+      try {
+        const budget = await getEventBudget(Number(eventId));
+        const assumptions = await getBudgetAssumptions(budget.id);
+        if (cancelled) return;
+        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
+        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
+          setBudgetAircraftSpeedKmh(speed);
+        } else {
+          setBudgetAircraftSpeedKmh(null);
+        }
+      } catch {
+        if (!cancelled) setBudgetAircraftSpeedKmh(null);
+      }
+    };
+    void loadBudgetSpeed();
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
 
   const resolveLocationStop = useCallback(
     (name: string | null | undefined) => {
@@ -426,10 +455,18 @@ const EventRoutePlannerPage = () => {
       const entries: RoutePlannerEntry[] = [];
 
       day.innhopps.forEach((item) => {
+        const takeoff = airfields.find((af) => af.id === item.takeoff_airfield_id);
+        const landing = airfields.find((af) => af.id === item.landing_airfield_id);
+        const landingName =
+          landing?.name ||
+          ((item.landing_airfield_id == null || item.landing_airfield_id === item.takeoff_airfield_id) ? takeoff?.name || null : null);
+        const elevationDiff =
+          typeof item.elevation === 'number' && typeof takeoff?.elevation === 'number' ? item.elevation - takeoff.elevation : null;
         const routePoints = hasText(item.coordinates)
           ? [
               {
                 id: `i-${item.id}`,
+                entryId: `i-${item.id}`,
                 label: item.name,
                 coordinates: item.coordinates!.trim(),
                 visualType: 'innhopp' as const
@@ -446,6 +483,28 @@ const EventRoutePlannerPage = () => {
             const parts = getEventLocalTimeParts(item.scheduled_at);
             return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
           })(),
+          to: participantOnly ? undefined : eventData ? `/events/${eventData.id}/innhopps/${item.id}` : undefined,
+          ready: isInnhoppReady(item),
+          missingCoordinates: !hasText(item.coordinates),
+          description: item.reason_for_choice || item.primary_landing_area?.description || null,
+          scheduledAt: item.scheduled_at || undefined,
+          notes: item.notes || null,
+          coordinates: item.coordinates || null,
+          innhoppReason: item.reason_for_choice || null,
+          innhoppElevation: item.elevation ?? null,
+          innhoppCoordinates: item.coordinates || null,
+          innhoppTakeoffName: takeoff?.name || null,
+          innhoppLandingName: landingName,
+          innhoppDistanceByAir: item.distance_by_air ?? null,
+          innhoppElevationDiff: elevationDiff,
+          innhoppPrimaryName: item.primary_landing_area?.name || null,
+          innhoppPrimarySize: item.primary_landing_area?.size || null,
+          innhoppSecondaryName: item.secondary_landing_area?.name || null,
+          innhoppSecondarySize: item.secondary_landing_area?.size || null,
+          innhoppRisk: item.risk_assessment || null,
+          innhoppMinimumRequirements: item.minimum_requirements || null,
+          innhoppRescueBoat: item.rescue_boat ?? null,
+          innhoppLandOwnerPermission: item.land_owner_permission ?? null,
           routePoints,
           disabled: routePoints.length === 0
         });
@@ -492,6 +551,7 @@ const EventRoutePlannerPage = () => {
           ? [
               {
                 id: `o-${item.id}`,
+                entryId: `o-${item.id}`,
                 label: item.name || 'Other logistics',
                 coordinates: item.coordinates!.trim(),
                 visualType: 'other' as const
@@ -508,6 +568,9 @@ const EventRoutePlannerPage = () => {
             const parts = getEventLocalTimeParts(item.scheduled_at);
             return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
           })(),
+          scheduledAt: item.scheduled_at || undefined,
+          notes: item.notes || null,
+          coordinates: item.coordinates || null,
           routePoints,
           disabled: routePoints.length === 0
         });
@@ -525,10 +588,14 @@ const EventRoutePlannerPage = () => {
             const parts = getEventLocalTimeParts(item.scheduled_at);
             return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
           })(),
+          scheduledAt: item.scheduled_at || undefined,
+          notes: item.notes || null,
+          location: item.location || null,
           routePoints: mealStop
             ? [
                 {
                   id: `meal-${item.id}`,
+                  entryId: `meal-${item.id}`,
                   label: item.name,
                   coordinates: mealStop.coordinates.trim(),
                   visualType: 'meal'
@@ -540,19 +607,23 @@ const EventRoutePlannerPage = () => {
       });
 
       day.accommodations.forEach((item) => {
-        const routePoints = hasText(item.coordinates)
-          ? [
-              {
-                id: `acc-${item.id}`,
-                label: item.name,
-                coordinates: item.coordinates!.trim(),
-                visualType: 'accommodation' as const
-              }
-            ]
-          : [];
+        const buildAccommodationRoutePoints = (entryId: string) =>
+          hasText(item.coordinates)
+            ? [
+                {
+                  id: `${entryId}-point`,
+                  entryId,
+                  label: item.name,
+                  coordinates: item.coordinates!.trim(),
+                  visualType: 'accommodation' as const
+                }
+              ]
+            : [];
         if (item.check_in_at && extractDateKey(item.check_in_at) === day.key) {
+          const entryId = `acc-in-${item.id}`;
+          const routePoints = buildAccommodationRoutePoints(entryId);
           entries.push({
-            id: `acc-in-${item.id}`,
+            id: entryId,
             title: `Check-in: ${item.name}`,
             subtitle: '',
             type: 'Accommodation',
@@ -561,13 +632,19 @@ const EventRoutePlannerPage = () => {
               const parts = getEventLocalTimeParts(item.check_in_at);
               return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
             })(),
+            scheduledAt: item.check_in_at || undefined,
+            notes: item.notes || null,
+            booked: !!item.booked,
+            coordinates: item.coordinates || null,
             routePoints,
             disabled: routePoints.length === 0
           });
         }
         if (item.check_out_at && extractDateKey(item.check_out_at) === day.key) {
+          const entryId = `acc-out-${item.id}`;
+          const routePoints = buildAccommodationRoutePoints(entryId);
           entries.push({
-            id: `acc-out-${item.id}`,
+            id: entryId,
             title: `Check-out: ${item.name}`,
             subtitle: '',
             type: 'Accommodation',
@@ -576,18 +653,28 @@ const EventRoutePlannerPage = () => {
               const parts = getEventLocalTimeParts(item.check_out_at);
               return parts ? parts.hour * 60 + parts.minute : Number.POSITIVE_INFINITY;
             })(),
+            scheduledAt: item.check_out_at || undefined,
+            notes: item.notes || null,
+            booked: !!item.booked,
+            coordinates: item.coordinates || null,
             routePoints,
             disabled: routePoints.length === 0
           });
         }
         if (!item.check_in_at && !item.check_out_at) {
+          const entryId = `acc-${item.id}`;
+          const routePoints = buildAccommodationRoutePoints(entryId);
           entries.push({
-            id: `acc-${item.id}`,
+            id: entryId,
             title: item.name,
             subtitle: '',
             type: 'Accommodation',
             hourKey: 'Unscheduled',
             sortValue: Number.POSITIVE_INFINITY,
+            scheduledAt: null,
+            notes: item.notes || null,
+            booked: !!item.booked,
+            coordinates: item.coordinates || null,
             routePoints,
             disabled: routePoints.length === 0
           });
@@ -599,7 +686,7 @@ const EventRoutePlannerPage = () => {
         return a.sortValue - b.sortValue;
       });
     },
-    [resolveLocationStop]
+    [airfields, eventData, participantOnly, resolveLocationStop]
   );
 
   const entriesByDay = useMemo(
@@ -612,6 +699,11 @@ const EventRoutePlannerPage = () => {
   );
 
   const allEntries = useMemo(() => entriesByDay.flatMap((item) => item.entries), [entriesByDay]);
+  const entryById = useMemo(() => {
+    const next = new Map<string, RoutePlannerEntry>();
+    allEntries.forEach((entry) => next.set(entry.id, entry));
+    return next;
+  }, [allEntries]);
   const routableEntries = useMemo(() => allEntries.filter((entry) => !entry.disabled), [allEntries]);
 
   useEffect(() => {
@@ -681,6 +773,25 @@ const EventRoutePlannerPage = () => {
     mapOverlayRef.current = mapOverlay;
     mapInstanceRef.current?.setMapTypeId(mapOverlay);
   }, [mapOverlay]);
+
+  useEffect(() => {
+    if (previewEntry) {
+      setRenderedPreviewEntry(previewEntry);
+      setPreviewClosing(false);
+      return;
+    }
+    if (!renderedPreviewEntry) return;
+    setPreviewClosing(true);
+    const timer = window.setTimeout(() => {
+      setRenderedPreviewEntry(null);
+      setPreviewClosing(false);
+    }, OVERLAY_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [previewEntry, renderedPreviewEntry]);
+
+  const closePreview = useCallback(() => {
+    setPreviewEntry(null);
+  }, []);
 
   useEffect(() => {
     if (previewGeometry.length === 0) {
@@ -753,22 +864,29 @@ const EventRoutePlannerPage = () => {
 
         mapMarkersRef.current = previewGeometry.map((stop) => {
           bounds.extend({ lat: stop.lat, lng: stop.lng });
+          const handleMarkerClick = () => {
+            const entry = entryById.get(stop.entryId);
+            if (entry) setPreviewEntry(entry);
+          };
           if (maps.marker?.AdvancedMarkerElement) {
-            return new maps.marker.AdvancedMarkerElement({
+            const advancedMarker = new maps.marker.AdvancedMarkerElement({
               position: { lat: stop.lat, lng: stop.lng },
               map,
               title: stop.label,
+              gmpClickable: true,
               content: buildAdvancedMarkerContent(stop.visualType)
             });
+            advancedMarker.addListener?.('click', handleMarkerClick);
+            return advancedMarker;
           }
-          return new maps.Marker({
+          const marker = new maps.Marker({
             position: { lat: stop.lat, lng: stop.lng },
             map,
             title: stop.label,
             label: {
-              text: '•',
+              text: iconNameByType[stop.visualType].slice(0, 1).toUpperCase(),
               color: '#ffffff',
-              fontSize: '22px',
+              fontSize: '13px',
               fontWeight: '700'
             },
             icon: {
@@ -780,6 +898,8 @@ const EventRoutePlannerPage = () => {
               scale: 16
             }
           });
+          marker.addListener('click', handleMarkerClick);
+          return marker;
         });
 
         if (previewGeometry.length === 1) {
@@ -798,7 +918,7 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [previewGeometry]);
+  }, [entryById, previewGeometry]);
 
   const toggleEntry = (entry: RoutePlannerEntry) => {
     if (entry.disabled) return;
@@ -1120,6 +1240,16 @@ const EventRoutePlannerPage = () => {
           );
         })
       )}
+      {renderedPreviewEntry ? (
+        <ScheduleEntryPreviewOverlay
+          entry={renderedPreviewEntry}
+          closing={previewClosing}
+          onClose={closePreview}
+          canOpenMapsActions={canOpenMapsActions}
+          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
+          typeBadgeClassNames={typeBadgeClassNames}
+        />
+      ) : null}
     </section>
   );
 };

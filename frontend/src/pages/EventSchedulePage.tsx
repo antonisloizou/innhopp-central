@@ -34,8 +34,9 @@ import {
 import { listAirfields, Airfield } from '../api/airfields';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
-import { formatMetersWithFeet } from '../utils/units';
 import EventGearMenu from '../components/EventGearMenu';
+import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
+import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
 import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import {
@@ -50,8 +51,6 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 
 const OVERLAY_EXIT_MS = 180;
-
-type EntryType = 'Innhopp' | 'Transport' | 'Ground Crew' | 'Accommodation' | 'Other' | 'Meal';
 type DayBucket = {
   date: Date;
   label: string;
@@ -81,47 +80,6 @@ const formatVehiclesLabel = (vehicles?: { name: string; driver?: string; passeng
     ? 'No vehicles'
     : vehicles.map((vehicle, index) => (hasText(vehicle.name) ? vehicle.name : `Vehicle ${index + 1}`)).join(', ');
 
-type ScheduleEntry = {
-  id: string;
-  hourKey: string;
-  sortValue: number;
-  title: string;
-  subtitle?: string;
-  type: EntryType;
-  passengers?: number;
-  ready?: boolean;
-  booked?: boolean;
-  missingCoordinates?: boolean;
-  otherComplete?: boolean;
-  mealComplete?: boolean;
-  transportComplete?: boolean;
-  coordinates?: string | null;
-  location?: string | null;
-  description?: string | null;
-  notes?: string | null;
-  innhoppReason?: string | null;
-  innhoppElevation?: number | null;
-  innhoppCoordinates?: string | null;
-  innhoppTakeoffName?: string | null;
-  innhoppLandingName?: string | null;
-  innhoppDistanceByAir?: number | null;
-  innhoppElevationDiff?: number | null;
-  innhoppPrimaryName?: string | null;
-  innhoppPrimarySize?: string | null;
-  innhoppSecondaryName?: string | null;
-  innhoppSecondarySize?: string | null;
-  innhoppRisk?: string | null;
-  innhoppMinimumRequirements?: string | null;
-  innhoppRescueBoat?: boolean | null;
-  innhoppLandOwnerPermission?: boolean | null;
-  transportRouteOrigin?: string | null;
-  transportRouteDestination?: string | null;
-  routeDurationLabel?: string;
-  routeVehiclesLabel?: string;
-  vehicles?: { name: string; driver?: string; passenger_capacity: number }[];
-  to?: string;
-  scheduledAt?: string | null;
-};
 type Entry = ScheduleEntry;
 
 const formatDayLabel = (date: Date) =>
@@ -135,16 +93,6 @@ const formatTimeLabel = (iso?: string | null) => {
   if (!parts) return 'Unscheduled';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(parts.hour)}:${pad(parts.minute)}`;
-};
-
-const formatDateTime = (iso?: string | null) => {
-  if (!iso) return '';
-  const parts = getEventLocalTimeParts(iso);
-  if (!parts) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const day = formatEventLocal(iso, { year: 'numeric', month: 'short', day: 'numeric' });
-  if (!day) return '';
-  return `${day}, ${pad(parts.hour)}:${pad(parts.minute)}`;
 };
 
 const computeFlightTimeMinutes = (distanceByAirKm?: number | null, aircraftSpeedKmh?: number | null): number | null => {
@@ -1177,6 +1125,22 @@ const EventSchedulePage = () => {
       typeFilters
     ]
   );
+
+  useEffect(() => {
+    const openPreviewId = (location.state as any)?.openPreviewId as string | undefined;
+    if (!openPreviewId || dayBuckets.length === 0) return;
+
+    for (const day of dayBuckets) {
+      const matchedEntry = buildOrderedEntriesForDay(day).find((entry) => entry.id === openPreviewId);
+      if (!matchedEntry) continue;
+
+      setPreviewEntry({ entry: matchedEntry, day });
+      const nextState = { ...(location.state as any) };
+      delete nextState.openPreviewId;
+      navigate('.', { replace: true, state: Object.keys(nextState).length > 0 ? nextState : null });
+      break;
+    }
+  }, [buildOrderedEntriesForDay, dayBuckets, location.state, navigate]);
 
   const resolveDropTarget = useCallback(
     (clientX: number, clientY: number) => {
@@ -2307,388 +2271,21 @@ const EventSchedulePage = () => {
             document.body
           )
         : null}
-      {previewOverlayEntry &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            onClick={closePreview}
-            role="button"
-            tabIndex={-1}
-            className={`event-schedule-preview-backdrop${previewClosing ? ' event-schedule-preview-backdrop--closing' : ''}`}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                closePreview();
-              } else if (e.key === 'Enter' && previewOverlayEntry.entry.to) {
-                navigate(previewOverlayEntry.entry.to);
-                closePreview();
-              }
-            }}
-          >
-            <div
-              className={`card overlay-panel-with-close event-schedule-preview-panel${
-                previewClosing ? ' event-schedule-preview-panel--closing' : ''
-              }`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (previewOverlayEntry.entry.to) {
-                  setHighlightId(previewOverlayEntry.entry.id);
-                  navigate(previewOverlayEntry.entry.to);
-                }
-                closePreview();
-              }}
-            >
-            <button
-              type="button"
-              className="overlay-close-button overlay-close-top-left"
-              aria-label="Close overlay"
-              onClick={(e) => {
-                e.stopPropagation();
-                closePreview();
-              }}
-            >
-              ×
-            </button>
-            <div className="card-header event-schedule-preview-header">
-              <h3 className="event-schedule-preview-title">{previewOverlayEntry.entry.title}</h3>
-              <div className="event-schedule-preview-badges">
-                {(() => {
-                  if (previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') {
-                    return (
-                      <>
-                        <span
-                          className={`badge ${previewOverlayEntry.entry.transportComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
-                        >
-                          {previewOverlayEntry.entry.transportComplete ? '✓' : '!'}
-                        </span>
-                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
-                          {previewOverlayEntry.entry.type}
-                        </span>
-                      </>
-                    );
-                  }
-                  if (previewOverlayEntry.entry.type === 'Accommodation') {
-                    return (
-                      <>
-                        <span
-                          className={`badge ${
-                            previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? 'success' : 'danger'
-                          } event-schedule-preview-status-badge`}
-                        >
-                          {previewOverlayEntry.entry.booked && !previewOverlayEntry.entry.missingCoordinates ? '✓' : '!'}
-                        </span>
-                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
-                          {previewOverlayEntry.entry.type}
-                        </span>
-                      </>
-                    );
-                  }
-                  if (previewOverlayEntry.entry.type === 'Innhopp') {
-                    return (
-                      <>
-                        <span
-                          className={`badge ${previewOverlayEntry.entry.ready ? 'success' : 'danger'} event-schedule-preview-status-badge`}
-                        >
-                          {previewOverlayEntry.entry.ready ? '✓' : '!'}
-                        </span>
-                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
-                          {previewOverlayEntry.entry.type}
-                        </span>
-                      </>
-                    );
-                  }
-                  if (previewOverlayEntry.entry.type === 'Other') {
-                    return (
-                      <>
-                        <span
-                          className={`badge ${previewOverlayEntry.entry.otherComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
-                        >
-                          {previewOverlayEntry.entry.otherComplete ? '✓' : '!'}
-                        </span>
-                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
-                          {previewOverlayEntry.entry.type}
-                        </span>
-                      </>
-                    );
-                  }
-                  if (previewOverlayEntry.entry.type === 'Meal') {
-                    return (
-                      <>
-                        <span
-                          className={`badge ${previewOverlayEntry.entry.mealComplete ? 'success' : 'danger'} event-schedule-preview-status-badge`}
-                        >
-                          {previewOverlayEntry.entry.mealComplete ? '✓' : '!'}
-                        </span>
-                        <span className={`badge ${typeBadgeClassNames[previewOverlayEntry.entry.type]}`}>
-                          {previewOverlayEntry.entry.type}
-                        </span>
-                      </>
-                    );
-                  }
-                  return null;
-                })()}
-              </div>
-            </div>
-              <div className="card-body event-schedule-preview-grid">
-                {(() => {
-                  const renderField = (key: string, label: string, value: React.ReactNode) => (
-                    <div key={key}>
-                      <div className="muted event-schedule-preview-label">{label}</div>
-                      <div>{value ?? '—'}</div>
-                    </div>
-                  );
-
-                if (previewOverlayEntry.entry.type === 'Innhopp') {
-                  const fields: React.ReactNode[] = [];
-                  if (previewOverlayEntry.entry.scheduledAt) {
-                    fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(previewOverlayEntry.entry.scheduledAt)));
-                  }
-                  fields.push(
-                    renderField(
-                      'elevation',
-                      'ELEVATION',
-                      previewOverlayEntry.entry.innhoppElevation != null
-                        ? formatMetersWithFeet(previewOverlayEntry.entry.innhoppElevation)
-                        : '—'
-                    )
-                  );
-                  const flightTimeMinutes = computeFlightTimeMinutes(
-                    previewOverlayEntry.entry.innhoppDistanceByAir,
-                    budgetAircraftSpeedKmh
-                  );
-                  fields.push(
-                    renderField('flight_time', 'FLIGHT TIME', flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : '—')
-                  );
-                  fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', previewOverlayEntry.entry.innhoppTakeoffName || '—'));
-                  fields.push(
-                    renderField(
-                      'elevation_diff',
-                      'ELEVATION DIFFERENCE',
-                      previewOverlayEntry.entry.innhoppElevationDiff != null
-                        ? formatMetersWithFeet(previewOverlayEntry.entry.innhoppElevationDiff)
-                        : '—'
-                    )
-                  );
-                  fields.push(
-                    renderField(
-                      'landing_airfield',
-                      'LANDING AIRFIELD',
-                      previewOverlayEntry.entry.innhoppLandingName || '—'
-                    )
-                  );
-                  fields.push(
-                    renderField(
-                      'primary',
-                      'PRIMARY AREA',
-                      previewOverlayEntry.entry.innhoppPrimaryName
-                        ? `${previewOverlayEntry.entry.innhoppPrimaryName}${
-                            previewOverlayEntry.entry.innhoppPrimarySize ? ` (${previewOverlayEntry.entry.innhoppPrimarySize})` : ''
-                          }`
-                        : '—'
-                    )
-                  );
-                  fields.push(
-                    renderField(
-                      'secondary',
-                      'SECONDARY AREA',
-                      previewOverlayEntry.entry.innhoppSecondaryName
-                        ? `${previewOverlayEntry.entry.innhoppSecondaryName}${
-                            previewOverlayEntry.entry.innhoppSecondarySize ? ` (${previewOverlayEntry.entry.innhoppSecondarySize})` : ''
-                          }`
-                        : '—'
-                    )
-                  );
-                  fields.push(renderField('risk', 'RISK ASSESSMENT', previewOverlayEntry.entry.innhoppRisk || '—'));
-                  fields.push(
-                    renderField('minimum', 'MINIMUM REQUIREMENTS', previewOverlayEntry.entry.innhoppMinimumRequirements || '—')
-                  );
-                  fields.push(renderField('notes', 'NOTES', (previewOverlayEntry.entry as any).notes || '—'));
-                  fields.push(
-                    renderField(
-                      'landowners',
-                      'LANDOWNERS PERMISSION',
-                      previewOverlayEntry.entry.innhoppLandOwnerPermission == null
-                        ? '—'
-                        : previewOverlayEntry.entry.innhoppLandOwnerPermission
-                        ? 'Yes'
-                        : 'No'
-                    )
-                  );
-                  if (previewOverlayEntry.entry.innhoppCoordinates && canOpenMapsActions) {
-                    fields.push(
-                      <div
-                        key="open-maps"
-                        className="event-schedule-preview-action-grid form-field-full-span"
-                      >
-                        <div>
-                          <button
-                            type="button"
-                            className="link-button event-schedule-preview-link"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(
-                                `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                  previewOverlayEntry.entry.innhoppCoordinates || ''
-                                )}`,
-                                '_blank'
-                              );
-                            }}
-                          >
-                            Open in Maps
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-                  return fields;
-                }
-
-                return (
-                  <>
-                    {previewOverlayEntry.entry.type === 'Accommodation' ? (
-                      <>
-                        <div key="booked">
-                          <div className="muted event-schedule-preview-label">BOOKED</div>
-                          <div>{previewOverlayEntry.entry.booked ? 'Yes' : 'No'}</div>
-                        </div>
-                        {previewOverlayEntry.entry.scheduledAt ? (
-                          <div key="scheduled">
-                            <div className="muted event-schedule-preview-label">SCHEDULED AT</div>
-                            <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
-                          </div>
-                        ) : null}
-                        <div key="notes">
-                          <div className="muted event-schedule-preview-label">NOTES</div>
-                          <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
-                        </div>
-                        <div className="form-field-full-span event-schedule-preview-action-row">
-                          {previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
-                            <button
-                              type="button"
-                              className="link-button event-schedule-preview-link"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                window.open(
-                                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                    previewOverlayEntry.entry.coordinates || ''
-                                  )}`,
-                                  '_blank'
-                                );
-                              }}
-                            >
-                              Open in Maps
-                            </button>
-                          ) : (
-                            '—'
-                          )}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') ? (
-                          <div key="duration">
-                            <div className="muted event-schedule-preview-label">DURATION</div>
-                            <div>{previewOverlayEntry.entry.routeDurationLabel || 'Unavailable'}</div>
-                          </div>
-                        ) : previewOverlayEntry.entry.subtitle ? (
-                          <div key="subtitle">
-                            <div className="muted event-schedule-preview-label">SUBTITLE</div>
-                            <div>{previewOverlayEntry.entry.subtitle}</div>
-                          </div>
-                        ) : null}
-                        {previewOverlayEntry.entry.type === 'Meal' && (
-                          <div key="meal-location">
-                            <div className="muted event-schedule-preview-label">LOCATION</div>
-                            <div>{(previewOverlayEntry.entry as any).location || '—'}</div>
-                          </div>
-                        )}
-                        {previewOverlayEntry.entry.scheduledAt ? (
-                          <div key="scheduled">
-                            <div className="muted event-schedule-preview-label">SCHEDULED AT</div>
-                            <div>{formatDateTime(previewOverlayEntry.entry.scheduledAt)}</div>
-                          </div>
-                        ) : null}
-                        <div key="notes">
-                          <div className="muted event-schedule-preview-label">NOTES</div>
-                          <div>{(previewOverlayEntry.entry as any).notes || '—'}</div>
-                        </div>
-                        {(previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') &&
-                        (previewOverlayEntry.entry as any).vehicles ? (
-                          <div key="vehicles">
-                            <div className="muted event-schedule-preview-label">VEHICLES</div>
-                            <div className="event-schedule-preview-subsection">
-                              {((previewOverlayEntry.entry as any).vehicles as any[]).length === 0 ? (
-                                <div className="muted">—</div>
-                              ) : (
-                                ((previewOverlayEntry.entry as any).vehicles as any[]).map((v, idx) => (
-                                  <div key={idx} className="muted">
-                                    <strong>{v.name}</strong>
-                                    {v.driver ? ` (Driver: ${v.driver})` : ''}
-                                    {typeof v.passenger_capacity === 'number' ? ` • Capacity: ${v.passenger_capacity}` : ''}
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-                        ) : null}
-                        {canOpenMapsActions &&
-                        (previewOverlayEntry.entry.type === 'Transport' || previewOverlayEntry.entry.type === 'Ground Crew') &&
-                        (previewOverlayEntry.entry as any).transportRouteOrigin &&
-                        (previewOverlayEntry.entry as any).transportRouteDestination ? (
-                          <div
-                            key="route"
-                            className="form-field-full-span event-schedule-preview-action-row"
-                          >
-                            <button
-                              type="button"
-                              className="link-button event-schedule-preview-link"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const origin = (previewOverlayEntry.entry as any).transportRouteOrigin || '';
-                                const dest = (previewOverlayEntry.entry as any).transportRouteDestination || '';
-                                window.open(
-                                  `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
-                                    origin
-                                  )}&destination=${encodeURIComponent(dest)}`,
-                                  '_blank'
-                                );
-                              }}
-                            >
-                              Open route
-                            </button>
-                          </div>
-                        ) : null}
-                        {previewOverlayEntry.entry.type === 'Other' && previewOverlayEntry.entry.coordinates && canOpenMapsActions ? (
-                          <div
-                            key="other-maps"
-                            className="form-field-full-span event-schedule-preview-action-row"
-                          >
-                            <button
-                              type="button"
-                              className="link-button event-schedule-preview-link"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                window.open(
-                                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                    previewOverlayEntry.entry.coordinates || ''
-                                  )}`,
-                                  '_blank'
-                                );
-                              }}
-                            >
-                              Open in Maps
-                            </button>
-                          </div>
-                        ) : null}
-                      </>
-                    )}
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-        </div>,
-          document.body
-        )}
+      {previewOverlayEntry ? (
+        <ScheduleEntryPreviewOverlay
+          entry={previewOverlayEntry.entry}
+          closing={previewClosing}
+          onClose={closePreview}
+          canOpenMapsActions={canOpenMapsActions}
+          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
+          typeBadgeClassNames={typeBadgeClassNames}
+          onNavigateToEntry={(entry) => {
+            if (!entry.to) return;
+            setHighlightId(entry.id);
+            navigate(entry.to);
+          }}
+        />
+      ) : null}
     </section>
   );
 };

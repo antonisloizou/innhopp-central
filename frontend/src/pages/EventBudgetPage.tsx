@@ -22,7 +22,13 @@ import {
 } from '../api/budgets';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
 import { Event, Season, copyEvent, deleteEvent, listEvents, listSeasons, updateEvent } from '../api/events';
+import { Airfield, listAirfields } from '../api/airfields';
 import EventGearMenu from '../components/EventGearMenu';
+import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
+import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
+import { useAuth } from '../auth/AuthProvider';
+import { canUseStaffMapsActions } from '../auth/access';
+import { isInnhoppReady } from '../utils/innhoppReadiness';
 import {
   CostSplitMode,
   buildCostSplit,
@@ -100,10 +106,21 @@ const formatMinutesAsHours = (minutes: number) => {
   if (hours === 0) return `${remainingMinutes} min`;
   return `${hours} hrs ${remainingMinutes} min`;
 };
+const formatDurationMinutesForInnhopp = (minutes?: number | null) => {
+  if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Unavailable';
+  const total = minutes as number;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours <= 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
+};
 
 const EventBudgetPage = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canOpenMapsActions = canUseStaffMapsActions(user);
   const [loading, setLoading] = useState(false);
   const [loadingFilters, setLoadingFilters] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -117,6 +134,7 @@ const EventBudgetPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [selectedSeason, setSelectedSeason] = useState('');
   const [selectedEvent, setSelectedEvent] = useState('');
   const [budget, setBudget] = useState<Budget | null>(null);
@@ -175,6 +193,26 @@ const EventBudgetPage = () => {
     perParticipant: 'worst'
   });
   const [openScenarioMenuFor, setOpenScenarioMenuFor] = useState<OverviewScenarioCardKey | null>(null);
+  const [previewEntry, setPreviewEntry] = useState<ScheduleEntry | null>(null);
+  const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<ScheduleEntry | null>(null);
+  const [previewClosing, setPreviewClosing] = useState(false);
+  const OVERLAY_EXIT_MS = 180;
+  useEffect(() => {
+    if (previewEntry) {
+      setRenderedPreviewEntry(previewEntry);
+      setPreviewClosing(false);
+      return;
+    }
+    if (!renderedPreviewEntry) return;
+    setPreviewClosing(true);
+    const timeoutId = window.setTimeout(() => {
+      setRenderedPreviewEntry(null);
+      setPreviewClosing(false);
+    }, OVERLAY_EXIT_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [previewEntry, renderedPreviewEntry]);
+
+  const closePreview = () => setPreviewEntry(null);
   useEffect(() => {
     if (costSplitTab !== 'innhopp' && isTimeSplitMode) {
       setCostSplitMode('amount');
@@ -438,10 +476,11 @@ const EventBudgetPage = () => {
     const loadFilters = async () => {
       setLoadingFilters(true);
       try {
-        const [seasonResp, eventResp] = await Promise.all([listSeasons(), listEvents()]);
+        const [seasonResp, eventResp, airfieldResp] = await Promise.all([listSeasons(), listEvents(), listAirfields()]);
         if (cancelled) return;
         setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
         setEvents(Array.isArray(eventResp) ? eventResp : []);
+        setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
       } catch (err) {
         if (!cancelled) {
           setMessage(err instanceof Error ? err.message : 'Failed to load events');
@@ -877,6 +916,20 @@ const EventBudgetPage = () => {
     () => new Map((activeEventData?.innhopps || []).map((innhopp) => [innhopp.id, innhopp])),
     [activeEventData?.innhopps]
   );
+  const airfieldsByID = useMemo(() => new Map(airfields.map((airfield) => [airfield.id, airfield])), [airfields]);
+  const typeBadgeClassNames: Record<EntryType, string> = {
+    Innhopp: 'schedule-type-badge schedule-type-badge--innhopp',
+    Transport: 'schedule-type-badge schedule-type-badge--transport',
+    'Ground Crew': 'schedule-type-badge schedule-type-badge--ground-crew',
+    Accommodation: 'schedule-type-badge schedule-type-badge--accommodation',
+    Meal: 'schedule-type-badge schedule-type-badge--meal',
+    Other: 'schedule-type-badge schedule-type-badge--other'
+  };
+  const budgetAircraftSpeedKmh =
+    parameters.aircraft_cruising_speed_kmh ??
+    summary?.parameters?.aircraft_cruising_speed_kmh ??
+    summary?.assumptions?.aircraft_cruising_speed_kmh ??
+    null;
   const warningMessageForNotes = (notes?: string) => {
     if (typeof notes !== 'string') return null;
     if (notes.includes(AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER)) {
@@ -2156,7 +2209,64 @@ const EventBudgetPage = () => {
                   return (
                     <>
                       {aircraftPerInnhoppSplit.map((row) => (
-                        <div className="budget-cost-split-item" key={row.key}>
+                        <div
+                          className="budget-cost-split-item"
+                          key={row.key}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            const innhopp = innhoppsByID.get(row.key);
+                            if (!innhopp) return;
+                            const takeoff = innhopp.takeoff_airfield_id ? airfieldsByID.get(innhopp.takeoff_airfield_id) : null;
+                            const landing = innhopp.landing_airfield_id ? airfieldsByID.get(innhopp.landing_airfield_id) : null;
+                            const landingName =
+                              landing?.name ||
+                              ((innhopp.landing_airfield_id == null || innhopp.landing_airfield_id === innhopp.takeoff_airfield_id)
+                                ? takeoff?.name || null
+                                : null);
+                            const elevationDiff =
+                              typeof innhopp.elevation === 'number' && typeof takeoff?.elevation === 'number'
+                                ? innhopp.elevation - takeoff.elevation
+                                : null;
+                            const minutes = Number(row.minutes || 0);
+                            setPreviewEntry({
+                              id: `i-${innhopp.id}`,
+                              hourKey: '',
+                              sortValue: Number.POSITIVE_INFINITY,
+                              title: `Innhopp #${innhopp.sequence}: ${innhopp.name}`,
+                              subtitle: `Aircraft time: ${formatDurationMinutesForInnhopp(minutes)}`,
+                              type: 'Innhopp',
+                              to: `/events/${activeEventID}/innhopps/${innhopp.id}`,
+                              ready: isInnhoppReady(innhopp),
+                              missingCoordinates: !(innhopp.coordinates || '').trim(),
+                              description: innhopp.reason_for_choice || innhopp.primary_landing_area?.description || null,
+                              notes: innhopp.notes || undefined,
+                              innhoppReason: innhopp.reason_for_choice || null,
+                              innhoppElevation: innhopp.elevation ?? null,
+                              innhoppCoordinates: innhopp.coordinates || null,
+                              innhoppTakeoffName: takeoff?.name || null,
+                              innhoppLandingName: landingName,
+                              innhoppDistanceByAir: innhopp.distance_by_air ?? null,
+                              innhoppElevationDiff: elevationDiff,
+                              innhoppPrimaryName: innhopp.primary_landing_area?.name || null,
+                              innhoppPrimarySize: innhopp.primary_landing_area?.size || null,
+                              innhoppSecondaryName: innhopp.secondary_landing_area?.name || null,
+                              innhoppSecondarySize: innhopp.secondary_landing_area?.size || null,
+                              innhoppRisk: innhopp.risk_assessment || null,
+                              innhoppMinimumRequirements: innhopp.minimum_requirements || null,
+                              innhoppRescueBoat: innhopp.rescue_boat ?? null,
+                              innhoppLandOwnerPermission: innhopp.land_owner_permission ?? null,
+                              routeDurationLabel: formatDurationMinutesForInnhopp(minutes),
+                              scheduledAt: innhopp.scheduled_at
+                            });
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              (e.currentTarget as HTMLDivElement).click();
+                            }
+                          }}
+                        >
                           <div className="budget-cost-split-top">
                             <span className="field-label">
                               {row.label}
@@ -2244,7 +2354,21 @@ const EventBudgetPage = () => {
               ) : null}
             </div>
             )}
-          </article>
+      </article>
+      {renderedPreviewEntry ? (
+        <ScheduleEntryPreviewOverlay
+          entry={renderedPreviewEntry}
+          closing={previewClosing}
+          onClose={closePreview}
+          canOpenMapsActions={canOpenMapsActions}
+          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
+          typeBadgeClassNames={typeBadgeClassNames}
+          onNavigateToEntry={(entry) => {
+            if (!entry.to) return;
+            navigate(entry.to);
+          }}
+        />
+      ) : null}
 
           <article className="card budget-parameters-card">
             <header
