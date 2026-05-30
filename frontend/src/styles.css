@@ -4452,15 +4452,29 @@ iframe {
   position: fixed;
   inset: 0;
   z-index: 1050;
+  height: 100dvh;
 }
 
 .event-route-preview-canvas--fullscreen .event-route-preview-map,
 .event-route-preview-canvas--fullscreen .event-route-preview-map-error {
-  min-height: calc(100vh - 2rem);
+  min-height: calc(100dvh - 2rem);
 }
 
 body.event-route-manual-fullscreen-active {
   overflow: hidden;
+}
+
+html.event-route-fullscreen-active,
+body.event-route-fullscreen-active {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.event-route-fullscreen-active {
+  position: fixed;
+  left: 0;
+  right: 0;
+  width: 100%;
 }
 
 .event-route-preview-map-controls {

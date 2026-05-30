@@ -801,6 +801,28 @@ const EventRoutePlannerPage = () => {
   }, [manualPreviewFullscreen]);
 
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    if (!previewFullscreen) return;
+
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    body.style.top = `-${scrollY}px`;
+    body.classList.add('event-route-fullscreen-active');
+    html.classList.add('event-route-fullscreen-active');
+
+    return () => {
+      body.classList.remove('event-route-fullscreen-active');
+      html.classList.remove('event-route-fullscreen-active');
+      const topValue = body.style.top;
+      body.style.top = '';
+      const restoredScroll = Number.parseInt(topValue || '0', 10);
+      if (Number.isFinite(restoredScroll)) {
+        window.scrollTo(0, Math.abs(restoredScroll));
+      }
+    };
+  }, [previewFullscreen]);
+
+  useEffect(() => {
     mapOverlayRef.current = mapOverlay;
     mapInstanceRef.current?.setMapTypeId(mapOverlay);
   }, [mapOverlay]);
@@ -1079,25 +1101,6 @@ const EventRoutePlannerPage = () => {
 
       {message ? <p className="error-text">{message}</p> : null}
 
-      <article className="card event-schedule-summary-card">
-        <div className="event-route-planner-summary-grid">
-          <dl className="card-details event-schedule-stats event-schedule-stats-grid">
-            <div>
-              <dt>Total Items</dt>
-              <dd>{allEntries.length}</dd>
-            </div>
-            <div>
-              <dt>Selected</dt>
-              <dd>{selectedEntryCount}</dd>
-            </div>
-            <div>
-              <dt>Without Coordinates</dt>
-              <dd>{allEntries.length - routableEntries.length}</dd>
-            </div>
-          </dl>
-        </div>
-      </article>
-
       <article className="card event-route-preview-card">
           <div className="event-route-preview-header">
             <div>
@@ -1202,6 +1205,25 @@ const EventRoutePlannerPage = () => {
             </div>
           </>
         )}
+      </article>
+
+      <article className="card event-schedule-summary-card">
+        <div className="event-route-planner-summary-grid">
+          <dl className="card-details event-schedule-stats event-schedule-stats-grid">
+            <div>
+              <dt>Total Items</dt>
+              <dd>{allEntries.length}</dd>
+            </div>
+            <div>
+              <dt>Selected</dt>
+              <dd>{selectedEntryCount}</dd>
+            </div>
+            <div>
+              <dt>Without Coordinates</dt>
+              <dd>{allEntries.length - routableEntries.length}</dd>
+            </div>
+          </dl>
+        </div>
       </article>
 
       {entriesByDay.length === 0 ? (
