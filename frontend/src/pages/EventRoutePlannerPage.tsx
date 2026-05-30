@@ -129,6 +129,15 @@ const buildMapsUrl = (points: RouteStop[]) => {
 
 let googleMapsLoader: Promise<any> | null = null;
 
+type FullscreenCapableElement = HTMLDivElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenCapableDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+};
+
 const loadGoogleMapsApi = () => {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Google Maps can only load in the browser.'));
@@ -226,6 +235,7 @@ const EventRoutePlannerPage = () => {
   const mapPolylineRef = useRef<any | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
+  const [manualPreviewFullscreen, setManualPreviewFullscreen] = useState(false);
   const [mapOverlay, setMapOverlay] = useState<RouteMapOverlay>('hybrid');
   const mapOverlayRef = useRef<RouteMapOverlay>('hybrid');
   const [previewEntry, setPreviewEntry] = useState<RoutePlannerEntry | null>(null);
@@ -760,14 +770,35 @@ const EventRoutePlannerPage = () => {
   }, [previewStops]);
 
   useEffect(() => {
+    const doc = document as FullscreenCapableDocument;
     const handleFullscreenChange = () => {
-      setPreviewFullscreen(document.fullscreenElement === previewCanvasRef.current);
+      const fullscreenEl = doc.fullscreenElement || doc.webkitFullscreenElement || null;
+      const isNativeFullscreen = fullscreenEl === previewCanvasRef.current;
+      setPreviewFullscreen(isNativeFullscreen || manualPreviewFullscreen);
+      if (isNativeFullscreen) {
+        setManualPreviewFullscreen(false);
+      }
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange as EventListener);
+    handleFullscreenChange();
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange as EventListener);
     };
-  }, []);
+  }, [manualPreviewFullscreen]);
+
+  useEffect(() => {
+    setPreviewFullscreen(manualPreviewFullscreen);
+    const body = document.body;
+    if (manualPreviewFullscreen) {
+      body.classList.add('event-route-manual-fullscreen-active');
+      return () => {
+        body.classList.remove('event-route-manual-fullscreen-active');
+      };
+    }
+    body.classList.remove('event-route-manual-fullscreen-active');
+  }, [manualPreviewFullscreen]);
 
   useEffect(() => {
     mapOverlayRef.current = mapOverlay;
@@ -950,13 +981,44 @@ const EventRoutePlannerPage = () => {
   };
 
   const togglePreviewFullscreen = async () => {
-    const node = previewCanvasRef.current;
+    const node = previewCanvasRef.current as FullscreenCapableElement | null;
     if (!node || typeof document === 'undefined') return;
-    if (document.fullscreenElement === node) {
-      await document.exitFullscreen();
+    const doc = document as FullscreenCapableDocument;
+    const activeFullscreenElement = doc.fullscreenElement || doc.webkitFullscreenElement || null;
+    const isNativeFullscreen = activeFullscreenElement === node;
+
+    if (isNativeFullscreen) {
+      if (doc.exitFullscreen) {
+        await doc.exitFullscreen();
+        return;
+      }
+      if (doc.webkitExitFullscreen) {
+        await doc.webkitExitFullscreen();
+        return;
+      }
+      setManualPreviewFullscreen(false);
       return;
     }
-    await node.requestFullscreen();
+
+    if (manualPreviewFullscreen) {
+      setManualPreviewFullscreen(false);
+      return;
+    }
+
+    try {
+      if (node.requestFullscreen) {
+        await node.requestFullscreen();
+        return;
+      }
+      if (node.webkitRequestFullscreen) {
+        await node.webkitRequestFullscreen();
+        return;
+      }
+    } catch {
+      // Fallback to CSS-based fullscreen when browser blocks native fullscreen on mobile.
+    }
+
+    setManualPreviewFullscreen(true);
   };
 
   const handleDelete = async () => {
