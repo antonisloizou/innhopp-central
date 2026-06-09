@@ -1939,18 +1939,18 @@ const EventBudgetPage = () => {
                     points={marginCurve.targetMarginPolylinePoints}
                     className="budget-curve-line budget-curve-line-target"
                   />
-                  {marginCurve.targetMarkupLabel ? (
+                  {marginCurve.targetMarginLabel ? (
                     <text
-                      x={marginCurve.targetMarkupLabel.x}
-                      y={marginCurve.targetMarkupLabel.y}
+                      x={marginCurve.targetMarginLabel.x}
+                      y={marginCurve.targetMarginLabel.y}
                       className="budget-curve-target-label"
                       textAnchor="middle"
                     >
-                      <tspan x={marginCurve.targetMarkupLabel.x} dy="0">
-                        Target Markup
+                      <tspan x={marginCurve.targetMarginLabel.x} dy="0">
+                        Target Margin
                       </tspan>
-                      <tspan x={marginCurve.targetMarkupLabel.x} dy="1.2em">
-                        {`${Math.round(marginCurve.targetMarkupLabel.percent)}%`}
+                      <tspan x={marginCurve.targetMarginLabel.x} dy="1.2em">
+                        {`${Math.round(marginCurve.targetMarginLabel.percent)}%`}
                       </tspan>
                     </text>
                   ) : null}
@@ -2013,7 +2013,7 @@ const EventBudgetPage = () => {
                             >
                               <div className="budget-bar-table-row budget-bar-table-row-labels" role="row">
                                 <span className="field-label" role="cell">Cost</span>
-                                <span className="field-label" role="cell">Target</span>
+                                <span className="field-label" role="cell">Target Revenue</span>
                                 <span className="field-label" role="cell">Revenue</span>
                               </div>
                               <div className="budget-bar-table-row" role="row">

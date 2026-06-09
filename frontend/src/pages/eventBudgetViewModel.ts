@@ -45,7 +45,7 @@ export type MarginCurveModel = {
   points: Array<{ participants: number; margin: number; x: number; y: number }>;
   polylinePoints: string;
   targetMarginPolylinePoints: string;
-  targetMarkupLabel: { x: number; y: number; percent: number } | null;
+  targetMarginLabel: { x: number; y: number; percent: number } | null;
   zeroY: number;
   yMax: number;
   yMin: number;
@@ -164,6 +164,12 @@ export const buildMarginCurveModel = (
 
   const participants = sourceCurvePoints.map((point) => point.participants);
   const margins = sourceCurvePoints.map((point) => point.margin);
+  const targetMargins = sourceCurvePoints.map((point) => {
+    const scenarioCostWithDrift = Number.isFinite(point.costWithDrift)
+      ? point.costWithDrift
+      : summary?.cost_with_drift || 0;
+    return (scenarioCostWithDrift * targetMarkupPercent) / 100;
+  });
   const confirmParticipants = summary?.scenarios?.confirm_case?.participants;
   const fullParticipants = summary?.scenarios?.full_capacity_case?.participants;
   const minParticipants = Math.max(
@@ -174,13 +180,14 @@ export const buildMarginCurveModel = (
     minParticipants + 1,
     typeof fullParticipants === 'number' ? fullParticipants + 1 : Math.max(...participants)
   );
-  const yMin = Math.min(...margins);
-  const yMax = Math.max(...margins);
-  const maxAbsMargin = Math.max(1, Math.abs(yMin), Math.abs(yMax));
+  const allYValues = [...margins, ...targetMargins, 0];
+  const yMin = Math.min(...allYValues);
+  const yMax = Math.max(...allYValues);
+  const ySpan = Math.max(1, yMax - yMin);
   const verticalHeadroomRatio = 0.1;
-  const axisExtent = maxAbsMargin * (1 + verticalHeadroomRatio);
-  const axisMin = -axisExtent;
-  const axisMax = axisExtent;
+  const axisPadding = ySpan * verticalHeadroomRatio;
+  const axisMin = yMin >= 0 ? 0 : yMin - axisPadding;
+  const axisMax = yMax <= 0 ? 0 : yMax + axisPadding;
   const yRange = axisMax - axisMin || 1;
   const participantRange = maxParticipants - minParticipants || 1;
   const plotLeft = padLeft;
@@ -204,11 +211,8 @@ export const buildMarginCurveModel = (
     x: toX(point.participants),
     y: toY(point.margin)
   }));
-  const targetMarginPoints = sourceCurvePoints.map((point) => {
-    const scenarioCostWithDrift = Number.isFinite(point.costWithDrift)
-      ? point.costWithDrift
-      : summary?.cost_with_drift || 0;
-    const targetMargin = (scenarioCostWithDrift * targetMarkupPercent) / 100;
+  const targetMarginPoints = sourceCurvePoints.map((point, index) => {
+    const targetMargin = targetMargins[index] || 0;
     return {
       participants: point.participants,
       margin: targetMargin,
@@ -240,7 +244,7 @@ export const buildMarginCurveModel = (
   const targetYAtMid = interpolateYAtX(targetMarginPoints, midX);
   const profitabilityYAtMid = interpolateYAtX(points, midX);
   const targetAboveProfitability = targetYAtMid < profitabilityYAtMid;
-  const targetMarkupLabel = targetMarginPoints.length
+  const targetMarginLabel = targetMarginPoints.length
     ? {
         x: midX,
         y: Math.max(
@@ -318,7 +322,7 @@ export const buildMarginCurveModel = (
     points,
     polylinePoints,
     targetMarginPolylinePoints,
-    targetMarkupLabel,
+    targetMarginLabel,
     zeroY,
     yMax,
     yMin,

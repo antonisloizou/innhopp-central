@@ -159,4 +159,12 @@ describe('eventBudgetViewModel', () => {
     expect(targetPoints?.[0]).toBeGreaterThan(targetPoints?.[1] || 0);
     expect(targetPoints?.[1]).toBeGreaterThan(targetPoints?.[2] || 0);
   });
+
+  it('keeps zero at the bottom when every curve value is positive', () => {
+    const curve = buildMarginCurveModel(makeSummary(), 20);
+
+    expect(curve).not.toBeNull();
+    expect(curve?.axisMin).toBe(0);
+    expect(curve?.zeroY).toBe(curve?.plotBottom);
+  });
 });
