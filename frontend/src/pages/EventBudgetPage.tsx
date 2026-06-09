@@ -326,6 +326,8 @@ const EventBudgetPage = () => {
     const baseAmount = safeAmount / sourceRate;
     return baseAmount * targetRate;
   };
+  const convertBaseAmountToDisplayCurrency = (amount: number) =>
+    convertAmountToDisplayCurrency(amount, baseCurrency);
   const rateTooltip = (targetCurrency: string) => {
     const base = (pendingBaseCurrency || baseCurrency || 'EUR').trim().toUpperCase();
     const target = (targetCurrency || '').trim().toUpperCase();
@@ -879,7 +881,8 @@ const EventBudgetPage = () => {
         section.total * (loadScale ? aircraftLoadScale : 1) * (paxScale ? participantScale : 1) * scenarioDriftScale;
       return {
         ...section,
-        total: scaledTotal
+        total: scaledTotal,
+        displayTotal: convertBaseAmountToDisplayCurrency(scaledTotal)
       };
     });
     const scaledTotalAll = scaledSections.reduce((acc, section) => acc + section.total, 0);
@@ -890,7 +893,7 @@ const EventBudgetPage = () => {
         ...section,
         percentage: scaledPercentage,
         barPct: scaledMax > 0 ? (section.total / scaledMax) * 100 : 0,
-        displayValue: costSplitMode === 'percentage' ? scaledPercentage : section.total
+        displayValue: costSplitMode === 'percentage' ? scaledPercentage : section.displayTotal
       };
     });
   }, [
@@ -1009,7 +1012,9 @@ const EventBudgetPage = () => {
     }));
     const aircraftSectionBaseTotal =
       summary?.section_totals?.find((section) => (section.code || '').trim().toLowerCase() === 'aircraft')?.total || 0;
-    const aircraftSectionScenarioTotal = aircraftSectionBaseTotal * aircraftLoadScale * scenarioDriftScale;
+    const aircraftSectionScenarioTotal = convertBaseAmountToDisplayCurrency(
+      aircraftSectionBaseTotal * aircraftLoadScale * scenarioDriftScale
+    );
     const rawTotal = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
     const normalizeRatio = rawTotal > 0 ? aircraftSectionScenarioTotal / rawTotal : 1;
     const normalizedRows =
@@ -1142,7 +1147,10 @@ const EventBudgetPage = () => {
     }));
     const dayRowsAmountAdjusted = (() => {
       const totalFromRows = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
-      const targetFromSections = costSplit.reduce((acc, section) => acc + section.total, 0);
+      const targetFromSections = costSplit.reduce(
+        (acc, section) => acc + (typeof section.displayTotal === 'number' ? section.displayTotal : 0),
+        0
+      );
       const delta = targetFromSections - totalFromRows;
       if (Math.abs(delta) < 0.0001) return scaledRows;
       const datedRows = scaledRows.filter((row) => row.key !== 'undated');
@@ -2180,7 +2188,7 @@ const EventBudgetPage = () => {
                             <span className="muted">
                               {isPercentageSplitMode
                                 ? `${section.displayValue.toFixed(1)}%`
-                                : formatMoney(section.displayValue)}
+                                : formatBaseMoney(section.displayValue, effectiveDisplayCurrency)}
                             </span>
                           </div>
                           <div className="budget-bar-track">
@@ -2192,7 +2200,9 @@ const EventBudgetPage = () => {
                         <div className="budget-cost-split-top">
                           <span className="field-label">Total</span>
                           <span className="muted">
-                            {isPercentageSplitMode ? `${totalValue.toFixed(1)}%` : formatMoney(totalValue)}
+                            {isPercentageSplitMode
+                              ? `${totalValue.toFixed(1)}%`
+                              : formatBaseMoney(totalValue, effectiveDisplayCurrency)}
                           </span>
                         </div>
                       </div>
