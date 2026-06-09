@@ -69,6 +69,57 @@ func TestGetSummaryIntegration(t *testing.T) {
 	}
 }
 
+func TestGetSummaryConvertsEventRevenueFromEventCurrency(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEventWithCurrency(t, ctx, db, seasonID, 100, 200, "NOK")
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO budget_currencies (budget_id, currency_code, rate_to_base)
+         VALUES ($1, 'NOK', 10)
+         ON CONFLICT (budget_id, currency_code) DO UPDATE SET rate_to_base = EXCLUDED.rate_to_base`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("insert NOK budget currency failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Get("/api/budgets/{budgetID}/summary", h.getSummary)
+	req := httptest.NewRequest(http.MethodGet, "/api/budgets/"+strconv.FormatInt(budgetID, 10)+"/summary", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload BudgetSummary
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode summary failed: %v", err)
+	}
+	if payload.DepositAmount != 10 {
+		t.Fatalf("deposit amount mismatch: got %.2f want 10.00", payload.DepositAmount)
+	}
+	if payload.MainInvoiceAmount != 20 {
+		t.Fatalf("main invoice amount mismatch: got %.2f want 20.00", payload.MainInvoiceAmount)
+	}
+	if payload.RevenuePerParticipant != 30 {
+		t.Fatalf("revenue per participant mismatch: got %.2f want 30.00", payload.RevenuePerParticipant)
+	}
+	if payload.Scenarios["confirm_case"].Revenue != 360 {
+		t.Fatalf("confirm scenario revenue mismatch: got %.2f want 360.00", payload.Scenarios["confirm_case"].Revenue)
+	}
+}
+
 func TestUpdateBudgetBlocksReviewWhenWorstCaseNegative(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
@@ -387,14 +438,18 @@ func insertTestSeason(t *testing.T, ctx context.Context, db *pgxpool.Pool) int64
 }
 
 func insertTestEvent(t *testing.T, ctx context.Context, db *pgxpool.Pool, seasonID int64, depositAmount, mainInvoiceAmount float64) int64 {
+	return insertTestEventWithCurrency(t, ctx, db, seasonID, depositAmount, mainInvoiceAmount, "EUR")
+}
+
+func insertTestEventWithCurrency(t *testing.T, ctx context.Context, db *pgxpool.Pool, seasonID int64, depositAmount, mainInvoiceAmount float64, currency string) int64 {
 	t.Helper()
 	var eventID int64
 	err := db.QueryRow(
 		ctx,
 		`INSERT INTO events (season_id, name, location, starts_at, ends_at, deposit_amount, main_invoice_amount, currency)
-         VALUES ($1, 'Budget Test Event', 'Test Location', NOW(), NOW() + INTERVAL '2 days', $2, $3, 'EUR')
+         VALUES ($1, 'Budget Test Event', 'Test Location', NOW(), NOW() + INTERVAL '2 days', $2, $3, $4)
          RETURNING id`,
-		seasonID, depositAmount, mainInvoiceAmount,
+		seasonID, depositAmount, mainInvoiceAmount, currency,
 	).Scan(&eventID)
 	if err != nil {
 		t.Fatalf("insert event failed: %v", err)

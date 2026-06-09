@@ -1550,13 +1550,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	for k, v := range overrides {
 		assumptions[k] = v
 	}
-	depositAmount, mainInvoiceAmount, err := h.fetchEventRevenueInputs(ctx, budget.EventID)
+	depositAmount, mainInvoiceAmount, eventCurrency, err := h.fetchEventRevenueInputs(ctx, budget.EventID)
 	if err != nil {
 		return BudgetSummary{}, err
 	}
-	revenuePerParticipant := roundMoney(depositAmount + mainInvoiceAmount)
-	assumptions["deposit_amount"] = depositAmount
-	assumptions["main_invoice_amount"] = mainInvoiceAmount
 
 	sectionRows, err := h.db.Query(
 		ctx,
@@ -1598,6 +1595,19 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		currencyCodes = append(currencyCodes, row.CurrencyCode)
 		fallbackRates[row.CurrencyCode] = row.RateToBase
 	}
+	eventCurrency = normalizeCurrency(eventCurrency)
+	if eventCurrency != "" && eventCurrency != budget.BaseCurrency {
+		foundEventCurrency := false
+		for _, code := range currencyCodes {
+			if code == eventCurrency {
+				foundEventCurrency = true
+				break
+			}
+		}
+		if !foundEventCurrency {
+			currencyCodes = append(currencyCodes, eventCurrency)
+		}
+	}
 	liveRates, liveErr := h.fetchLiveCurrencyRates(ctx, budget.BaseCurrency, currencyCodes)
 	if liveErr != nil {
 		liveRates = fallbackRates
@@ -1616,6 +1626,11 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		}
 		return amount / rate
 	}
+	depositAmountBase := roundMoney(toBaseAmountFromCurrency(depositAmount, eventCurrency))
+	mainInvoiceAmountBase := roundMoney(toBaseAmountFromCurrency(mainInvoiceAmount, eventCurrency))
+	revenuePerParticipant := roundMoney(depositAmountBase + mainInvoiceAmountBase)
+	assumptions["deposit_amount"] = depositAmountBase
+	assumptions["main_invoice_amount"] = mainInvoiceAmountBase
 
 	aircraftPricePerMinute := clampNonNegative(assumptions["aircraft_price_per_minute"])
 	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
@@ -2032,8 +2047,8 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		Parameters:            assumptions,
 		Assumptions:           assumptions,
 		SectionTotals:         sectionTotals,
-		DepositAmount:         depositAmount,
-		MainInvoiceAmount:     mainInvoiceAmount,
+		DepositAmount:         depositAmountBase,
+		MainInvoiceAmount:     mainInvoiceAmountBase,
 		RevenuePerParticipant: revenuePerParticipant,
 		ExpectedCost:          expectedCost,
 		DriftAmount:           driftAmount,
@@ -2048,19 +2063,21 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}, nil
 }
 
-func (h *Handler) fetchEventRevenueInputs(ctx context.Context, eventID int64) (depositAmount float64, mainInvoiceAmount float64, err error) {
+func (h *Handler) fetchEventRevenueInputs(ctx context.Context, eventID int64) (depositAmount float64, mainInvoiceAmount float64, currency string, err error) {
 	var depositRaw string
 	var mainInvoiceRaw string
+	var eventCurrency string
 	if err := h.db.QueryRow(
 		ctx,
 		`SELECT
             COALESCE(deposit_amount::text, '0'),
-            COALESCE(main_invoice_amount::text, '0')
+            COALESCE(main_invoice_amount::text, '0'),
+            COALESCE(currency, 'EUR')
          FROM events
          WHERE id = $1`,
 		eventID,
-	).Scan(&depositRaw, &mainInvoiceRaw); err != nil {
-		return 0, 0, err
+	).Scan(&depositRaw, &mainInvoiceRaw, &eventCurrency); err != nil {
+		return 0, 0, "", err
 	}
 	if parsed, parseErr := strconv.ParseFloat(strings.TrimSpace(depositRaw), 64); parseErr == nil {
 		depositAmount = parsed
@@ -2068,7 +2085,7 @@ func (h *Handler) fetchEventRevenueInputs(ctx context.Context, eventID int64) (d
 	if parsed, parseErr := strconv.ParseFloat(strings.TrimSpace(mainInvoiceRaw), 64); parseErr == nil {
 		mainInvoiceAmount = parsed
 	}
-	return roundMoney(clampNonNegative(depositAmount)), roundMoney(clampNonNegative(mainInvoiceAmount)), nil
+	return roundMoney(clampNonNegative(depositAmount)), roundMoney(clampNonNegative(mainInvoiceAmount)), normalizeCurrency(eventCurrency), nil
 }
 
 func (h *Handler) fetchEventDurationDays(ctx context.Context, eventID int64) (int, error) {
