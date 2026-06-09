@@ -1510,7 +1510,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     });
   };
 
-  const handleChange = (index: number, key: 'sequence' | 'name' | 'scheduled_at' | 'notes', value: string) => {
+  const handleChange = (
+    index: number,
+    key: 'sequence' | 'name' | 'coordinates' | 'scheduled_at' | 'notes',
+    value: string
+  ) => {
     setInnhopps((prev) => {
       const next = [...prev];
       next[index] = {
@@ -2111,68 +2115,87 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           {innhopps
             .filter((row) => !row.id)
             .map((row, index) => {
-              const draftIndex = innhopps.findIndex((r) => r === row);
-              return (
+                const draftIndex = innhopps.findIndex((r) => r === row);
+                return (
                 <div key={index} className="innhopp-row">
-                  <label className="form-field">
-                    <span>Sequence</span>
-                    <input
-                      type="number"
-                      min={1}
-                      value={row.sequence}
-                      onChange={(e) => handleChange(draftIndex, 'sequence', e.target.value)}
-                      className="event-detail-sequence-input"
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Name</span>
-                    <input
-                      type="text"
-                      value={row.name}
-                      onChange={(e) => handleChange(draftIndex, 'name', e.target.value)}
-                      placeholder="Describe the innhopp"
-                      required
-                    />
-                  </label>
-                  <label className="form-field">
-                    <span>Scheduled at</span>
-                  <Flatpickr
-                    value={toEventLocalPickerDate(row.scheduled_at)}
-                    options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
-                    onChange={(dates) => {
-                      const date = dates[0];
-                      handleChange(draftIndex, 'scheduled_at', date ? formatEventLocalPickerDateTime(date) : '');
-                    }}
-                  />
-                  </label>
-                  <label className="form-field">
-                    <span>Takeoff airfield</span>
-                    <select
-                      value={row.takeoff_airfield_id ?? ''}
-                      onChange={(e) => handleTakeoffAirfieldChange(draftIndex, e.target.value)}
-                    >
-                      <option value="">Select airfield</option>
-                      <option value="__new__">Create new airfield…</option>
-                      {groupedTakeoffAirfields.map((group) => (
-                        <optgroup key={group.label} label={group.label}>
-                          {group.options.map((opt) => (
-                            <option key={opt.key} value={opt.value}>
-                              {opt.label}
-                            </option>
+                  <div className="event-detail-innhopp-inline-layout">
+                    <div className="event-detail-innhopp-inline-row event-detail-innhopp-inline-row--top">
+                      <label className="form-field">
+                        <span>Sequence</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={row.sequence}
+                          onChange={(e) => handleChange(draftIndex, 'sequence', e.target.value)}
+                          className="event-detail-sequence-input"
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Name</span>
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={(e) => handleChange(draftIndex, 'name', e.target.value)}
+                          placeholder="Describe the innhopp"
+                          required
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Coordinates (DMS)</span>
+                        <input
+                          type="text"
+                          value={row.coordinates || ''}
+                          onChange={(e) => handleChange(draftIndex, 'coordinates', e.target.value)}
+                          placeholder={`11°14'30.0"N 73°42'59.7"W`}
+                          pattern={`^[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[NS]\\s[0-9]{1,3}°[0-9]{1,2}'[0-9]{1,2}(?:\\.\\d+)?\"[EW]$`}
+                          title={`Use DMS format like 11°14'30.0\"N 73°42'59.7\"W`}
+                        />
+                      </label>
+                    </div>
+                    <div className="event-detail-innhopp-inline-row event-detail-innhopp-inline-row--middle">
+                      <label className="form-field">
+                        <span>Scheduled at</span>
+                        <Flatpickr
+                          value={toEventLocalPickerDate(row.scheduled_at)}
+                          options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
+                          onChange={(dates) => {
+                            const date = dates[0];
+                            handleChange(draftIndex, 'scheduled_at', date ? formatEventLocalPickerDateTime(date) : '');
+                          }}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Takeoff airfield</span>
+                        <select
+                          value={row.takeoff_airfield_id ?? ''}
+                          onChange={(e) => handleTakeoffAirfieldChange(draftIndex, e.target.value)}
+                        >
+                          <option value="">Select airfield</option>
+                          <option value="__new__">Create new airfield…</option>
+                          {groupedTakeoffAirfields.map((group) => (
+                            <optgroup key={group.label} label={group.label}>
+                              {group.options.map((opt) => (
+                                <option key={opt.key} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field notes-field">
-                    <span>Notes</span>
-                    <input
-                      type="text"
-                      value={row.notes}
-                      onChange={(e) => handleChange(draftIndex, 'notes', e.target.value)}
-                      placeholder="Exit altitude, landing brief…"
-                    />
-                  </label>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="event-detail-innhopp-inline-row">
+                      <label className="form-field notes-field">
+                        <span>Notes</span>
+                        <input
+                          type="text"
+                          value={row.notes}
+                          onChange={(e) => handleChange(draftIndex, 'notes', e.target.value)}
+                          placeholder="Exit altitude, landing brief…"
+                        />
+                      </label>
+                    </div>
+                  </div>
                   {takeoffFormVisible[draftIndex] && (
                     <div
                       className="form-grid form-field-full-span event-detail-inline-airfield-grid"
