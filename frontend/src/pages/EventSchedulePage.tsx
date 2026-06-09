@@ -814,20 +814,8 @@ const EventSchedulePage = () => {
         const el = document.getElementById(`entry-${highlightId}`);
         el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 0);
-      return;
     }
-    if (eventData?.status !== 'live') return;
-    const today = new Date();
-    const target = dayBuckets.reduce((closest, current) => {
-      const diff = Math.abs(current.date.getTime() - today.getTime());
-      if (!closest) return { key: current.key, diff };
-      return diff < closest.diff ? { key: current.key, diff } : closest;
-    }, null as { key: string; diff: number } | null);
-    if (target?.key) {
-      const el = document.getElementById(`event-day-${target.key}`);
-      el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [dayBuckets, eventData?.status, highlightId]);
+  }, [dayBuckets, highlightId]);
 
   const typeBadgeClassNames: Record<EntryType, string> = {
     Innhopp: 'schedule-type-badge schedule-type-badge--innhopp',

@@ -4444,20 +4444,20 @@ iframe {
 }
 
 .event-route-preview-canvas--fullscreen {
-  padding: 1rem;
-  background: rgba(10, 14, 23, 0.96);
+  padding: 0;
+  background: transparent;
 }
 
 .event-route-preview-canvas.event-route-preview-canvas--fullscreen {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: 99999;
   height: 100dvh;
 }
 
 .event-route-preview-canvas--fullscreen .event-route-preview-map,
 .event-route-preview-canvas--fullscreen .event-route-preview-map-error {
-  min-height: calc(100dvh - 2rem);
+  min-height: 100dvh;
 }
 
 body.event-route-manual-fullscreen-active {
@@ -4493,6 +4493,7 @@ button.ghost.event-route-preview-fullscreen-button,
 button.ghost.event-route-preview-overlay-button {
   background: rgba(15, 23, 42, 0.8);
   border-color: rgba(255, 255, 255, 0.8);
+  color: #f8fafc;
   backdrop-filter: blur(8px);
 }
 

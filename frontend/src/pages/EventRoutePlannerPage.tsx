@@ -769,6 +769,24 @@ const EventRoutePlannerPage = () => {
     }));
   }, [previewStops]);
 
+  const fitPreviewRouteToMap = useCallback(
+    (maps?: any, mapArg?: any) => {
+      const map = mapArg || mapInstanceRef.current;
+      if (!map || previewGeometry.length === 0) return;
+      if (previewGeometry.length === 1) {
+        map.setCenter({ lat: previewGeometry[0].lat, lng: previewGeometry[0].lng });
+        map.setZoom(previewFullscreen ? 14 : 12);
+        return;
+      }
+      const api = maps || (window as any).google?.maps;
+      if (!api) return;
+      const bounds = new api.LatLngBounds();
+      previewGeometry.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
+      map.fitBounds(bounds, previewFullscreen ? 20 : 56);
+    },
+    [previewGeometry, previewFullscreen]
+  );
+
   useEffect(() => {
     const doc = document as FullscreenCapableDocument;
     const handleFullscreenChange = () => {
@@ -903,7 +921,6 @@ const EventRoutePlannerPage = () => {
         mapPolylineRef.current?.setMap?.(null);
         mapPolylineRef.current = null;
 
-        const bounds = new maps.LatLngBounds();
         const path = previewGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng }));
 
         mapPolylineRef.current = new maps.Polyline({
@@ -916,7 +933,6 @@ const EventRoutePlannerPage = () => {
         });
 
         mapMarkersRef.current = previewGeometry.map((stop) => {
-          bounds.extend({ lat: stop.lat, lng: stop.lng });
           const handleMarkerClick = () => {
             const entry = entryById.get(stop.entryId);
             if (entry) setPreviewEntry(entry);
@@ -955,12 +971,7 @@ const EventRoutePlannerPage = () => {
           return marker;
         });
 
-        if (previewGeometry.length === 1) {
-          map.setCenter({ lat: previewGeometry[0].lat, lng: previewGeometry[0].lng });
-          map.setZoom(12);
-        } else {
-          map.fitBounds(bounds, 56);
-        }
+        fitPreviewRouteToMap(maps, map);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -971,7 +982,23 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [entryById, previewGeometry]);
+  }, [entryById, fitPreviewRouteToMap, previewGeometry]);
+
+  useEffect(() => {
+    if (!previewFullscreen || !mapInstanceRef.current || previewGeometry.length === 0) return;
+    const map = mapInstanceRef.current;
+    const api = (window as any).google?.maps;
+    const triggerResize = () => {
+      api?.event?.trigger?.(map, 'resize');
+      fitPreviewRouteToMap(api, map);
+    };
+    const rafId = window.requestAnimationFrame(triggerResize);
+    const timer = window.setTimeout(triggerResize, 240);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timer);
+    };
+  }, [fitPreviewRouteToMap, previewFullscreen, previewGeometry.length]);
 
   const toggleEntry = (entry: RoutePlannerEntry) => {
     if (entry.disabled) return;
