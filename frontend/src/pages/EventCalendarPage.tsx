@@ -5,6 +5,7 @@ import { canManageEvents } from '../auth/access';
 import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, getMyParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
+import { countVisibleParticipants } from '../utils/eventParticipants';
 
 const normalizeEvents = (raw: Event[]) =>
   (Array.isArray(raw) ? raw : []).map((event) => ({
@@ -234,16 +235,6 @@ const EventCalendarPage = () => {
     return map;
   }, [participants]);
 
-  const countNonStaff = (ids?: number[]) => {
-    if (!Array.isArray(ids)) return 0;
-    return ids.reduce((count, id) => {
-      const roles = Array.isArray(participantLookup.get(id)?.roles)
-        ? participantLookup.get(id)?.roles || []
-        : [];
-      return roles.includes('Staff') ? count : count + 1;
-    }, 0);
-  };
-
   useEffect(() => {
     if (!selectedSeason) return;
     const seasonId = Number(selectedSeason);
@@ -346,7 +337,7 @@ const EventCalendarPage = () => {
                           </div>
                           <div>
                             <dt>Participants</dt>
-                            <dd>{Math.max(slotCount - remaining, 0)}</dd>
+                            <dd>{countVisibleParticipants(event.participant_ids, participantLookup)}</dd>
                           </div>
                           <div>
                             <dt>INNHOPPS</dt>

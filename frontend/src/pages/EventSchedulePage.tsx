@@ -49,6 +49,7 @@ import {
 } from '../utils/eventDate';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
+import { countVisibleParticipants } from '../utils/eventParticipants';
 
 const OVERLAY_EXIT_MS = 180;
 type DayBucket = {
@@ -1679,7 +1680,8 @@ const EventSchedulePage = () => {
 
   const totalSlots = eventData.slots ?? 0;
   const remaining = Math.max(eventData.remaining_slots ?? 0, 0);
-  const nonStaffCount = Math.max(totalSlots - remaining, 0);
+  const participantLookup = new Map(participants.map((participant) => [participant.id, participant]));
+  const nonStaffCount = countVisibleParticipants(eventData.participant_ids, participantLookup);
   const isFull = remaining === 0;
   const pastEvent = eventData.status === 'past';
   const openCreateFromDayMenu = (dayKey: string, type: EntryType) => {
