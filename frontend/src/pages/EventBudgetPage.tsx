@@ -70,7 +70,7 @@ type BudgetSectionKey =
   | 'costSplit'
   | 'lineItems';
 
-type ParametersTabKey = 'load' | 'aircraft' | 'pricing' | 'estimates' | 'currencies';
+type ParametersTabKey = 'load' | 'pricing' | 'estimates' | 'currencies';
 type CostSplitTabKey = 'section' | 'innhopp' | 'day';
 type LabelScenarioKey = 'confirm' | 'worst' | 'full';
 type ScenarioSummaryKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
@@ -2412,15 +2412,6 @@ const EventBudgetPage = () => {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={parametersTab === 'aircraft'}
-                  className={parametersTab === 'aircraft' ? 'primary' : 'ghost'}
-                  onClick={() => setParametersTab('aircraft')}
-                >
-                  Aircraft
-                </button>
-                <button
-                  type="button"
-                  role="tab"
                   aria-selected={parametersTab === 'pricing'}
                   className={parametersTab === 'pricing' ? 'primary' : 'ghost'}
                   onClick={() => setParametersTab('pricing')}
@@ -2451,16 +2442,6 @@ const EventBudgetPage = () => {
                   {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count'].map(
                     renderNumericParameterField
                   )}
-                </div>
-              )}
-              {parametersTab === 'aircraft' && (
-                <div className="budget-assumptions-row budget-assumptions-row--aircraft">
-                  <div className="form-field form-field-full-span">
-                    <span>Aircraft settings</span>
-                    <p className="muted">
-                      Aircraft pricing, currency, speed, slot bands, and minimum load duration are now managed on event details.
-                    </p>
-                  </div>
                 </div>
               )}
               {parametersTab === 'pricing' && (
