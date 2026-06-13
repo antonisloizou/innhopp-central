@@ -4,6 +4,7 @@ import type { ClipboardEvent as ReactClipboardEvent } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Event,
+  EventAircraft,
   Innhopp,
   InnhoppInput,
   InnhoppImage,
@@ -31,8 +32,8 @@ import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
-import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import { parseCoordinates } from '../utils/coordinates';
+import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -188,6 +189,7 @@ const InnhoppDetailPage = () => {
   const initialFormState: InnhoppFormState = {
     name: '',
     sequence: 1,
+    aircraft_id: undefined,
     coordinates: '',
     scheduled_at: '',
     notes: '',
@@ -240,8 +242,39 @@ const InnhoppDetailPage = () => {
   const [landingDrivingDurationMinutes, setLandingDrivingDurationMinutes] = useState<number | null>(null);
   const [landingRoadRouteLoading, setLandingRoadRouteLoading] = useState(false);
   const [landingRoadRouteError, setLandingRoadRouteError] = useState<string | null>(null);
-  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
-  const [budgetFlightEstimateReason, setBudgetFlightEstimateReason] = useState<string | null>(null);
+  const selectedAircraft = useMemo<EventAircraft | null>(() => {
+    if (!eventData || !Array.isArray(eventData.aircraft) || !hasNumber(form.aircraft_id)) {
+      return null;
+    }
+    return eventData.aircraft.find((aircraft) => aircraft.id === form.aircraft_id) || null;
+  }, [eventData, form.aircraft_id]);
+  const selectedAircraftSpeedKmh = useMemo(() => {
+    const speed = selectedAircraft?.cruising_speed_kmh;
+    return typeof speed === 'number' && Number.isFinite(speed) && speed > 0 ? speed : null;
+  }, [selectedAircraft]);
+  const selectedAircraftFlightEstimateReason = useMemo(() => {
+    if (!hasNumber(form.aircraft_id)) {
+      return 'No aircraft assigned.';
+    }
+    if (!selectedAircraft) {
+      return 'Assigned aircraft is no longer attached to this event.';
+    }
+    if (!hasNumber(selectedAircraftSpeedKmh) || (selectedAircraftSpeedKmh as number) <= 0) {
+      return 'Aircraft cruising speed is unavailable.';
+    }
+    return null;
+  }, [form.aircraft_id, selectedAircraft, selectedAircraftSpeedKmh]);
+  const selectedAircraftWarning = useMemo(
+    () =>
+      getInnhoppAircraftWarning(
+        {
+          aircraft_id: form.aircraft_id,
+          distance_by_air: form.distance_by_air
+        },
+        eventData?.aircraft || []
+      ),
+    [eventData?.aircraft, form.aircraft_id, form.distance_by_air]
+  );
   const takeoffRouteRequestRef = useRef(0);
   const landingRouteRequestRef = useRef(0);
   const lastFlyingUnavailableReasonRef = useRef<string | null>(null);
@@ -252,15 +285,15 @@ const InnhoppDetailPage = () => {
   const flyingDurationMinutes = useMemo(() => {
     if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) < 0) return null;
     if ((form.distance_by_air as number) === 0) return 0;
-    if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
-    return Math.round(((form.distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
-  }, [form.distance_by_air, budgetAircraftSpeedKmh]);
+    if (!hasNumber(selectedAircraftSpeedKmh) || (selectedAircraftSpeedKmh as number) <= 0) return null;
+    return Math.round(((form.distance_by_air as number) / (selectedAircraftSpeedKmh as number)) * 60);
+  }, [form.distance_by_air, selectedAircraftSpeedKmh]);
   const landingFlyingDurationMinutes = useMemo(() => {
     if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) < 0) return null;
     if ((form.landing_distance_by_air as number) === 0) return 0;
-    if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) return null;
-    return Math.round(((form.landing_distance_by_air as number) / (budgetAircraftSpeedKmh as number)) * 60);
-  }, [form.landing_distance_by_air, budgetAircraftSpeedKmh]);
+    if (!hasNumber(selectedAircraftSpeedKmh) || (selectedAircraftSpeedKmh as number) <= 0) return null;
+    return Math.round(((form.landing_distance_by_air as number) / (selectedAircraftSpeedKmh as number)) * 60);
+  }, [form.landing_distance_by_air, selectedAircraftSpeedKmh]);
 
   const extractImageFiles = (dt?: DataTransfer | null): File[] => {
     if (!dt) return [];
@@ -408,6 +441,7 @@ const InnhoppDetailPage = () => {
           setForm({
             name: target.name,
             sequence: target.sequence,
+            aircraft_id: target.aircraft_id ?? undefined,
             coordinates: target.coordinates || '',
             elevation: target.elevation ?? undefined,
             scheduled_at: toInputDateTime(target.scheduled_at) || defaultStart,
@@ -451,7 +485,11 @@ const InnhoppDetailPage = () => {
                   const d = parseEventLocal(evt.starts_at);
                   if (d) {
                     d.setUTCHours(9, 0, 0, 0);
-                    setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                    setForm((prev) => ({
+                      ...prev,
+                      aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
+                      scheduled_at: d.toISOString()
+                    }));
                   }
                 }
               }
@@ -470,13 +508,26 @@ const InnhoppDetailPage = () => {
                 setEventData(evt);
                 evtCache.current = { ...evtCache.current, [evt.id]: evt };
                 if (initialScheduledAt) {
-                  setForm((prev) => ({ ...prev, scheduled_at: initialScheduledAt }));
+                  setForm((prev) => ({
+                    ...prev,
+                    aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
+                    scheduled_at: initialScheduledAt
+                  }));
                 } else if (!copy?.scheduled_at && evt.starts_at) {
                   const d = parseEventLocal(evt.starts_at);
                   if (d) {
                     d.setUTCHours(9, 0, 0, 0);
-                    setForm((prev) => ({ ...prev, scheduled_at: d.toISOString() }));
+                    setForm((prev) => ({
+                      ...prev,
+                      aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
+                      scheduled_at: d.toISOString()
+                    }));
                   }
+                } else {
+                  setForm((prev) => ({
+                    ...prev,
+                    aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id
+                  }));
                 }
               }
             } catch {
@@ -487,6 +538,7 @@ const InnhoppDetailPage = () => {
             setForm({
               name: copy.name,
               sequence: copy.sequence,
+              aircraft_id: copy.aircraft_id ?? undefined,
               coordinates: copy.coordinates || '',
               elevation: copy.elevation ?? undefined,
               scheduled_at: toInputDateTime(copy.scheduled_at),
@@ -538,42 +590,6 @@ const InnhoppDetailPage = () => {
 
   useEffect(() => {
     let cancelled = false;
-    const loadBudgetSpeed = async () => {
-      if (!eventId) return;
-      setBudgetAircraftSpeedKmh(null);
-      setBudgetFlightEstimateReason('No budget linked to this event.');
-      try {
-        const budget = await getEventBudget(Number(eventId));
-        const assumptions = await getBudgetAssumptions(budget.id);
-        if (cancelled) return;
-        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
-        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
-          setBudgetAircraftSpeedKmh(speed);
-          setBudgetFlightEstimateReason(null);
-          return;
-        }
-        setBudgetAircraftSpeedKmh(null);
-        setBudgetFlightEstimateReason('Aircraft cruising speed is not set in the associated budget.');
-      } catch (err) {
-        if (cancelled) return;
-        const status = (err as Error & { status?: number })?.status;
-        if (status === 404) {
-          setBudgetAircraftSpeedKmh(null);
-          setBudgetFlightEstimateReason('No budget linked to this event.');
-          return;
-        }
-        setBudgetAircraftSpeedKmh(null);
-        setBudgetFlightEstimateReason('Could not load budget assumptions.');
-      }
-    };
-    loadBudgetSpeed();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
-
-  useEffect(() => {
-    let cancelled = false;
     const loadAirfieldContext = async () => {
       try {
         const [airfieldData, eventData] = await Promise.all([listAirfields(), listEvents()]);
@@ -596,6 +612,7 @@ const InnhoppDetailPage = () => {
     return {
       sequence: state.sequence,
       name: state.name.trim(),
+      aircraft_id: state.aircraft_id,
       coordinates: state.coordinates?.trim() || '',
       scheduled_at: state.scheduled_at ? toEventLocalInput(state.scheduled_at) : '',
       notes: state.notes?.trim() || '',
@@ -791,14 +808,14 @@ const InnhoppDetailPage = () => {
     let reason = 'Unknown reason.';
     if (!hasNumber(form.distance_by_air) || (form.distance_by_air as number) <= 0) {
       reason = 'distance_by_air is missing or zero.';
-    } else if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) {
-      reason = budgetFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
+    } else if (!hasNumber(selectedAircraftSpeedKmh) || (selectedAircraftSpeedKmh as number) <= 0) {
+      reason = selectedAircraftFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
     }
     if (lastFlyingUnavailableReasonRef.current === reason) return;
     lastFlyingUnavailableReasonRef.current = reason;
     if (!isActionableTravelEstimateIssue(reason)) return;
     console.warn(`[InnhoppDetail] Flying time estimate unavailable: ${reason}`);
-  }, [flyingDurationMinutes, form.distance_by_air, budgetAircraftSpeedKmh, budgetFlightEstimateReason]);
+  }, [flyingDurationMinutes, form.distance_by_air, selectedAircraftSpeedKmh, selectedAircraftFlightEstimateReason]);
 
   useEffect(() => {
     let cancelled = false;
@@ -918,8 +935,8 @@ const InnhoppDetailPage = () => {
     let reason = 'Unknown reason.';
     if (!hasNumber(form.landing_distance_by_air) || (form.landing_distance_by_air as number) <= 0) {
       reason = 'landing_distance_by_air is missing or zero.';
-    } else if (!hasNumber(budgetAircraftSpeedKmh) || (budgetAircraftSpeedKmh as number) <= 0) {
-      reason = budgetFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
+    } else if (!hasNumber(selectedAircraftSpeedKmh) || (selectedAircraftSpeedKmh as number) <= 0) {
+      reason = selectedAircraftFlightEstimateReason || 'Aircraft cruising speed is unavailable.';
     }
     if (lastLandingFlyingUnavailableReasonRef.current === reason) return;
     lastLandingFlyingUnavailableReasonRef.current = reason;
@@ -929,8 +946,8 @@ const InnhoppDetailPage = () => {
     sameLandingAsTakeoff,
     landingFlyingDurationMinutes,
     form.landing_distance_by_air,
-    budgetAircraftSpeedKmh,
-    budgetFlightEstimateReason
+    selectedAircraftSpeedKmh,
+    selectedAircraftFlightEstimateReason
   ]);
 
   useEffect(() => {
@@ -1371,6 +1388,31 @@ const InnhoppDetailPage = () => {
                 onChange={(e) => setForm((prev) => ({ ...prev, reason_for_choice: e.target.value }))}
                 placeholder="Why this innhopp location was selected"
               />
+            </label>
+            <label className="form-field">
+              <span>Aircraft</span>
+              <select
+                value={form.aircraft_id ?? ''}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    aircraft_id: e.target.value ? Number(e.target.value) : undefined
+                  }))
+                }
+              >
+                <option value="">No aircraft assigned</option>
+                {(eventData.aircraft || []).map((aircraft) => (
+                  <option key={aircraft.id} value={aircraft.id}>
+                    {aircraft.name}
+                  </option>
+                ))}
+              </select>
+              <span className="muted">
+                {selectedAircraft
+                  ? `${selectedAircraft.name} · ${selectedAircraft.pricing_model === 'time' ? 'Time priced' : 'Slot priced'}`
+                  : 'Assign an aircraft to enable aircraft-based costing and time estimates.'}
+              </span>
+              {selectedAircraftWarning ? <span className="muted">{selectedAircraftWarning}</span> : null}
             </label>
             <div
               className={`form-grid innhopp-location-grid form-field-full-span${
@@ -1904,9 +1946,9 @@ const InnhoppDetailPage = () => {
                   <span className="innhopp-detail-estimate-value">
                     {flyingDurationMinutes !== null
                       ? `${formatDurationMinutes(flyingDurationMinutes)} (${Math.round(
-                          budgetAircraftSpeedKmh as number
+                          selectedAircraftSpeedKmh as number
                         )} km/h)`
-                      : `Unavailable${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                      : `Unavailable${selectedAircraftFlightEstimateReason ? ` (${selectedAircraftFlightEstimateReason})` : ''}`}
                   </span>
                 </span>
             </label>
@@ -2108,9 +2150,9 @@ const InnhoppDetailPage = () => {
                       <span className="innhopp-detail-estimate-value">
                         {landingFlyingDurationMinutes !== null
                           ? `${formatDurationMinutes(landingFlyingDurationMinutes)} (${Math.round(
-                              budgetAircraftSpeedKmh as number
+                              selectedAircraftSpeedKmh as number
                             )} km/h)`
-                          : `Unavailable${budgetFlightEstimateReason ? ` (${budgetFlightEstimateReason})` : ''}`}
+                          : `Unavailable${selectedAircraftFlightEstimateReason ? ` (${selectedAircraftFlightEstimateReason})` : ''}`}
                       </span>
                     </span>
                   </label>

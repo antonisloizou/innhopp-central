@@ -2,6 +2,7 @@ package budgets
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,12 +30,113 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{db: db}
 }
 
+func BackfillAircraftAssignmentsFromBudgetParams(ctx context.Context, db *pgxpool.Pool) error {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	type legacyEvent struct {
+		EventID          int64
+		EventName        string
+		BudgetID         int64
+		AircraftCurrency string
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT e.id, e.name, b.id, b.aircraft_currency
+		FROM events e
+		JOIN event_budgets b ON b.event_id = e.id
+		WHERE EXISTS (
+			SELECT 1
+			FROM event_innhopps i
+			WHERE i.event_id = e.id
+			  AND i.aircraft_id IS NULL
+		)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_aircraft ea
+			WHERE ea.event_id = e.id
+		)
+		ORDER BY e.id ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	eventsToBackfill := make([]legacyEvent, 0)
+	for rows.Next() {
+		var item legacyEvent
+		if err := rows.Scan(&item.EventID, &item.EventName, &item.BudgetID, &item.AircraftCurrency); err != nil {
+			return err
+		}
+		eventsToBackfill = append(eventsToBackfill, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, item := range eventsToBackfill {
+		aircraftName := strings.TrimSpace(item.EventName)
+		if aircraftName == "" {
+			aircraftName = "Event"
+		}
+		aircraftName += " Aircraft"
+
+		ratePerMinute := defaultAssumptions["aircraft_price_per_minute"]
+		cruisingSpeedKmh := defaultAssumptions["aircraft_cruising_speed_kmh"]
+		minimumLoadDuration := defaultAssumptions["minimum_load_duration"]
+		if err := tx.QueryRow(ctx, `
+			SELECT
+				COALESCE(MAX(CASE WHEN key = 'aircraft_price_per_minute' THEN value_num END)::double precision, $2),
+				COALESCE(MAX(CASE WHEN key = 'aircraft_cruising_speed_kmh' THEN value_num END)::double precision, $3),
+				COALESCE(MAX(CASE WHEN key = 'minimum_load_duration' THEN value_num END)::double precision, $4)
+			FROM budget_assumptions
+			WHERE budget_id = $1
+		`, item.BudgetID, ratePerMinute, cruisingSpeedKmh, minimumLoadDuration).Scan(&ratePerMinute, &cruisingSpeedKmh, &minimumLoadDuration); err != nil {
+			return err
+		}
+
+		var aircraftID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO aircraft
+				(name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, notes)
+			VALUES
+				($1, 'time', $2, $3, $4, $5, '')
+			RETURNING id
+		`, aircraftName, normalizeCurrency(item.AircraftCurrency), ratePerMinute, cruisingSpeedKmh, minimumLoadDuration).Scan(&aircraftID); err != nil {
+			return err
+		}
+
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO event_aircraft (event_id, aircraft_id, sort_order)
+			VALUES ($1, $2, 0)
+			ON CONFLICT (event_id, aircraft_id) DO NOTHING
+		`, item.EventID, aircraftID); err != nil {
+			return err
+		}
+
+		if _, err := tx.Exec(ctx, `
+			UPDATE event_innhopps
+			SET aircraft_id = $2
+			WHERE event_id = $1
+			  AND aircraft_id IS NULL
+		`, item.EventID, aircraftID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
 type Budget struct {
 	ID               int64     `json:"id"`
 	EventID          int64     `json:"event_id"`
 	Name             string    `json:"name"`
 	BaseCurrency     string    `json:"base_currency"`
-	AircraftCurrency string    `json:"aircraft_currency"`
+	AircraftCurrency string    `json:"-"`
 	Status           string    `json:"status"`
 	Notes            string    `json:"notes,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -144,6 +246,14 @@ var defaultAssumptions = map[string]float64{
 	"estimate_staff_salary_per_person_day":    0,
 }
 
+var legacyAircraftAssumptionKeys = map[string]struct{}{
+	"aircraft_price_per_minute":   {},
+	"minimum_load_duration":       {},
+	"aircraft_cruising_speed_kmh": {},
+}
+
+var activeBudgetAssumptionDefaults = filterLegacyAircraftAssumptions(defaultAssumptions)
+
 var estimateAssumptionKeys = map[string]struct{}{
 	"estimate_accommodation_per_person_night": {},
 	"estimate_transport_per_day":              {},
@@ -153,6 +263,8 @@ var estimateAssumptionKeys = map[string]struct{}{
 
 const autoAircraftInnhoppNotePrefix = "[auto-aircraft-innhopp]"
 const autoAircraftMissingDistanceSuffix = ":missing-distance"
+const autoAircraftMissingAircraftSuffix = ":missing-aircraft"
+const autoAircraftSlotOverflowSuffix = ":slot-overflow"
 const autoEstimateLineItemNotePrefix = "[auto-estimate]"
 const autoEstimateWarningSuffix = ":estimate-generated"
 const legacyPlannedLoadCountKey = "planned_load_count"
@@ -244,6 +356,366 @@ func clampNonNegative(v float64) float64 {
 	return v
 }
 
+func filterPublicAssumptions(values map[string]float64) map[string]float64 {
+	if len(values) == 0 {
+		return map[string]float64{}
+	}
+	filtered := make(map[string]float64, len(values))
+	for key, value := range values {
+		if _, legacy := legacyAircraftAssumptionKeys[key]; legacy {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
+}
+
+func filterLegacyAircraftAssumptions(values map[string]float64) map[string]float64 {
+	if len(values) == 0 {
+		return map[string]float64{}
+	}
+	filtered := make(map[string]float64, len(values))
+	for key, value := range values {
+		if _, legacy := legacyAircraftAssumptionKeys[key]; legacy {
+			continue
+		}
+		filtered[key] = value
+	}
+	return filtered
+}
+
+type aircraftSlotBand struct {
+	MaxDistanceKm  float64
+	SlotMultiplier float64
+}
+
+type eventAircraftInnhopp struct {
+	InnhoppID              int64
+	Sequence               int64
+	InnhoppName            string
+	ServiceDate            *time.Time
+	DistanceByAirKm        *float64
+	TakeoffAirfieldID      int64
+	LandingAirfieldID      int64
+	LandingDistanceByAirKm *float64
+	AircraftID             *int64
+	AircraftName           string
+	PricingModel           string
+	RateCurrency           string
+	RatePerMinute          *float64
+	CruisingSpeedKmh       *float64
+	MinimumLoadDuration    *float64
+	PricePerSlot           *float64
+	SlotBands              []aircraftSlotBand
+}
+
+type aircraftComputedMetric struct {
+	Quantity        float64
+	UnitCost        float64
+	CostCurrency    string
+	BaseCost        float64
+	AirMinutes      float64
+	AirDistanceKm   float64
+	MissingAircraft bool
+	MissingDistance bool
+	SlotOverflow    bool
+	Valid           bool
+}
+
+func pickRateToBase(currency string, liveRates, fallbackRates map[string]float64) float64 {
+	rate := liveRates[normalizeCurrency(currency)]
+	if rate <= 0 {
+		rate = fallbackRates[normalizeCurrency(currency)]
+	}
+	if rate <= 0 {
+		rate = 1
+	}
+	return rate
+}
+
+func toBaseAmount(amount float64, rate float64) float64 {
+	if rate <= 0 {
+		return amount
+	}
+	return amount / rate
+}
+
+func displayInnhoppLabel(sequence int64, name string) string {
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = "Untitled innhopp"
+	}
+	if sequence > 0 {
+		return fmt.Sprintf("#%d %s", sequence, displayName)
+	}
+	return displayName
+}
+
+func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]eventAircraftInnhopp, error) {
+	rows, err := h.db.Query(
+		ctx,
+		`SELECT i.id, COALESCE(i.sequence, 0), COALESCE(i.name, ''), i.scheduled_at,
+                i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air,
+                i.aircraft_id, COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
+                a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
+         FROM event_innhopps i
+         LEFT JOIN event_aircraft ea ON ea.event_id = i.event_id AND ea.aircraft_id = i.aircraft_id
+         LEFT JOIN aircraft a ON a.id = ea.aircraft_id
+         WHERE i.event_id = $1
+         ORDER BY i.sequence ASC, i.id ASC`,
+		eventID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]eventAircraftInnhopp, 0)
+	aircraftIDs := make([]int64, 0)
+	seenAircraft := map[int64]struct{}{}
+	for rows.Next() {
+		var item eventAircraftInnhopp
+		var scheduledAt sql.NullTime
+		var distanceByAir sql.NullFloat64
+		var landingDistanceByAir sql.NullFloat64
+		var aircraftID sql.NullInt64
+		var ratePerMinute sql.NullFloat64
+		var cruisingSpeedKmh sql.NullFloat64
+		var minimumLoadDuration sql.NullFloat64
+		var pricePerSlot sql.NullFloat64
+		if err := rows.Scan(
+			&item.InnhoppID,
+			&item.Sequence,
+			&item.InnhoppName,
+			&scheduledAt,
+			&distanceByAir,
+			&item.TakeoffAirfieldID,
+			&item.LandingAirfieldID,
+			&landingDistanceByAir,
+			&aircraftID,
+			&item.AircraftName,
+			&item.PricingModel,
+			&item.RateCurrency,
+			&ratePerMinute,
+			&cruisingSpeedKmh,
+			&minimumLoadDuration,
+			&pricePerSlot,
+		); err != nil {
+			return nil, err
+		}
+		if scheduledAt.Valid {
+			day := time.Date(scheduledAt.Time.Year(), scheduledAt.Time.Month(), scheduledAt.Time.Day(), 0, 0, 0, 0, time.UTC)
+			item.ServiceDate = &day
+		}
+		if distanceByAir.Valid {
+			val := distanceByAir.Float64
+			item.DistanceByAirKm = &val
+		}
+		if landingDistanceByAir.Valid {
+			val := landingDistanceByAir.Float64
+			item.LandingDistanceByAirKm = &val
+		}
+		if aircraftID.Valid {
+			val := aircraftID.Int64
+			item.AircraftID = &val
+			if _, ok := seenAircraft[val]; !ok {
+				aircraftIDs = append(aircraftIDs, val)
+				seenAircraft[val] = struct{}{}
+			}
+		}
+		if ratePerMinute.Valid {
+			val := ratePerMinute.Float64
+			item.RatePerMinute = &val
+		}
+		if cruisingSpeedKmh.Valid {
+			val := cruisingSpeedKmh.Float64
+			item.CruisingSpeedKmh = &val
+		}
+		if minimumLoadDuration.Valid {
+			val := minimumLoadDuration.Float64
+			item.MinimumLoadDuration = &val
+		}
+		if pricePerSlot.Valid {
+			val := pricePerSlot.Float64
+			item.PricePerSlot = &val
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(aircraftIDs) == 0 {
+		return items, nil
+	}
+
+	bandRows, err := h.db.Query(
+		ctx,
+		`SELECT aircraft_id, max_distance_km, slot_multiplier
+         FROM aircraft_slot_pricing_bands
+         WHERE aircraft_id = ANY($1)
+         ORDER BY aircraft_id ASC, sort_order ASC, id ASC`,
+		aircraftIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer bandRows.Close()
+	bandsByAircraft := map[int64][]aircraftSlotBand{}
+	for bandRows.Next() {
+		var aircraftID int64
+		var band aircraftSlotBand
+		if err := bandRows.Scan(&aircraftID, &band.MaxDistanceKm, &band.SlotMultiplier); err != nil {
+			return nil, err
+		}
+		bandsByAircraft[aircraftID] = append(bandsByAircraft[aircraftID], band)
+	}
+	if err := bandRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if items[i].AircraftID != nil {
+			items[i].SlotBands = bandsByAircraft[*items[i].AircraftID]
+		}
+	}
+	return items, nil
+}
+
+func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+	if loadCount <= 0 {
+		return aircraftComputedMetric{}
+	}
+	speed := 180.0
+	if item.CruisingSpeedKmh != nil && *item.CruisingSpeedKmh > 0 {
+		speed = *item.CruisingSpeedKmh
+	}
+	minLoadDuration := 0.0
+	if item.MinimumLoadDuration != nil && *item.MinimumLoadDuration > 0 {
+		minLoadDuration = *item.MinimumLoadDuration
+	}
+	unitCost := 0.0
+	if item.RatePerMinute != nil && *item.RatePerMinute > 0 {
+		unitCost = roundMoney(*item.RatePerMinute)
+	}
+	sameAirfield := item.LandingAirfieldID <= 0 || item.LandingAirfieldID == item.TakeoffAirfieldID
+	missingDistance := item.TakeoffAirfieldID <= 0 || item.DistanceByAirKm == nil || *item.DistanceByAirKm < 0
+	totalDistanceKm := 0.0
+	if !missingDistance {
+		if sameAirfield {
+			totalDistanceKm = *item.DistanceByAirKm * 2 * float64(loadCount)
+		} else {
+			if item.LandingAirfieldID <= 0 || *item.DistanceByAirKm <= 0 || item.LandingDistanceByAirKm == nil || *item.LandingDistanceByAirKm < 0 {
+				missingDistance = true
+			} else {
+				outboundKm := *item.DistanceByAirKm * float64(loadCount)
+				returnToTakeoffKm := *item.DistanceByAirKm * math.Max(float64(loadCount-1), 0)
+				finalLandingKm := math.Max(*item.LandingDistanceByAirKm, 0)
+				totalDistanceKm = outboundKm + returnToTakeoffKm + finalLandingKm
+			}
+		}
+	}
+	totalMinutes := 0.0
+	if !missingDistance && totalDistanceKm > 0 {
+		totalMinutes = (totalDistanceKm / speed) * 60
+	}
+	minimumMinutes := minLoadDuration * float64(loadCount)
+	if totalMinutes < minimumMinutes {
+		totalMinutes = minimumMinutes
+	}
+	totalMinutes = math.Ceil(totalMinutes)
+	if totalMinutes <= 0 {
+		return aircraftComputedMetric{}
+	}
+	rateToBase := pickRateToBase(item.RateCurrency, liveRates, fallbackRates)
+	return aircraftComputedMetric{
+		Quantity:        totalMinutes,
+		UnitCost:        unitCost,
+		CostCurrency:    normalizeCurrency(item.RateCurrency),
+		BaseCost:        roundMoney(toBaseAmount(totalMinutes*unitCost, rateToBase)),
+		AirMinutes:      totalMinutes,
+		AirDistanceKm:   totalDistanceKm,
+		MissingDistance: missingDistance,
+		Valid:           true,
+	}
+}
+
+func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+	if loadCount <= 0 {
+		return aircraftComputedMetric{}
+	}
+	if item.PricePerSlot == nil || *item.PricePerSlot < 0 || len(item.SlotBands) == 0 {
+		return aircraftComputedMetric{}
+	}
+	if item.DistanceByAirKm == nil || *item.DistanceByAirKm < 0 {
+		return aircraftComputedMetric{MissingDistance: true}
+	}
+	distance := *item.DistanceByAirKm
+	selected := item.SlotBands[0]
+	found := false
+	for _, band := range item.SlotBands {
+		selected = band
+		if distance <= band.MaxDistanceKm {
+			found = true
+			break
+		}
+	}
+	slotOverflow := !found
+	quantity := roundMoney(float64(loadCount) * selected.SlotMultiplier)
+	if quantity <= 0 {
+		return aircraftComputedMetric{}
+	}
+	unitCost := roundMoney(*item.PricePerSlot)
+	rateToBase := pickRateToBase(item.RateCurrency, liveRates, fallbackRates)
+	return aircraftComputedMetric{
+		Quantity:      quantity,
+		UnitCost:      unitCost,
+		CostCurrency:  normalizeCurrency(item.RateCurrency),
+		BaseCost:      roundMoney(toBaseAmount(quantity*unitCost, rateToBase)),
+		AirDistanceKm: distance * float64(loadCount),
+		SlotOverflow:  slotOverflow,
+		Valid:         true,
+	}
+}
+
+func computeAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+	if item.AircraftID == nil || strings.TrimSpace(item.AircraftName) == "" {
+		return aircraftComputedMetric{MissingAircraft: true}
+	}
+	switch strings.ToLower(strings.TrimSpace(item.PricingModel)) {
+	case "slot":
+		return computeSlotBasedAircraftMetric(item, loadCount, liveRates, fallbackRates)
+	default:
+		return computeTimeBasedAircraftMetric(item, loadCount, liveRates, fallbackRates)
+	}
+}
+
+func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int64, loadCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, currencies []string, err error) {
+	items, err := h.fetchAircraftInnhopps(ctx, eventID)
+	if err != nil {
+		return 0, 0, 0, nil, err
+	}
+	currencySet := map[string]struct{}{}
+	for _, item := range items {
+		metric := computeAircraftMetric(item, loadCount, liveRates, fallbackRates)
+		if !metric.Valid {
+			continue
+		}
+		cost += metric.BaseCost
+		minutes += metric.AirMinutes
+		distance += metric.AirDistanceKm
+		if metric.CostCurrency != "" {
+			currencySet[metric.CostCurrency] = struct{}{}
+		}
+	}
+	cost = roundMoney(cost)
+	minutes = roundMoney(minutes)
+	distance = roundMoney(distance)
+	for currency := range currencySet {
+		currencies = append(currencies, currency)
+	}
+	sort.Strings(currencies)
+	return cost, minutes, distance, currencies, nil
+}
+
 func (h *Handler) getBudgetByEvent(w http.ResponseWriter, r *http.Request) {
 	eventID, ok := parseIDParam(w, r, "eventID")
 	if !ok {
@@ -268,10 +740,9 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name             string `json:"name"`
-		BaseCurrency     string `json:"base_currency"`
-		AircraftCurrency string `json:"aircraft_currency"`
-		Notes            string `json:"notes"`
+		Name         string `json:"name"`
+		BaseCurrency string `json:"base_currency"`
+		Notes        string `json:"notes"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -286,14 +757,7 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "base_currency must be a 3-letter ISO code")
 		return
 	}
-	aircraftCurrency := normalizeCurrency(payload.AircraftCurrency)
-	if aircraftCurrency == "EUR" && strings.TrimSpace(payload.AircraftCurrency) == "" {
-		aircraftCurrency = baseCurrency
-	}
-	if !isValidCurrencyCode(aircraftCurrency) {
-		httpx.Error(w, http.StatusBadRequest, "aircraft_currency must be a 3-letter ISO code")
-		return
-	}
+	aircraftCurrency := baseCurrency
 
 	tx, err := h.db.Begin(r.Context())
 	if err != nil {
@@ -344,7 +808,7 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for k, v := range defaultAssumptions {
+	for k, v := range activeBudgetAssumptionDefaults {
 		if _, err := tx.Exec(
 			r.Context(),
 			`INSERT INTO budget_assumptions (budget_id, key, value_num) VALUES ($1, $2, $3)`,
@@ -425,11 +889,10 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name             *string `json:"name"`
-		BaseCurrency     *string `json:"base_currency"`
-		AircraftCurrency *string `json:"aircraft_currency"`
-		Status           *string `json:"status"`
-		Notes            *string `json:"notes"`
+		Name         *string `json:"name"`
+		BaseCurrency *string `json:"base_currency"`
+		Status       *string `json:"status"`
+		Notes        *string `json:"notes"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -449,12 +912,8 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	aircraftCurrency := current.AircraftCurrency
-	if payload.AircraftCurrency != nil {
-		aircraftCurrency = normalizeCurrency(*payload.AircraftCurrency)
-		if !isValidCurrencyCode(aircraftCurrency) {
-			httpx.Error(w, http.StatusBadRequest, "aircraft_currency must be a 3-letter ISO code")
-			return
-		}
+	if !isValidCurrencyCode(aircraftCurrency) {
+		aircraftCurrency = baseCurrency
 	}
 	status := current.Status
 	if payload.Status != nil {
@@ -863,9 +1322,10 @@ func (h *Handler) getAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
+	publicAssumptions := filterPublicAssumptions(assumptions)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"values":              assumptions,
-		"parameters":          assumptions,
+		"values":              publicAssumptions,
+		"parameters":          publicAssumptions,
 		"estimate_currencies": estimateCurrencies,
 	})
 }
@@ -903,6 +1363,9 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 			k = fullLoadCountKey
 		}
 		if _, ok := defaultAssumptions[k]; !ok {
+			continue
+		}
+		if _, legacy := legacyAircraftAssumptionKeys[k]; legacy {
 			continue
 		}
 		if strings.HasSuffix(k, "_percent") && val < 0 {
@@ -959,9 +1422,10 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
+	publicAssumptions := filterPublicAssumptions(updated)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"values":              updated,
-		"parameters":          updated,
+		"values":              publicAssumptions,
+		"parameters":          publicAssumptions,
 		"estimate_currencies": estimateCurrencies,
 	})
 }
@@ -1007,10 +1471,9 @@ func (h *Handler) listCurrencies(w http.ResponseWriter, r *http.Request) {
 	rates[baseCurrency] = 1
 	_ = h.upsertCurrencyRates(r.Context(), budgetID, rates)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"base_currency":     budget.BaseCurrency,
-		"aircraft_currency": budget.AircraftCurrency,
-		"currencies":        codes,
-		"live_rates":        rates,
+		"base_currency": budget.BaseCurrency,
+		"currencies":    codes,
+		"live_rates":    rates,
 	})
 }
 
@@ -1632,21 +2095,6 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	assumptions["deposit_amount"] = depositAmountBase
 	assumptions["main_invoice_amount"] = mainInvoiceAmountBase
 
-	aircraftPricePerMinute := clampNonNegative(assumptions["aircraft_price_per_minute"])
-	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
-	aircraftRateToBase := liveRates[aircraftCurrency]
-	if aircraftRateToBase <= 0 {
-		aircraftRateToBase = fallbackRates[aircraftCurrency]
-	}
-	if aircraftRateToBase <= 0 {
-		aircraftRateToBase = 1
-	}
-	toBaseAmount := func(amount float64, rate float64) float64 {
-		if rate <= 0 {
-			return amount
-		}
-		return amount / rate
-	}
 	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
 	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
 	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
@@ -1663,36 +2111,44 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	worstAircraftLoads := confirmLoads + 1
 	fullAircraftLoads := fullLoads
 
-	confirmAircraftMinutes, _, aircraftErr := h.computeAircraftFlightMetrics(
+	confirmAircraftDerivedCost, _, _, confirmAircraftCurrencies, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		assumptions,
 		confirmAircraftLoads,
+		liveRates,
+		fallbackRates,
 	)
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	worstAircraftMinutes, _, aircraftErr := h.computeAircraftFlightMetrics(
+	worstAircraftDerivedCost, _, _, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		assumptions,
 		worstAircraftLoads,
+		liveRates,
+		fallbackRates,
 	)
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	fullAircraftMinutes, fullAircraftDistance, aircraftErr := h.computeAircraftFlightMetrics(
+	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullAircraftCurrencies, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		assumptions,
 		fullAircraftLoads,
+		liveRates,
+		fallbackRates,
 	)
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	confirmAircraftDerivedCost := roundMoney(toBaseAmount(confirmAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
-	worstAircraftDerivedCost := roundMoney(toBaseAmount(worstAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
-	fullAircraftDerivedCost := roundMoney(toBaseAmount(fullAircraftMinutes*aircraftPricePerMinute, aircraftRateToBase))
+	aircraftCurrencyLabel := ""
+	if len(fullAircraftCurrencies) == 1 {
+		aircraftCurrencyLabel = fullAircraftCurrencies[0]
+	} else if len(fullAircraftCurrencies) > 1 {
+		aircraftCurrencyLabel = "MIXED"
+	} else if len(confirmAircraftCurrencies) == 1 {
+		aircraftCurrencyLabel = confirmAircraftCurrencies[0]
+	}
 
 	lineRows, err := h.db.Query(
 		ctx,
@@ -1881,8 +2337,9 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 			sectionData["derived_total"] = total
 			sectionData["air_minutes"] = roundMoney(fullAircraftMinutes)
 			sectionData["air_distance_km"] = roundMoney(fullAircraftDistance)
-			sectionData["aircraft_currency"] = aircraftCurrency
-			sectionData["aircraft_rate_to_base"] = roundMoney(aircraftRateToBase)
+			if aircraftCurrencyLabel != "" {
+				sectionData["aircraft_currency"] = aircraftCurrencyLabel
+			}
 			sectionData["total"] = total
 		} else {
 			switch budgetMethod {
@@ -1901,16 +2358,15 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 	if !aircraftSectionPresent {
 		sectionTotals = append(sectionTotals, map[string]any{
-			"section_id":            int64(0),
-			"code":                  "aircraft",
-			"name":                  "Aircraft",
-			"total":                 roundMoney(fullAircraftDerivedCost),
-			"manual_total":          float64(0),
-			"derived_total":         roundMoney(fullAircraftDerivedCost),
-			"air_minutes":           roundMoney(fullAircraftMinutes),
-			"air_distance_km":       roundMoney(fullAircraftDistance),
-			"aircraft_currency":     aircraftCurrency,
-			"aircraft_rate_to_base": roundMoney(aircraftRateToBase),
+			"section_id":        int64(0),
+			"code":              "aircraft",
+			"name":              "Aircraft",
+			"total":             roundMoney(fullAircraftDerivedCost),
+			"manual_total":      float64(0),
+			"derived_total":     roundMoney(fullAircraftDerivedCost),
+			"air_minutes":       roundMoney(fullAircraftMinutes),
+			"air_distance_km":   roundMoney(fullAircraftDistance),
+			"aircraft_currency": aircraftCurrencyLabel,
 		})
 		expectedCost += fullAircraftDerivedCost
 	}
@@ -2042,10 +2498,12 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		})
 	}
 
+	publicAssumptions := filterPublicAssumptions(assumptions)
+
 	return BudgetSummary{
 		Budget:                budget,
-		Parameters:            assumptions,
-		Assumptions:           assumptions,
+		Parameters:            publicAssumptions,
+		Assumptions:           publicAssumptions,
 		SectionTotals:         sectionTotals,
 		DepositAmount:         depositAmountBase,
 		MainInvoiceAmount:     mainInvoiceAmountBase,
@@ -2192,18 +2650,18 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 	}
 
 	fullLoadCount := int(clampNonNegative(assumptions["full_load_count"]))
-	aircraftPricePerMinute := roundMoney(clampNonNegative(assumptions["aircraft_price_per_minute"]))
-	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
-	cruisingSpeedKmh := clampNonNegative(assumptions["aircraft_cruising_speed_kmh"])
-	if cruisingSpeedKmh <= 0 {
-		cruisingSpeedKmh = defaultAssumptions["aircraft_cruising_speed_kmh"]
+	liveRates, _ := h.fetchLiveCurrencyRates(ctx, budget.BaseCurrency, nil)
+	if liveRates == nil {
+		liveRates = map[string]float64{}
 	}
-	minimumLoadDuration := clampNonNegative(assumptions["minimum_load_duration"])
+	fallbackRates := map[string]float64{budget.BaseCurrency: 1}
 
 	type generatedLineItem struct {
 		InnhoppID       int64
 		Marker          string
 		MissingDistance bool
+		MissingAircraft bool
+		SlotOverflow    bool
 		Name            string
 		ServiceDate     *time.Time
 		LocationLabel   string
@@ -2213,102 +2671,49 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		SortOrder       int
 	}
 
-	rows, err := h.db.Query(
-		ctx,
-		`SELECT id, COALESCE(sequence, 0), COALESCE(name, ''), scheduled_at,
-                COALESCE(distance_by_air, 0), COALESCE(takeoff_airfield_id, 0), COALESCE(landing_airfield_id, 0), COALESCE(landing_distance_by_air, 0)
-         FROM event_innhopps
-         WHERE event_id = $1
-         ORDER BY sequence ASC, id ASC`,
-		budget.EventID,
-	)
+	rows, err := h.fetchAircraftInnhopps(ctx, budget.EventID)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	items := make([]generatedLineItem, 0)
-	for rows.Next() {
-		var innhoppID int64
-		var sequence int64
-		var name string
-		var scheduledAt *time.Time
-		var distanceByAirKm float64
-		var takeoffAirfieldID int64
-		var landingAirfieldID int64
-		var landingDistanceByAirKm float64
-		if err := rows.Scan(&innhoppID, &sequence, &name, &scheduledAt, &distanceByAirKm, &takeoffAirfieldID, &landingAirfieldID, &landingDistanceByAirKm); err != nil {
-			return err
-		}
+	for _, row := range rows {
 		if fullLoadCount <= 0 {
 			continue
 		}
-
-		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
-		// Zero-distance jumps at the takeoff airfield are legitimate and should not warn.
-		// But if a required airfield reference is missing, we cannot calculate route distance.
-		missingDistance := takeoffAirfieldID <= 0 || distanceByAirKm < 0
-		if !sameAirfield {
-			missingDistance = missingDistance || landingAirfieldID <= 0 || distanceByAirKm <= 0 || landingDistanceByAirKm < 0
-		}
-		totalDistanceKm := 0.0
-		if sameAirfield {
-			totalDistanceKm = distanceByAirKm * 2 * float64(fullLoadCount)
-		} else {
-			// Different landing field:
-			// - each load requires takeoff -> innhopp
-			// - loads except the last require return innhopp -> takeoff (approximated by distance_by_air)
-			// - final leg is innhopp -> landing once
-			outboundKm := distanceByAirKm * float64(fullLoadCount)
-			returnToTakeoffKm := distanceByAirKm * math.Max(float64(fullLoadCount-1), 0)
-			finalLandingKm := math.Max(landingDistanceByAirKm, 0)
-			totalDistanceKm = outboundKm + returnToTakeoffKm + finalLandingKm
-		}
-		totalMinutes := 0.0
-		if !missingDistance {
-			totalMinutes = (totalDistanceKm / cruisingSpeedKmh) * 60
-		}
-		minimumMinutes := minimumLoadDuration * float64(fullLoadCount)
-		if totalMinutes < minimumMinutes {
-			totalMinutes = minimumMinutes
-		}
-		totalMinutes = math.Ceil(totalMinutes)
-		if totalMinutes <= 0 {
+		metric := computeAircraftMetric(row, fullLoadCount, liveRates, fallbackRates)
+		if !metric.Valid {
 			continue
 		}
-
-		displayName := strings.TrimSpace(name)
-		if displayName == "" {
-			displayName = "Untitled innhopp"
-		}
-		if sequence > 0 {
-			displayName = fmt.Sprintf("#%d %s", sequence, displayName)
-		}
-		marker := fmt.Sprintf("%s:%d", autoAircraftInnhoppNotePrefix, innhoppID)
-		if missingDistance {
+		marker := fmt.Sprintf("%s:%d", autoAircraftInnhoppNotePrefix, row.InnhoppID)
+		if metric.MissingDistance {
 			marker += autoAircraftMissingDistanceSuffix
 		}
-		var serviceDate *time.Time
-		if scheduledAt != nil {
-			day := time.Date(scheduledAt.Year(), scheduledAt.Month(), scheduledAt.Day(), 0, 0, 0, 0, time.UTC)
-			serviceDate = &day
+		if metric.MissingAircraft {
+			marker += autoAircraftMissingAircraftSuffix
 		}
-
+		if metric.SlotOverflow {
+			marker += autoAircraftSlotOverflowSuffix
+		}
+		displayName := displayInnhoppLabel(row.Sequence, row.InnhoppName)
+		lineName := strings.TrimSpace(row.AircraftName)
+		if lineName == "" {
+			lineName = "Aircraft"
+		}
 		items = append(items, generatedLineItem{
-			InnhoppID:       innhoppID,
+			InnhoppID:       row.InnhoppID,
 			Marker:          marker,
-			MissingDistance: missingDistance,
-			Name:            "Aircraft",
-			ServiceDate:     serviceDate,
+			MissingDistance: metric.MissingDistance,
+			MissingAircraft: metric.MissingAircraft,
+			SlotOverflow:    metric.SlotOverflow,
+			Name:            lineName,
+			ServiceDate:     row.ServiceDate,
 			LocationLabel:   displayName,
-			Quantity:        totalMinutes,
-			UnitCost:        aircraftPricePerMinute,
-			CostCurrency:    aircraftCurrency,
+			Quantity:        metric.Quantity,
+			UnitCost:        metric.UnitCost,
+			CostCurrency:    metric.CostCurrency,
 			SortOrder:       len(items),
 		})
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 
 	tx, err := h.db.Begin(ctx)
@@ -2687,75 +3092,4 @@ func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64)
 		}
 	}
 	return tx.Commit(ctx)
-}
-
-func (h *Handler) computeAircraftFlightMetrics(ctx context.Context, eventID int64, assumptions map[string]float64, loadCount int) (minutes float64, totalDistance float64, err error) {
-	rows, err := h.db.Query(
-		ctx,
-		`SELECT COALESCE(distance_by_air, 0), COALESCE(takeoff_airfield_id, 0), COALESCE(landing_airfield_id, 0), COALESCE(landing_distance_by_air, 0)
-         FROM event_innhopps
-         WHERE event_id = $1
-         ORDER BY sequence ASC, id ASC`,
-		eventID,
-	)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer rows.Close()
-
-	cruisingSpeedKmh := clampNonNegative(assumptions["aircraft_cruising_speed_kmh"])
-	if cruisingSpeedKmh <= 0 {
-		cruisingSpeedKmh = defaultAssumptions["aircraft_cruising_speed_kmh"]
-	}
-	minimumLoadDuration := clampNonNegative(assumptions["minimum_load_duration"])
-	if loadCount < 0 {
-		loadCount = 0
-	}
-
-	aggregateMinutes := 0.0
-	aggregateDistance := 0.0
-	for rows.Next() {
-		var distanceByAirKm float64
-		var takeoffAirfieldID int64
-		var landingAirfieldID int64
-		var landingDistanceByAirKm float64
-		if err := rows.Scan(&distanceByAirKm, &takeoffAirfieldID, &landingAirfieldID, &landingDistanceByAirKm); err != nil {
-			return 0, 0, err
-		}
-		if loadCount <= 0 {
-			continue
-		}
-		sameAirfield := landingAirfieldID <= 0 || landingAirfieldID == takeoffAirfieldID
-		if sameAirfield {
-			roundTripDistanceKm := distanceByAirKm * 2
-			aggregateDistance += roundTripDistanceKm * float64(loadCount)
-			roundTripMinutes := 0.0
-			if distanceByAirKm > 0 {
-				roundTripMinutes = (roundTripDistanceKm / cruisingSpeedKmh) * 60
-			}
-			if roundTripMinutes < minimumLoadDuration {
-				roundTripMinutes = minimumLoadDuration
-			}
-			aggregateMinutes += math.Ceil(roundTripMinutes * float64(loadCount))
-			continue
-		}
-		outboundKm := distanceByAirKm * float64(loadCount)
-		returnToTakeoffKm := distanceByAirKm * math.Max(float64(loadCount-1), 0)
-		finalLandingKm := math.Max(landingDistanceByAirKm, 0)
-		totalDistanceKm := outboundKm + returnToTakeoffKm + finalLandingKm
-		aggregateDistance += totalDistanceKm
-		totalMinutes := 0.0
-		if totalDistanceKm > 0 {
-			totalMinutes = (totalDistanceKm / cruisingSpeedKmh) * 60
-		}
-		minimumMinutes := minimumLoadDuration * float64(loadCount)
-		if totalMinutes < minimumMinutes {
-			totalMinutes = minimumMinutes
-		}
-		aggregateMinutes += math.Ceil(totalMinutes)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, 0, err
-	}
-	return aggregateMinutes, aggregateDistance, nil
 }

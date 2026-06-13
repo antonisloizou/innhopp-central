@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import {
+  AircraftInput,
+  EventAircraft,
   Event,
   EventCommercialStatus,
   Innhopp,
@@ -16,6 +18,7 @@ import {
   copyEvent,
   deleteEvent,
   getEvent,
+  listAircraft,
   listEvents,
   listSeasons,
   updateEvent
@@ -28,6 +31,7 @@ import {
 } from '../api/participants';
 import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '../api/airfields';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { roleOptions } from '../utils/roles';
 import { formatMetersWithFeet } from '../utils/units';
 import {
@@ -72,6 +76,7 @@ type InnhoppFormRow = {
   id?: number;
   sequence: number;
   name: string;
+  aircraft_id?: number;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -107,6 +112,8 @@ type LandOwnerForm = {
   telephone: string;
   email: string;
 };
+
+type AircraftFormRow = AircraftInput;
 
 type ParticipantFormState = {
   full_name: string;
@@ -237,6 +244,39 @@ const formatLandOwnersForPayload = (owners: LandOwnerForm[]): LandOwner[] =>
     email: owner.email.trim()
   }));
 
+const toAircraftFormRow = (aircraft: EventAircraft, index: number): AircraftFormRow => ({
+  id: aircraft.id,
+  name: aircraft.name,
+  pricing_model: aircraft.pricing_model,
+  rate_currency: aircraft.rate_currency || 'EUR',
+  rate_per_minute: aircraft.rate_per_minute ?? 0,
+  cruising_speed_kmh: aircraft.cruising_speed_kmh ?? 180,
+  minimum_load_duration: aircraft.minimum_load_duration ?? 0,
+  price_per_slot: aircraft.price_per_slot ?? 0,
+  notes: aircraft.notes || '',
+  sort_order: aircraft.sort_order ?? index,
+  slot_pricing_bands:
+    aircraft.slot_pricing_bands?.map((band, bandIndex) => ({
+      id: band.id,
+      max_distance_km: band.max_distance_km,
+      slot_multiplier: band.slot_multiplier,
+      sort_order: band.sort_order ?? bandIndex
+    })) || []
+});
+
+const emptyAircraftFormRow = (sortOrder: number): AircraftFormRow => ({
+  name: '',
+  pricing_model: 'time',
+  rate_currency: 'EUR',
+  rate_per_minute: 0,
+  cruising_speed_kmh: 180,
+  minimum_load_duration: 0,
+  price_per_slot: 0,
+  notes: '',
+  sort_order: sortOrder,
+  slot_pricing_bands: [{ max_distance_km: 20, slot_multiplier: 1, sort_order: 0 }]
+});
+
 const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
   const defaultStart = parseEventLocal(event.starts_at);
   if (defaultStart) defaultStart.setUTCHours(9, 0, 0, 0);
@@ -245,6 +285,7 @@ const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
     id: i.id,
     sequence: i.sequence ?? idx + 1,
     name: i.name || '',
+    aircraft_id: i.aircraft_id || undefined,
     coordinates: i.coordinates || '',
     elevation: i.elevation ?? undefined,
     takeoff_airfield_id: i.takeoff_airfield_id || undefined,
@@ -280,8 +321,11 @@ const EventDetailPage = () => {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [allEvents, setAllEvents] = useState<Event[]>([]);
+  const [allAircraft, setAllAircraft] = useState<EventAircraft[]>([]);
+  const [attachedAircraft, setAttachedAircraft] = useState<AircraftFormRow[]>([]);
   const [participantIds, setParticipantIds] = useState<number[]>([]);
   const [airfieldIds, setAirfieldIds] = useState<number[]>([]);
+  const [selectedAircraftId, setSelectedAircraftId] = useState<string>('');
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('');
   const [selectedStaffId, setSelectedStaffId] = useState<string>('');
   const [selectedAirfieldId, setSelectedAirfieldId] = useState<string>('');
@@ -344,7 +388,8 @@ const EventDetailPage = () => {
       formState: typeof eventForm,
       participantsState: number[],
       airfieldsState: number[],
-      innhoppState: InnhoppFormRow[]
+      innhoppState: InnhoppFormRow[],
+      aircraftState: AircraftFormRow[]
     ) => {
       const participantsSorted = [...participantsState].sort((a, b) => a - b);
       const airfieldsSorted = [...airfieldsState].sort((a, b) => a - b);
@@ -352,14 +397,15 @@ const EventDetailPage = () => {
         form: formState,
         participants: participantsSorted,
         airfields: airfieldsSorted,
-        innhopps: innhoppState
+        innhopps: innhoppState,
+        aircraft: aircraftState
       });
     },
     []
   );
 const currentSignature = useMemo(
-  () => buildSignature(eventForm, participantIds, airfieldIds, innhopps),
-  [buildSignature, eventForm, participantIds, airfieldIds, innhopps]
+  () => buildSignature(eventForm, participantIds, airfieldIds, innhopps, attachedAircraft),
+  [buildSignature, eventForm, participantIds, airfieldIds, innhopps, attachedAircraft]
 );
   const publicRegistrationUrl = useMemo(() => {
     const slug = eventForm.public_registration_slug.trim().toLowerCase();
@@ -569,6 +615,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   type SectionKey =
     | 'details'
     | 'registration'
+    | 'aircraft'
     | 'innhopps'
     | 'airfields'
     | 'participants'
@@ -581,6 +628,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>({
     details: true,
     registration: false,
+    aircraft: false,
     innhopps: false,
     airfields: false,
     participants: false,
@@ -669,6 +717,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         id: undefined,
         sequence: (prev.length || 0) + 1,
         name: copy.name || '',
+        aircraft_id: copy.aircraft_id || undefined,
         coordinates: copy.coordinates || '',
         elevation: copy.elevation ?? undefined,
         takeoff_airfield_id: copy.takeoff_airfield_id || undefined,
@@ -842,6 +891,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         setEventData(event);
         setRegistrations(Array.isArray(eventRegistrations) ? eventRegistrations : []);
         setInnhopps(normalizeInnhopps(event));
+        setAttachedAircraft(Array.isArray(event.aircraft) ? event.aircraft.map(toAircraftFormRow) : []);
         setParticipantIds(Array.isArray(event.participant_ids) ? event.participant_ids : []);
         setAirfieldIds(Array.isArray(event.airfield_ids) ? event.airfield_ids : []);
         setEventForm({
@@ -987,6 +1037,24 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       }
     };
     loadAirfields();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadAircraftOptions = async () => {
+      try {
+        const data = await listAircraft();
+        if (!cancelled) {
+          setAllAircraft(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (!cancelled) setAllAircraft([]);
+      }
+    };
+    loadAircraftOptions();
     return () => {
       cancelled = true;
     };
@@ -1141,11 +1209,30 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         commercial_status: eventForm.commercial_status,
         airfield_ids: nextAirfieldIds,
         participant_ids: nextParticipantIds,
+        aircraft: attachedAircraft.map((row, index) => ({
+          id: row.id,
+          name: row.name.trim(),
+          pricing_model: row.pricing_model,
+          rate_currency: row.rate_currency.trim().toUpperCase() || 'EUR',
+          rate_per_minute: row.rate_per_minute,
+          cruising_speed_kmh: row.cruising_speed_kmh,
+          minimum_load_duration: row.minimum_load_duration,
+          price_per_slot: row.price_per_slot,
+          notes: row.notes?.trim() || undefined,
+          sort_order: index,
+          slot_pricing_bands: (row.slot_pricing_bands || []).map((band, bandIndex) => ({
+            id: band.id,
+            max_distance_km: band.max_distance_km,
+            slot_multiplier: band.slot_multiplier,
+            sort_order: bandIndex
+          }))
+        })),
         innhopps: (nextInnhopps ?? innhopps)
           .filter((row) => row.name.trim() !== '')
           .map<InnhoppInput>((row, idx) => ({
             sequence: row.sequence || idx + 1,
             name: row.name.trim(),
+            aircraft_id: row.aircraft_id,
             coordinates: row.coordinates?.trim(),
             elevation: row.elevation,
             takeoff_airfield_id: row.takeoff_airfield_id,
@@ -1182,8 +1269,17 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
       setParticipantIds(normalizedParticipants);
       setAirfieldIds(normalizedAirfields);
+      setAttachedAircraft(Array.isArray(updated.aircraft) ? updated.aircraft.map(toAircraftFormRow) : []);
       setInnhopps(normalizedInnhopps);
-      setLastSavedSignature(buildSignature(eventForm, normalizedParticipants, normalizedAirfields, normalizedInnhopps));
+      setLastSavedSignature(
+        buildSignature(
+          eventForm,
+          normalizedParticipants,
+          normalizedAirfields,
+          normalizedInnhopps,
+          Array.isArray(updated.aircraft) ? updated.aircraft.map(toAircraftFormRow) : []
+        )
+      );
       setSaved(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update event');
@@ -1232,7 +1328,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       const nextRegistrations = await listEventRegistrations(eventData.id);
       setEventData(updated);
       setRegistrations(Array.isArray(nextRegistrations) ? nextRegistrations : []);
-      setLastSavedSignature(buildSignature(eventForm, participantIds, airfieldIds, innhopps));
+      setLastSavedSignature(buildSignature(eventForm, participantIds, airfieldIds, innhopps, attachedAircraft));
       setSaved(true);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update registration settings');
@@ -1345,6 +1441,90 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setMessage(err instanceof Error ? err.message : 'Failed to add airfield');
     } finally {
       setAddingAirfield(false);
+    }
+  };
+
+  const availableAircraft = useMemo(
+    () => allAircraft.filter((item) => !attachedAircraft.some((attached) => attached.id === item.id)),
+    [allAircraft, attachedAircraft]
+  );
+
+  const updateAircraftRow = (index: number, patch: Partial<AircraftFormRow>) => {
+    setAttachedAircraft((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)));
+  };
+
+  const updateAircraftBand = (
+    rowIndex: number,
+    bandIndex: number,
+    patch: Partial<NonNullable<AircraftFormRow['slot_pricing_bands']>[number]>
+  ) => {
+    setAttachedAircraft((prev) =>
+      prev.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex
+          ? {
+              ...row,
+              slot_pricing_bands: (row.slot_pricing_bands || []).map((band, currentBandIndex) =>
+                currentBandIndex === bandIndex ? { ...band, ...patch } : band
+              )
+            }
+          : row
+      )
+    );
+  };
+
+  const addAircraftBand = (rowIndex: number) => {
+    setAttachedAircraft((prev) =>
+      prev.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex
+          ? {
+              ...row,
+              slot_pricing_bands: [
+                ...(row.slot_pricing_bands || []),
+                { max_distance_km: 0, slot_multiplier: 1, sort_order: (row.slot_pricing_bands || []).length }
+              ]
+            }
+          : row
+      )
+    );
+  };
+
+  const removeAircraftBand = (rowIndex: number, bandIndex: number) => {
+    setAttachedAircraft((prev) =>
+      prev.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex
+          ? {
+              ...row,
+              slot_pricing_bands: (row.slot_pricing_bands || [])
+                .filter((_, currentBandIndex) => currentBandIndex !== bandIndex)
+                .map((band, nextBandIndex) => ({ ...band, sort_order: nextBandIndex }))
+            }
+          : row
+      )
+    );
+  };
+
+  const handleAttachAircraft = () => {
+    const id = Number(selectedAircraftId);
+    if (!id) return;
+    const item = allAircraft.find((candidate) => candidate.id === id);
+    if (!item) return;
+    setAttachedAircraft((prev) => [...prev, toAircraftFormRow(item, prev.length)]);
+    setSelectedAircraftId('');
+  };
+
+  const handleAddAircraftRow = () => {
+    setAttachedAircraft((prev) => [...prev, emptyAircraftFormRow(prev.length)]);
+  };
+
+  const handleRemoveAircraftRow = (index: number) => {
+    const removed = attachedAircraft[index];
+    setAttachedAircraft((prev) =>
+      prev.filter((_, rowIndex) => rowIndex !== index).map((row, rowIndex) => ({ ...row, sort_order: rowIndex }))
+    );
+    if (removed?.id) {
+      setInnhopps((prev) =>
+        prev.map((row) => (row.aircraft_id === removed.id ? { ...row, aircraft_id: undefined } : row))
+      );
     }
   };
 
@@ -1468,6 +1648,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       {
         sequence: prev.length + 1,
         name: '',
+        aircraft_id: attachedAircraft[0]?.id,
         coordinates: '',
         scheduled_at: defaultStart ? toLocalInputFromDate(defaultStart) : '',
         notes: '',
@@ -2038,6 +2219,197 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       <article className="card">
         <header
           className="card-header event-detail-section-header"
+          onClick={() => toggleSection('aircraft')}
+        >
+          <div className="event-detail-section-header-main">
+            <button
+              className="ghost"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection('aircraft');
+              }}
+            >
+              {openSections.aircraft ? '▾' : '▸'}
+            </button>
+            <h3 className="event-detail-section-title">Aircraft</h3>
+          </div>
+          <span className="badge neutral">{attachedAircraft.length} AIRCRAFT</span>
+        </header>
+        {openSections.aircraft && (
+          <>
+            {attachedAircraft.length === 0 ? <p className="muted">No aircraft attached yet.</p> : null}
+            <div className="form-grid">
+              {attachedAircraft.map((row, index) => {
+                const isSlotModel = row.pricing_model === 'slot';
+                return (
+                  <div key={row.id || `new-${index}`} className="card form-field-full-span">
+                    <div className="card-header">
+                      <strong>{row.name.trim() || `Aircraft ${index + 1}`}</strong>
+                      <div className="card-actions">
+                        {row.id ? (
+                          <Link to={`/aircraft/${row.id}`} className="ghost" onClick={saveDetailState}>
+                            Open page
+                          </Link>
+                        ) : null}
+                        <button type="button" className="ghost danger" onClick={() => handleRemoveAircraftRow(index)}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                    <div className="form-grid">
+                      <label className="form-field">
+                        <span>Name</span>
+                        <input value={row.name} onChange={(e) => updateAircraftRow(index, { name: e.target.value })} />
+                      </label>
+                      <label className="form-field">
+                        <span>Pricing model</span>
+                        <select
+                          value={row.pricing_model}
+                          onChange={(e) => updateAircraftRow(index, { pricing_model: e.target.value as AircraftFormRow['pricing_model'] })}
+                        >
+                          <option value="time">Time</option>
+                          <option value="slot">Slot</option>
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Currency</span>
+                        <select value={row.rate_currency} onChange={(e) => updateAircraftRow(index, { rate_currency: e.target.value })}>
+                          {ISO_CURRENCY_CODES.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {isSlotModel ? (
+                        <label className="form-field">
+                          <span>Price per slot</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={row.price_per_slot ?? 0}
+                            onChange={(e) => updateAircraftRow(index, { price_per_slot: Number(e.target.value) })}
+                          />
+                        </label>
+                      ) : (
+                        <label className="form-field">
+                          <span>Rate per minute</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={row.rate_per_minute ?? 0}
+                            onChange={(e) => updateAircraftRow(index, { rate_per_minute: Number(e.target.value) })}
+                          />
+                        </label>
+                      )}
+                      <label className="form-field">
+                        <span>Speed km/h</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={row.cruising_speed_kmh ?? 180}
+                          onChange={(e) => updateAircraftRow(index, { cruising_speed_kmh: Number(e.target.value) })}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Min load duration</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={row.minimum_load_duration ?? 0}
+                          onChange={(e) => updateAircraftRow(index, { minimum_load_duration: Number(e.target.value) })}
+                        />
+                      </label>
+                      <label className="form-field form-field-full-span">
+                        <span>Notes</span>
+                        <input value={row.notes || ''} onChange={(e) => updateAircraftRow(index, { notes: e.target.value })} />
+                      </label>
+                      {isSlotModel ? (
+                        <div className="form-field form-field-full-span">
+                          <div className="card-header">
+                            <strong>Slot bands</strong>
+                            <button type="button" className="ghost" onClick={() => addAircraftBand(index)}>
+                              Add band
+                            </button>
+                          </div>
+                          {(row.slot_pricing_bands || []).map((band, bandIndex) => (
+                            <div key={band.id || `${index}-${bandIndex}`} className="event-detail-innhopp-inline-row">
+                              <label className="form-field">
+                                <span>Max distance km</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.1"
+                                  value={band.max_distance_km}
+                                  onChange={(e) => updateAircraftBand(index, bandIndex, { max_distance_km: Number(e.target.value) })}
+                                />
+                              </label>
+                              <label className="form-field">
+                                <span>Slot multiplier</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.1"
+                                  value={band.slot_multiplier}
+                                  onChange={(e) => updateAircraftBand(index, bandIndex, { slot_multiplier: Number(e.target.value) })}
+                                />
+                              </label>
+                              <div className="form-field">
+                                <span>&nbsp;</span>
+                                <button
+                                  type="button"
+                                  className="ghost danger"
+                                  disabled={(row.slot_pricing_bands || []).length <= 1}
+                                  onClick={() => removeAircraftBand(index, bandIndex)}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="form-grid event-detail-top-margin">
+              <label className="form-field">
+                <span>Attach existing aircraft</span>
+                <select value={selectedAircraftId} onChange={(e) => setSelectedAircraftId(e.target.value)}>
+                  <option value="">Choose aircraft</option>
+                  {availableAircraft.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="form-actions event-detail-inline-actions">
+                <button type="button" className="primary" onClick={handleAttachAircraft} disabled={!selectedAircraftId}>
+                  Attach aircraft
+                </button>
+                <button type="button" className="ghost" onClick={handleAddAircraftRow}>
+                  Create inline
+                </button>
+                <Link to="/aircraft/new" className="ghost" onClick={saveDetailState}>
+                  Open full create page
+                </Link>
+              </div>
+            </div>
+          </>
+        )}
+      </article>
+
+      <article className="card">
+        <header
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('innhopps')}
         >
           <div className="event-detail-section-header-main">
@@ -2066,6 +2438,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   ? airfields.find((a) => a.id === row.takeoff_airfield_id)
                   : undefined;
                 const ready = isInnhoppReady(row);
+                const aircraftWarning = getInnhoppAircraftWarning(row, eventData.aircraft || []);
                 return (
                   <li
                     key={row.id}
@@ -2101,6 +2474,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                       <div className="muted">
                         Takeoff: {takeoff ? takeoff.name : row.takeoff_airfield_id ? `Airfield #${row.takeoff_airfield_id}` : 'Not set'}
                       </div>
+                      <div className="muted">
+                        Aircraft:{' '}
+                        {attachedAircraft.find((item) => item.id === row.aircraft_id)?.name ||
+                          (row.aircraft_id ? `Aircraft #${row.aircraft_id}` : 'Not assigned')}
+                      </div>
+                      {aircraftWarning ? <div className="muted">{aircraftWarning}</div> : null}
                       {row.notes && <div className="muted">{row.notes}</div>}
                     </Link>
                   </li>
@@ -2116,6 +2495,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             .filter((row) => !row.id)
             .map((row, index) => {
                 const draftIndex = innhopps.findIndex((r) => r === row);
+                const aircraftWarning = getInnhoppAircraftWarning(row, attachedAircraft);
                 return (
                 <div key={index} className="innhopp-row">
                   <div className="event-detail-innhopp-inline-layout">
@@ -2182,6 +2562,32 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                             </optgroup>
                           ))}
                         </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Aircraft</span>
+                        <select
+                          value={row.aircraft_id ?? ''}
+                          onChange={(e) =>
+                            setInnhopps((prev) => {
+                              const next = [...prev];
+                              next[draftIndex] = {
+                                ...next[draftIndex],
+                                aircraft_id: e.target.value ? Number(e.target.value) : undefined
+                              };
+                              return next;
+                            })
+                          }
+                        >
+                          <option value="">No aircraft</option>
+                          {attachedAircraft
+                            .filter((item) => item.id)
+                            .map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name || `Aircraft #${item.id}`}
+                              </option>
+                            ))}
+                        </select>
+                        {aircraftWarning ? <span className="muted">{aircraftWarning}</span> : null}
                       </label>
                     </div>
                     <div className="event-detail-innhopp-inline-row">

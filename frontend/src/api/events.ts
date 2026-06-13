@@ -35,11 +35,40 @@ export interface InnhoppImage {
   data: string;
 }
 
+export type AircraftPricingModel = 'time' | 'slot';
+
+export interface AircraftSlotPricingBand {
+  id: number;
+  aircraft_id: number;
+  max_distance_km: number;
+  slot_multiplier: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EventAircraft {
+  id: number;
+  name: string;
+  pricing_model: AircraftPricingModel;
+  rate_currency: string;
+  rate_per_minute?: number | null;
+  cruising_speed_kmh?: number | null;
+  minimum_load_duration?: number | null;
+  price_per_slot?: number | null;
+  notes?: string | null;
+  sort_order?: number;
+  slot_pricing_bands?: AircraftSlotPricingBand[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Innhopp {
   id: number;
   event_id: number;
   sequence: number;
   name: string;
+  aircraft_id?: number | null;
   coordinates?: string | null;
   elevation?: number | null;
   takeoff_airfield_id?: number | null;
@@ -88,6 +117,7 @@ export interface Event {
   commercial_status: EventCommercialStatus;
   airfield_ids: number[];
   participant_ids: number[];
+  aircraft: EventAircraft[];
   innhopps: Innhopp[];
   created_at: string;
 }
@@ -130,6 +160,7 @@ export interface CreateEventPayload {
   commercial_status?: EventCommercialStatus;
   airfield_ids?: number[];
   participant_ids?: number[];
+  aircraft?: AircraftInput[];
   innhopps?: InnhoppInput[];
 }
 
@@ -187,6 +218,7 @@ export const deleteAccommodation = (eventId: number, accId: number) =>
 export interface InnhoppInput {
   sequence?: number;
   name: string;
+  aircraft_id?: number;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -213,9 +245,31 @@ export interface InnhoppInput {
   image_files?: InnhoppImage[];
 }
 
+export interface AircraftSlotPricingBandInput {
+  id?: number;
+  max_distance_km: number;
+  slot_multiplier: number;
+  sort_order?: number;
+}
+
+export interface AircraftInput {
+  id?: number;
+  name: string;
+  pricing_model: AircraftPricingModel;
+  rate_currency: string;
+  rate_per_minute?: number;
+  cruising_speed_kmh?: number;
+  minimum_load_duration?: number;
+  price_per_slot?: number;
+  notes?: string;
+  sort_order?: number;
+  slot_pricing_bands?: AircraftSlotPricingBandInput[];
+}
+
 export interface UpdateInnhoppPayload {
   sequence?: number;
   name: string;
+  aircraft_id?: number;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -246,6 +300,15 @@ export interface UpdateEventPayload extends Partial<CreateEventPayload> {
   participant_ids?: number[];
   innhopps?: InnhoppInput[];
 }
+
+export const listAircraft = () => apiRequest<EventAircraft[]>('/events/aircraft');
+export const getAircraft = (id: number) => apiRequest<EventAircraft>(`/events/aircraft/${id}`);
+export const createAircraft = (payload: AircraftInput) =>
+  apiRequest<EventAircraft>('/events/aircraft', { method: 'POST', body: JSON.stringify(payload) });
+export const updateAircraft = (id: number, payload: AircraftInput) =>
+  apiRequest<EventAircraft>(`/events/aircraft/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+export const deleteAircraft = (id: number) =>
+  apiRequest<void>(`/events/aircraft/${id}`, { method: 'DELETE' });
 
 export const updateEvent = (id: number, payload: UpdateEventPayload) =>
   apiRequest<Event>(`/events/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });

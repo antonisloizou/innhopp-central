@@ -64,6 +64,9 @@ func main() {
 	if err := registrations.BackfillStaffRegistrations(backfillCtx, pool); err != nil {
 		log.Printf("staff registration backfill failed: %v", err)
 	}
+	if err := budgets.BackfillAircraftAssignmentsFromBudgetParams(backfillCtx, pool); err != nil {
+		log.Printf("aircraft backfill failed: %v", err)
+	}
 	cancelBackfill()
 	runRegistrationExpirySweep(pool)
 	go startRegistrationExpiryWorker(pool)
@@ -356,6 +359,43 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             description TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
+		`CREATE TABLE IF NOT EXISTS aircraft (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            pricing_model TEXT NOT NULL DEFAULT 'time',
+            rate_currency TEXT NOT NULL DEFAULT 'EUR',
+            rate_per_minute NUMERIC,
+            cruising_speed_kmh NUMERIC,
+            minimum_load_duration NUMERIC,
+            price_per_slot NUMERIC,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS pricing_model TEXT NOT NULL DEFAULT 'time'`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS rate_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS rate_per_minute NUMERIC`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS cruising_speed_kmh NUMERIC`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS minimum_load_duration NUMERIC`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS price_per_slot NUMERIC`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS notes TEXT`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`CREATE TABLE IF NOT EXISTS aircraft_slot_pricing_bands (
+            id SERIAL PRIMARY KEY,
+            aircraft_id INTEGER NOT NULL REFERENCES aircraft(id) ON DELETE CASCADE,
+            max_distance_km NUMERIC NOT NULL,
+            slot_multiplier NUMERIC NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_aircraft (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            aircraft_id INTEGER NOT NULL REFERENCES aircraft(id) ON DELETE CASCADE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, aircraft_id)
+        )`,
 		`ALTER TABLE airfields ALTER COLUMN latitude TYPE TEXT USING latitude::TEXT`,
 		`ALTER TABLE airfields ALTER COLUMN longitude TYPE TEXT USING longitude::TEXT`,
 		`CREATE TABLE IF NOT EXISTS event_innhopps (
@@ -363,6 +403,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     sequence INTEGER NOT NULL,
     name TEXT NOT NULL,
+    aircraft_id INTEGER REFERENCES aircraft(id),
     takeoff_airfield_id INTEGER REFERENCES airfields(id),
     landing_airfield_id INTEGER REFERENCES airfields(id),
     elevation INTEGER,
@@ -397,6 +438,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS takeoff_airfield_id INTEGER REFERENCES airfields(id)`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS aircraft_id INTEGER REFERENCES aircraft(id)`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS landing_airfield_id INTEGER REFERENCES airfields(id)`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS elevation INTEGER`,
 		`ALTER TABLE event_innhopps ALTER COLUMN scheduled_at TYPE TIMESTAMPTZ USING scheduled_at::timestamptz`,

@@ -9,6 +9,7 @@ import EventCreatePage from './pages/EventCreatePage';
 import EventDetailPage from './pages/EventDetailPage';
 import AirfieldDetailPage from './pages/AirfieldDetailPage';
 import AirfieldCreatePage from './pages/AirfieldCreatePage';
+import AircraftDetailPage from './pages/AircraftDetailPage';
 import SeasonCreatePage from './pages/SeasonCreatePage';
 import ManifestManagementPage from './pages/ManifestManagementPage';
 import ParticipantOnboardingPage from './pages/ParticipantOnboardingPage';
@@ -77,6 +78,8 @@ const App = () => (
           <Route path="innhopps/csv" element={<StaffRouteGuard><InnhoppCsvPage /></StaffRouteGuard>} />
           <Route path="airfields/new" element={<ParticipantRouteGuard><AirfieldCreatePage /></ParticipantRouteGuard>} />
           <Route path="airfields/:airfieldId" element={<ParticipantRouteGuard><AirfieldDetailPage /></ParticipantRouteGuard>} />
+          <Route path="aircraft/new" element={<ParticipantRouteGuard><AircraftDetailPage /></ParticipantRouteGuard>} />
+          <Route path="aircraft/:aircraftId" element={<ParticipantRouteGuard><AircraftDetailPage /></ParticipantRouteGuard>} />
           <Route path="seasons/new" element={<ParticipantRouteGuard><SeasonCreatePage /></ParticipantRouteGuard>} />
           <Route path="manifests" element={<ParticipantRouteGuard><ManifestManagementPage /></ParticipantRouteGuard>} />
           <Route path="manifests/:manifestId" element={<ParticipantRouteGuard><ManifestDetailPage /></ParticipantRouteGuard>} />

@@ -34,11 +34,12 @@ import {
 import { listAirfields, Airfield } from '../api/airfields';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
+import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import EventGearMenu from '../components/EventGearMenu';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
-import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import {
   formatEventLocal,
   fromEventLocalPickerDate,
@@ -94,19 +95,6 @@ const formatTimeLabel = (iso?: string | null) => {
   if (!parts) return 'Unscheduled';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(parts.hour)}:${pad(parts.minute)}`;
-};
-
-const computeFlightTimeMinutes = (distanceByAirKm?: number | null, aircraftSpeedKmh?: number | null): number | null => {
-  if (!Number.isFinite(distanceByAirKm) || (distanceByAirKm as number) < 0) return null;
-  if ((distanceByAirKm as number) === 0) return 0;
-  if (!Number.isFinite(aircraftSpeedKmh) || (aircraftSpeedKmh as number) <= 0) return null;
-  return Math.round(((distanceByAirKm as number) / (aircraftSpeedKmh as number)) * 60);
-};
-
-const applyMinimumLoadDuration = (minutes: number | null, minimumLoadDuration?: number | null): number | null => {
-  if (minutes == null) return null;
-  if (!Number.isFinite(minimumLoadDuration) || (minimumLoadDuration as number) <= 0) return minutes;
-  return Math.max(minutes, Math.ceil(minimumLoadDuration as number));
 };
 
 const extractDateKey = (iso?: string | null) => {
@@ -177,7 +165,6 @@ const EventSchedulePage = () => {
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
-  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -238,42 +225,6 @@ const EventSchedulePage = () => {
   const [previewClosing, setPreviewClosing] = useState(false);
   const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
   const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
-  const [budgetMinimumLoadDuration, setBudgetMinimumLoadDuration] = useState<number | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadBudgetSpeed = async () => {
-      if (!eventId) return;
-      setBudgetAircraftSpeedKmh(null);
-      setBudgetMinimumLoadDuration(null);
-      try {
-        const budget = await getEventBudget(Number(eventId));
-        const assumptions = await getBudgetAssumptions(budget.id);
-        if (cancelled) return;
-        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
-        const minLoadDuration = assumptions?.values?.minimum_load_duration;
-        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
-          setBudgetAircraftSpeedKmh(speed);
-        } else {
-          setBudgetAircraftSpeedKmh(null);
-        }
-        if (typeof minLoadDuration === 'number' && Number.isFinite(minLoadDuration) && minLoadDuration > 0) {
-          setBudgetMinimumLoadDuration(minLoadDuration);
-        } else {
-          setBudgetMinimumLoadDuration(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setBudgetAircraftSpeedKmh(null);
-          setBudgetMinimumLoadDuration(null);
-        }
-      }
-    };
-    loadBudgetSpeed();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
 
   useEffect(() => {
     if (previewEntry) {
@@ -356,6 +307,10 @@ const EventSchedulePage = () => {
     return () => window.removeEventListener('resize', updatePosition);
   }, [timePicker]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
+  const aircraftByID = useMemo(() => {
+    const entries = (eventData?.aircraft || []).map((aircraft) => [aircraft.id, aircraft] as const);
+    return new Map(entries);
+  }, [eventData?.aircraft]);
   const buildDragGhost = (rowNode: HTMLElement, timeLabel?: string | null, startX?: number, startY?: number) => {
     const sourceRow = (rowNode.querySelector('.schedule-entry') as HTMLElement | null) || rowNode;
     const rect = sourceRow.getBoundingClientRect();
@@ -870,9 +825,12 @@ const EventSchedulePage = () => {
       day.innhopps.forEach((i) => {
         const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
         const landing = airfields.find((af) => af.id === i.landing_airfield_id);
-        const flightTimeMinutes = applyMinimumLoadDuration(
-          computeFlightTimeMinutes(i.distance_by_air, budgetAircraftSpeedKmh),
-          budgetMinimumLoadDuration
+        const aircraft = i.aircraft_id ? aircraftByID.get(i.aircraft_id) || null : null;
+        const aircraftWarning = getInnhoppAircraftWarning(i, eventData?.aircraft || []);
+        const flightTimeMinutes = computeDisplayFlightTimeMinutes(
+          i.distance_by_air,
+          aircraft?.cruising_speed_kmh ?? null,
+          aircraft?.minimum_load_duration ?? null
         );
         const flightDurationLabel = flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : 'Unavailable';
         const landingName =
@@ -901,6 +859,9 @@ const EventSchedulePage = () => {
           innhoppTakeoffName: takeoff?.name || null,
           innhoppLandingName: landingName,
           innhoppDistanceByAir: i.distance_by_air ?? null,
+          innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
+          innhoppMinimumLoadDuration: aircraft?.minimum_load_duration ?? null,
+          innhoppAircraftWarning: aircraftWarning,
           innhoppElevationDiff: elevationDiff,
           innhoppPrimaryName: i.primary_landing_area?.name || null,
           innhoppPrimarySize: i.primary_landing_area?.size || null,
@@ -1104,9 +1065,8 @@ const EventSchedulePage = () => {
         });
     },
     [
+      aircraftByID,
       airfields,
-      budgetAircraftSpeedKmh,
-      budgetMinimumLoadDuration,
       eventData,
       eventId,
       locationCoordinates,
@@ -2056,6 +2016,9 @@ const EventSchedulePage = () => {
                     ) : (
                       entry.subtitle && <div className="muted event-schedule-wrap-text">{entry.subtitle}</div>
                     )}
+                    {entry.type === 'Innhopp' && entry.innhoppAircraftWarning ? (
+                      <div className="muted event-schedule-wrap-text">{entry.innhoppAircraftWarning}</div>
+                    ) : null}
                   </div>
                 );
                 const handleEntryClick = (e: ReactMouseEvent) => {
@@ -2267,7 +2230,6 @@ const EventSchedulePage = () => {
           closing={previewClosing}
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
-          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
           typeBadgeClassNames={typeBadgeClassNames}
           onNavigateToEntry={(entry) => {
             if (!entry.to) return;

@@ -5,7 +5,6 @@ export type Budget = {
   event_id: number;
   name: string;
   base_currency: string;
-  aircraft_currency: string;
   status: string;
   notes?: string;
   created_at: string;
@@ -91,7 +90,6 @@ export type BudgetSummary = {
 
 export type BudgetCurrenciesResponse = {
   base_currency: string;
-  aircraft_currency?: string;
   currencies: string[];
   live_rates?: Record<string, number>;
 };
@@ -100,7 +98,7 @@ export const getEventBudget = (eventId: number) => apiRequest<Budget>(`/budgets/
 
 export const createEventBudget = (
   eventId: number,
-  payload: { name?: string; base_currency?: string; aircraft_currency?: string; notes?: string }
+  payload: { name?: string; base_currency?: string; notes?: string }
 ) =>
   apiRequest<Budget>(`/budgets/events/${eventId}`, {
     method: 'POST',
@@ -113,7 +111,6 @@ export const updateBudget = (
   payload: {
     name?: string;
     base_currency?: string;
-    aircraft_currency?: string;
     status?: string;
     notes?: string;
   }

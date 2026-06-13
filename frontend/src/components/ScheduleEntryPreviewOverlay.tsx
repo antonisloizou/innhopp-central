@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { formatEventLocal, getEventLocalTimeParts } from '../utils/eventDate';
+import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import { formatMetersWithFeet } from '../utils/units';
 import { EntryType, ScheduleEntry } from './schedulePreviewTypes';
 
@@ -23,20 +24,12 @@ const formatDateTime = (iso?: string | null) => {
   return `${day}, ${pad(parts.hour)}:${pad(parts.minute)}`;
 };
 
-const computeFlightTimeMinutes = (distanceByAirKm?: number | null, aircraftSpeedKmh?: number | null): number | null => {
-  if (!Number.isFinite(distanceByAirKm) || (distanceByAirKm as number) < 0) return null;
-  if ((distanceByAirKm as number) === 0) return 0;
-  if (!Number.isFinite(aircraftSpeedKmh) || (aircraftSpeedKmh as number) <= 0) return null;
-  return Math.round(((distanceByAirKm as number) / (aircraftSpeedKmh as number)) * 60);
-};
-
 type Props = {
   entry: ScheduleEntry;
   closing: boolean;
   onClose: () => void;
   onNavigateToEntry?: (entry: ScheduleEntry) => void;
   canOpenMapsActions: boolean;
-  budgetAircraftSpeedKmh: number | null;
   typeBadgeClassNames: Record<EntryType, string>;
 };
 
@@ -46,7 +39,6 @@ const ScheduleEntryPreviewOverlay = ({
   onClose,
   onNavigateToEntry,
   canOpenMapsActions,
-  budgetAircraftSpeedKmh,
   typeBadgeClassNames
 }: Props) => {
   if (typeof document === 'undefined') return null;
@@ -162,8 +154,15 @@ const ScheduleEntryPreviewOverlay = ({
                 fields.push(renderField('scheduled_at', 'SCHEDULED AT', formatDateTime(entry.scheduledAt)));
               }
               fields.push(renderField('elevation', 'ELEVATION', entry.innhoppElevation != null ? formatMetersWithFeet(entry.innhoppElevation) : '—'));
-              const flightTimeMinutes = computeFlightTimeMinutes(entry.innhoppDistanceByAir, budgetAircraftSpeedKmh);
+              const flightTimeMinutes = computeDisplayFlightTimeMinutes(
+                entry.innhoppDistanceByAir,
+                entry.innhoppAircraftSpeedKmh,
+                entry.innhoppMinimumLoadDuration
+              );
               fields.push(renderField('flight_time', 'FLIGHT TIME', flightTimeMinutes != null ? formatDurationMinutes(flightTimeMinutes) : '—'));
+              if (entry.innhoppAircraftWarning) {
+                fields.push(renderField('aircraft_warning', 'AIRCRAFT WARNING', entry.innhoppAircraftWarning));
+              }
               fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', entry.innhoppTakeoffName || '—'));
               fields.push(
                 renderField(

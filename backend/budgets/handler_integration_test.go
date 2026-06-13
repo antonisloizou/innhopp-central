@@ -168,6 +168,51 @@ func TestUpdateBudgetBlocksReviewWhenWorstCaseNegative(t *testing.T) {
 	}
 }
 
+func TestCreateBudgetDoesNotPersistLegacyAircraftAssumptions(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Post("/api/events/{eventID}/budget", h.createBudgetForEvent)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/"+strconv.FormatInt(eventID, 10)+"/budget", bytes.NewBufferString(`{"name":"Created Budget","base_currency":"EUR"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload Budget
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode create response failed: %v", err)
+	}
+
+	var legacyCount int
+	if err := db.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+         FROM budget_assumptions
+         WHERE budget_id = $1
+           AND key IN ('aircraft_price_per_minute', 'minimum_load_duration', 'aircraft_cruising_speed_kmh')`,
+		payload.ID,
+	).Scan(&legacyCount); err != nil {
+		t.Fatalf("count legacy assumptions failed: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected no legacy aircraft assumptions for new budgets, got %d", legacyCount)
+	}
+}
+
 func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
@@ -311,6 +356,136 @@ func TestSyncAutoAircraftLineItemsSameAirfieldZeroDistanceUsesMinimumWithoutWarn
 	}
 }
 
+func TestBackfillAircraftAssignmentsFromBudgetParamsCreatesEditableEventAircraft(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(ctx, `UPDATE event_budgets SET aircraft_currency = 'NOK' WHERE id = $1`, budgetID); err != nil {
+		t.Fatalf("update aircraft currency failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'aircraft_price_per_minute' THEN 12.5
+           WHEN 'aircraft_cruising_speed_kmh' THEN 210
+           WHEN 'minimum_load_duration' THEN 18
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('aircraft_price_per_minute', 'aircraft_cruising_speed_kmh', 'minimum_load_duration')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var firstInnhoppID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, distance_by_air, landing_distance_by_air)
+         VALUES ($1, 1, 'Legacy One', 10, 5)
+         RETURNING id`,
+		eventID,
+	).Scan(&firstInnhoppID); err != nil {
+		t.Fatalf("insert first innhopp failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, distance_by_air, landing_distance_by_air)
+         VALUES ($1, 2, 'Legacy Two', 15, 5)`,
+		eventID,
+	); err != nil {
+		t.Fatalf("insert second innhopp failed: %v", err)
+	}
+
+	if err := BackfillAircraftAssignmentsFromBudgetParams(ctx, db); err != nil {
+		t.Fatalf("backfill failed: %v", err)
+	}
+	if err := BackfillAircraftAssignmentsFromBudgetParams(ctx, db); err != nil {
+		t.Fatalf("second backfill failed: %v", err)
+	}
+
+	var aircraftID int64
+	var aircraftName string
+	var pricingModel string
+	var rateCurrency string
+	var ratePerMinute float64
+	var cruisingSpeed float64
+	var minimumLoad float64
+	if err := db.QueryRow(
+		ctx,
+		`SELECT a.id, a.name, a.pricing_model, a.rate_currency, a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration
+         FROM aircraft a
+         JOIN event_aircraft ea ON ea.aircraft_id = a.id
+         WHERE ea.event_id = $1`,
+		eventID,
+	).Scan(&aircraftID, &aircraftName, &pricingModel, &rateCurrency, &ratePerMinute, &cruisingSpeed, &minimumLoad); err != nil {
+		t.Fatalf("load backfilled aircraft failed: %v", err)
+	}
+
+	if aircraftName != "Budget Test Event Aircraft" {
+		t.Fatalf("aircraft name mismatch: got %q", aircraftName)
+	}
+	if pricingModel != "time" {
+		t.Fatalf("pricing model mismatch: got %q", pricingModel)
+	}
+	if rateCurrency != "NOK" {
+		t.Fatalf("rate currency mismatch: got %q", rateCurrency)
+	}
+	if ratePerMinute != 12.5 {
+		t.Fatalf("rate per minute mismatch: got %.2f want 12.50", ratePerMinute)
+	}
+	if cruisingSpeed != 210 {
+		t.Fatalf("cruising speed mismatch: got %.2f want 210.00", cruisingSpeed)
+	}
+	if minimumLoad != 18 {
+		t.Fatalf("minimum load mismatch: got %.2f want 18.00", minimumLoad)
+	}
+
+	var attachedCount int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM event_aircraft WHERE event_id = $1`, eventID).Scan(&attachedCount); err != nil {
+		t.Fatalf("count attached aircraft failed: %v", err)
+	}
+	if attachedCount != 1 {
+		t.Fatalf("attached aircraft count mismatch: got %d want 1", attachedCount)
+	}
+
+	var assignedCount int
+	if err := db.QueryRow(ctx, `SELECT COUNT(*) FROM event_innhopps WHERE event_id = $1 AND aircraft_id = $2`, eventID, aircraftID).Scan(&assignedCount); err != nil {
+		t.Fatalf("count assigned innhopps failed: %v", err)
+	}
+	if assignedCount != 2 {
+		t.Fatalf("assigned innhopps mismatch: got %d want 2", assignedCount)
+	}
+
+	if _, err := db.Exec(ctx, `UPDATE aircraft SET name = 'Edited Aircraft Name' WHERE id = $1`, aircraftID); err != nil {
+		t.Fatalf("update aircraft name failed: %v", err)
+	}
+	var editedName string
+	if err := db.QueryRow(ctx, `SELECT name FROM aircraft WHERE id = $1`, aircraftID).Scan(&editedName); err != nil {
+		t.Fatalf("reload aircraft name failed: %v", err)
+	}
+	if editedName != "Edited Aircraft Name" {
+		t.Fatalf("edited aircraft name mismatch: got %q", editedName)
+	}
+
+	var firstAssignedAircraftID int64
+	if err := db.QueryRow(ctx, `SELECT aircraft_id FROM event_innhopps WHERE id = $1`, firstInnhoppID).Scan(&firstAssignedAircraftID); err != nil {
+		t.Fatalf("reload innhopp aircraft failed: %v", err)
+	}
+	if firstAssignedAircraftID != aircraftID {
+		t.Fatalf("innhopp aircraft mismatch: got %d want %d", firstAssignedAircraftID, aircraftID)
+	}
+}
+
 func openBudgetTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")
@@ -352,10 +527,41 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             id SERIAL PRIMARY KEY,
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             sequence INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            aircraft_id INTEGER,
             takeoff_airfield_id INTEGER,
             landing_airfield_id INTEGER,
             distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
             landing_distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0
+        )`,
+		`CREATE TABLE IF NOT EXISTS aircraft (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            pricing_model TEXT NOT NULL DEFAULT 'time',
+            rate_currency TEXT NOT NULL DEFAULT 'EUR',
+            rate_per_minute NUMERIC,
+            cruising_speed_kmh NUMERIC,
+            minimum_load_duration NUMERIC,
+            price_per_slot NUMERIC,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_aircraft (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            aircraft_id INTEGER NOT NULL REFERENCES aircraft(id) ON DELETE CASCADE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, aircraft_id)
+        )`,
+		`CREATE TABLE IF NOT EXISTS aircraft_slot_pricing_bands (
+            id SERIAL PRIMARY KEY,
+            aircraft_id INTEGER NOT NULL REFERENCES aircraft(id) ON DELETE CASCADE,
+            max_distance_km NUMERIC NOT NULL,
+            slot_multiplier NUMERIC NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
 		`CREATE TABLE IF NOT EXISTS event_budgets (
             id SERIAL PRIMARY KEY,

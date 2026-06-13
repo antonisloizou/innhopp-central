@@ -85,6 +85,11 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/airfields", h.createAirfield)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/airfields/{airfieldID}", h.updateAirfield)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/airfields/{airfieldID}", h.deleteAirfield)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/aircraft", h.listAircraft)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/aircraft/{aircraftID}", h.getAircraft)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/aircraft", h.createAircraft)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/aircraft/{aircraftID}", h.updateAircraft)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/aircraft/{aircraftID}", h.deleteAircraft)
 
 	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests", h.listManifests)
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Post("/manifests", h.createManifest)
@@ -122,8 +127,42 @@ type Event struct {
 	CommercialStatus          string     `json:"commercial_status"`
 	AirfieldIDs               []int64    `json:"airfield_ids"`
 	ParticipantIDs            []int64    `json:"participant_ids"`
+	Aircraft                  []Aircraft `json:"aircraft"`
 	Innhopps                  []Innhopp  `json:"innhopps"`
 	CreatedAt                 time.Time  `json:"created_at"`
+}
+
+type AircraftPricingModel string
+
+const (
+	AircraftPricingModelTime AircraftPricingModel = "time"
+	AircraftPricingModelSlot AircraftPricingModel = "slot"
+)
+
+type AircraftSlotPricingBand struct {
+	ID             int64     `json:"id"`
+	AircraftID     int64     `json:"aircraft_id"`
+	MaxDistanceKm  float64   `json:"max_distance_km"`
+	SlotMultiplier float64   `json:"slot_multiplier"`
+	SortOrder      int       `json:"sort_order"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type Aircraft struct {
+	ID                  int64                     `json:"id"`
+	Name                string                    `json:"name"`
+	PricingModel        AircraftPricingModel      `json:"pricing_model"`
+	RateCurrency        string                    `json:"rate_currency"`
+	RatePerMinute       *float64                  `json:"rate_per_minute,omitempty"`
+	CruisingSpeedKmh    *float64                  `json:"cruising_speed_kmh,omitempty"`
+	MinimumLoadDuration *float64                  `json:"minimum_load_duration,omitempty"`
+	PricePerSlot        *float64                  `json:"price_per_slot,omitempty"`
+	Notes               string                    `json:"notes,omitempty"`
+	SortOrder           int                       `json:"sort_order,omitempty"`
+	SlotPricingBands    []AircraftSlotPricingBand `json:"slot_pricing_bands,omitempty"`
+	CreatedAt           time.Time                 `json:"created_at"`
+	UpdatedAt           time.Time                 `json:"updated_at"`
 }
 
 type Accommodation struct {
@@ -159,35 +198,36 @@ type InnhoppImage struct {
 }
 
 type Innhopp struct {
-	ID                   int64          `json:"id"`
-	EventID              int64          `json:"event_id"`
-	Sequence             int            `json:"sequence"`
-	Name                 string         `json:"name"`
-	Coordinates          string         `json:"coordinates,omitempty"`
-	TakeoffAirfieldID    *int64         `json:"takeoff_airfield_id,omitempty"`
-	LandingAirfieldID    *int64         `json:"landing_airfield_id,omitempty"`
-	Elevation            *int           `json:"elevation,omitempty"`
-	ScheduledAt          *time.Time     `json:"scheduled_at,omitempty"`
-	Notes                string         `json:"notes,omitempty"`
-	ReasonForChoice      string         `json:"reason_for_choice,omitempty"`
-	AdjustAltimeterAAD   string         `json:"adjust_altimeter_aad,omitempty"`
-	Notam                string         `json:"notam,omitempty"`
-	DistanceByAir        *float64       `json:"distance_by_air,omitempty"`
-	DistanceByRoad       *float64       `json:"distance_by_road,omitempty"`
-	LandingDistanceByAir *float64       `json:"landing_distance_by_air,omitempty"`
-	LandingDistanceByRoad *float64      `json:"landing_distance_by_road,omitempty"`
-	PrimaryLandingArea   LandingArea    `json:"primary_landing_area"`
-	SecondaryLandingArea LandingArea    `json:"secondary_landing_area"`
-	RiskAssessment       string         `json:"risk_assessment,omitempty"`
-	SafetyPrecautions    string         `json:"safety_precautions,omitempty"`
-	Jumprun              string         `json:"jumprun,omitempty"`
-	Hospital             string         `json:"hospital,omitempty"`
-	RescueBoat           *bool          `json:"rescue_boat,omitempty"`
-	MinimumRequirements  string         `json:"minimum_requirements,omitempty"`
-	LandOwners           []LandOwner    `json:"land_owners,omitempty"`
-	LandOwnerPermission  *bool          `json:"land_owner_permission,omitempty"`
-	ImageFiles           []InnhoppImage `json:"image_files,omitempty"`
-	CreatedAt            time.Time      `json:"created_at"`
+	ID                    int64          `json:"id"`
+	EventID               int64          `json:"event_id"`
+	Sequence              int            `json:"sequence"`
+	Name                  string         `json:"name"`
+	Coordinates           string         `json:"coordinates,omitempty"`
+	AircraftID            *int64         `json:"aircraft_id,omitempty"`
+	TakeoffAirfieldID     *int64         `json:"takeoff_airfield_id,omitempty"`
+	LandingAirfieldID     *int64         `json:"landing_airfield_id,omitempty"`
+	Elevation             *int           `json:"elevation,omitempty"`
+	ScheduledAt           *time.Time     `json:"scheduled_at,omitempty"`
+	Notes                 string         `json:"notes,omitempty"`
+	ReasonForChoice       string         `json:"reason_for_choice,omitempty"`
+	AdjustAltimeterAAD    string         `json:"adjust_altimeter_aad,omitempty"`
+	Notam                 string         `json:"notam,omitempty"`
+	DistanceByAir         *float64       `json:"distance_by_air,omitempty"`
+	DistanceByRoad        *float64       `json:"distance_by_road,omitempty"`
+	LandingDistanceByAir  *float64       `json:"landing_distance_by_air,omitempty"`
+	LandingDistanceByRoad *float64       `json:"landing_distance_by_road,omitempty"`
+	PrimaryLandingArea    LandingArea    `json:"primary_landing_area"`
+	SecondaryLandingArea  LandingArea    `json:"secondary_landing_area"`
+	RiskAssessment        string         `json:"risk_assessment,omitempty"`
+	SafetyPrecautions     string         `json:"safety_precautions,omitempty"`
+	Jumprun               string         `json:"jumprun,omitempty"`
+	Hospital              string         `json:"hospital,omitempty"`
+	RescueBoat            *bool          `json:"rescue_boat,omitempty"`
+	MinimumRequirements   string         `json:"minimum_requirements,omitempty"`
+	LandOwners            []LandOwner    `json:"land_owners,omitempty"`
+	LandOwnerPermission   *bool          `json:"land_owner_permission,omitempty"`
+	ImageFiles            []InnhoppImage `json:"image_files,omitempty"`
+	CreatedAt             time.Time      `json:"created_at"`
 }
 
 type Manifest struct {
@@ -202,25 +242,47 @@ type Manifest struct {
 }
 
 type eventPayload struct {
-	SeasonID                  int64            `json:"season_id"`
-	Name                      string           `json:"name"`
-	Location                  string           `json:"location"`
-	Status                    string           `json:"status"`
-	StartsAt                  string           `json:"starts_at"`
-	EndsAt                    string           `json:"ends_at"`
-	Slots                     int              `json:"slots"`
-	PublicRegistrationSlug    string           `json:"public_registration_slug"`
-	PublicRegistrationEnabled bool             `json:"public_registration_enabled"`
-	RegistrationOpenAt        string           `json:"registration_open_at"`
-	MainInvoiceDeadline       string           `json:"main_invoice_deadline"`
-	DepositAmount             *float64         `json:"deposit_amount"`
-	MainInvoiceAmount         *float64         `json:"main_invoice_amount"`
-	Currency                  string           `json:"currency"`
-	MinimumDepositCount       int              `json:"minimum_deposit_count"`
-	CommercialStatus          string           `json:"commercial_status"`
-	AirfieldIDs               []int64          `json:"airfield_ids"`
-	ParticipantIDs            []int64          `json:"participant_ids"`
-	Innhopps                  []innhoppPayload `json:"innhopps"`
+	SeasonID                  int64             `json:"season_id"`
+	Name                      string            `json:"name"`
+	Location                  string            `json:"location"`
+	Status                    string            `json:"status"`
+	StartsAt                  string            `json:"starts_at"`
+	EndsAt                    string            `json:"ends_at"`
+	Slots                     int               `json:"slots"`
+	PublicRegistrationSlug    string            `json:"public_registration_slug"`
+	PublicRegistrationEnabled bool              `json:"public_registration_enabled"`
+	RegistrationOpenAt        string            `json:"registration_open_at"`
+	MainInvoiceDeadline       string            `json:"main_invoice_deadline"`
+	DepositAmount             *float64          `json:"deposit_amount"`
+	MainInvoiceAmount         *float64          `json:"main_invoice_amount"`
+	Currency                  string            `json:"currency"`
+	MinimumDepositCount       int               `json:"minimum_deposit_count"`
+	CommercialStatus          string            `json:"commercial_status"`
+	AirfieldIDs               []int64           `json:"airfield_ids"`
+	ParticipantIDs            []int64           `json:"participant_ids"`
+	Aircraft                  []aircraftPayload `json:"aircraft"`
+	Innhopps                  []innhoppPayload  `json:"innhopps"`
+}
+
+type aircraftSlotPricingBandPayload struct {
+	ID             *int64   `json:"id"`
+	MaxDistanceKm  *float64 `json:"max_distance_km"`
+	SlotMultiplier *float64 `json:"slot_multiplier"`
+	SortOrder      *int     `json:"sort_order"`
+}
+
+type aircraftPayload struct {
+	ID                  *int64                           `json:"id"`
+	Name                string                           `json:"name"`
+	PricingModel        string                           `json:"pricing_model"`
+	RateCurrency        string                           `json:"rate_currency"`
+	RatePerMinute       *float64                         `json:"rate_per_minute"`
+	CruisingSpeedKmh    *float64                         `json:"cruising_speed_kmh"`
+	MinimumLoadDuration *float64                         `json:"minimum_load_duration"`
+	PricePerSlot        *float64                         `json:"price_per_slot"`
+	Notes               string                           `json:"notes"`
+	SortOrder           *int                             `json:"sort_order"`
+	SlotPricingBands    []aircraftSlotPricingBandPayload `json:"slot_pricing_bands"`
 }
 
 type landingAreaPayload struct {
@@ -237,63 +299,86 @@ type landOwnerPayload struct {
 }
 
 type innhoppPayload struct {
-	ID                   *int64             `json:"id"`
-	Sequence             *int               `json:"sequence"`
-	Name                 string             `json:"name"`
-	Coordinates          string             `json:"coordinates"`
-	Elevation            *int               `json:"elevation"`
-	ScheduledAt          string             `json:"scheduled_at"`
-	Notes                string             `json:"notes"`
-	TakeoffAirfieldID    *int64             `json:"takeoff_airfield_id"`
-	LandingAirfieldID    *int64             `json:"landing_airfield_id"`
-	ReasonForChoice      string             `json:"reason_for_choice"`
-	AdjustAltimeterAAD   string             `json:"adjust_altimeter_aad"`
-	Notam                string             `json:"notam"`
-	DistanceByAir        *float64           `json:"distance_by_air"`
-	DistanceByRoad       *float64           `json:"distance_by_road"`
-	LandingDistanceByAir *float64           `json:"landing_distance_by_air"`
-	LandingDistanceByRoad *float64          `json:"landing_distance_by_road"`
-	PrimaryLandingArea   landingAreaPayload `json:"primary_landing_area"`
-	SecondaryLandingArea landingAreaPayload `json:"secondary_landing_area"`
-	RiskAssessment       string             `json:"risk_assessment"`
-	SafetyPrecautions    string             `json:"safety_precautions"`
-	Jumprun              string             `json:"jumprun"`
-	Hospital             string             `json:"hospital"`
-	RescueBoat           *bool              `json:"rescue_boat"`
-	MinimumRequirements  string             `json:"minimum_requirements"`
-	LandOwners           []landOwnerPayload `json:"land_owners"`
-	LandOwnerPermission  *bool              `json:"land_owner_permission"`
-	ImageFiles           []InnhoppImage     `json:"image_files"`
+	ID                    *int64             `json:"id"`
+	Sequence              *int               `json:"sequence"`
+	Name                  string             `json:"name"`
+	Coordinates           string             `json:"coordinates"`
+	AircraftID            *int64             `json:"aircraft_id"`
+	Elevation             *int               `json:"elevation"`
+	ScheduledAt           string             `json:"scheduled_at"`
+	Notes                 string             `json:"notes"`
+	TakeoffAirfieldID     *int64             `json:"takeoff_airfield_id"`
+	LandingAirfieldID     *int64             `json:"landing_airfield_id"`
+	ReasonForChoice       string             `json:"reason_for_choice"`
+	AdjustAltimeterAAD    string             `json:"adjust_altimeter_aad"`
+	Notam                 string             `json:"notam"`
+	DistanceByAir         *float64           `json:"distance_by_air"`
+	DistanceByRoad        *float64           `json:"distance_by_road"`
+	LandingDistanceByAir  *float64           `json:"landing_distance_by_air"`
+	LandingDistanceByRoad *float64           `json:"landing_distance_by_road"`
+	PrimaryLandingArea    landingAreaPayload `json:"primary_landing_area"`
+	SecondaryLandingArea  landingAreaPayload `json:"secondary_landing_area"`
+	RiskAssessment        string             `json:"risk_assessment"`
+	SafetyPrecautions     string             `json:"safety_precautions"`
+	Jumprun               string             `json:"jumprun"`
+	Hospital              string             `json:"hospital"`
+	RescueBoat            *bool              `json:"rescue_boat"`
+	MinimumRequirements   string             `json:"minimum_requirements"`
+	LandOwners            []landOwnerPayload `json:"land_owners"`
+	LandOwnerPermission   *bool              `json:"land_owner_permission"`
+	ImageFiles            []InnhoppImage     `json:"image_files"`
 }
 
 type innhoppInput struct {
-	ID                   *int64
-	Sequence             int
-	Name                 string
-	Coordinates          string
-	Elevation            *int
-	TakeoffAirfieldID    *int64
-	LandingAirfieldID    *int64
-	ScheduledAt          *time.Time
-	Notes                string
-	ReasonForChoice      string
-	AdjustAltimeterAAD   string
-	Notam                string
-	DistanceByAir        *float64
-	DistanceByRoad       *float64
-	LandingDistanceByAir *float64
+	ID                    *int64
+	Sequence              int
+	Name                  string
+	Coordinates           string
+	AircraftID            *int64
+	Elevation             *int
+	TakeoffAirfieldID     *int64
+	LandingAirfieldID     *int64
+	ScheduledAt           *time.Time
+	Notes                 string
+	ReasonForChoice       string
+	AdjustAltimeterAAD    string
+	Notam                 string
+	DistanceByAir         *float64
+	DistanceByRoad        *float64
+	LandingDistanceByAir  *float64
 	LandingDistanceByRoad *float64
-	PrimaryLandingArea   LandingArea
-	SecondaryLandingArea LandingArea
-	RiskAssessment       string
-	SafetyPrecautions    string
-	Jumprun              string
-	Hospital             string
-	RescueBoat           *bool
-	MinimumRequirements  string
-	LandOwners           []LandOwner
-	LandOwnerPermission  *bool
-	ImageFiles           []InnhoppImage
+	PrimaryLandingArea    LandingArea
+	SecondaryLandingArea  LandingArea
+	RiskAssessment        string
+	SafetyPrecautions     string
+	Jumprun               string
+	Hospital              string
+	RescueBoat            *bool
+	MinimumRequirements   string
+	LandOwners            []LandOwner
+	LandOwnerPermission   *bool
+	ImageFiles            []InnhoppImage
+}
+
+type aircraftSlotPricingBandInput struct {
+	ID             *int64
+	MaxDistanceKm  float64
+	SlotMultiplier float64
+	SortOrder      int
+}
+
+type aircraftInput struct {
+	ID                  *int64
+	Name                string
+	PricingModel        AircraftPricingModel
+	RateCurrency        string
+	RatePerMinute       *float64
+	CruisingSpeedKmh    *float64
+	MinimumLoadDuration *float64
+	PricePerSlot        *float64
+	Notes               string
+	SortOrder           int
+	SlotPricingBands    []aircraftSlotPricingBandInput
 }
 
 func decodeEventJSON(r *http.Request, dest any) error {
@@ -555,6 +640,15 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	replaceAircraft := payload.Aircraft != nil
+	var aircraft []aircraftInput
+	if replaceAircraft {
+		aircraft, err = normalizeAircraftPayloads(payload.Aircraft)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
@@ -641,6 +735,28 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attachedAircraftIDs := map[int64]struct{}{}
+	if replaceAircraft {
+		persistedIDs, err := replaceEventAircraftTx(ctx, tx, event.ID, aircraft)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to save aircraft")
+			return
+		}
+		for _, id := range persistedIDs {
+			attachedAircraftIDs[id] = struct{}{}
+		}
+	} else {
+		attachedAircraftIDs, err = fetchAttachedAircraftIDsTx(ctx, tx, event.ID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
+			return
+		}
+	}
+
+	if err := validateInnhoppAircraftAssignments(innhopps, attachedAircraftIDs); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := replaceEventInnhoppsTx(ctx, tx, event.ID, innhopps); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps: "+err.Error())
 		return
@@ -766,6 +882,15 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	replaceAircraft := payload.Aircraft != nil
+	var aircraft []aircraftInput
+	if replaceAircraft {
+		aircraft, err = normalizeAircraftPayloads(payload.Aircraft)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 
 	slots := payload.Slots
 	if slots < 0 {
@@ -848,7 +973,41 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	attachedAircraftIDs := map[int64]struct{}{}
+	if replaceAircraft {
+		for _, item := range aircraft {
+			if item.ID != nil {
+				attachedAircraftIDs[*item.ID] = struct{}{}
+			}
+		}
+		if !replaceInnhopps {
+			if err := ensureNoDetachedAircraftInUseTx(ctx, tx, eventID, attachedAircraftIDs); err != nil {
+				httpx.Error(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		persistedIDs, err := replaceEventAircraftTx(ctx, tx, eventID, aircraft)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to save aircraft")
+			return
+		}
+		attachedAircraftIDs = map[int64]struct{}{}
+		for _, id := range persistedIDs {
+			attachedAircraftIDs[id] = struct{}{}
+		}
+	} else {
+		attachedAircraftIDs, err = fetchAttachedAircraftIDsTx(ctx, tx, eventID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
+			return
+		}
+	}
+
 	if replaceInnhopps {
+		if err := validateInnhoppAircraftAssignments(innhopps, attachedAircraftIDs); err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err := replaceEventInnhoppsTx(ctx, tx, eventID, innhopps); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to save innhopps: "+err.Error())
 			return
@@ -940,6 +1099,7 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 			Sequence:             inn.Sequence,
 			Name:                 strings.TrimSpace(inn.Name),
 			Coordinates:          strings.TrimSpace(inn.Coordinates),
+			AircraftID:           inn.AircraftID,
 			Elevation:            inn.Elevation,
 			TakeoffAirfieldID:    inn.TakeoffAirfieldID,
 			ScheduledAt:          inn.ScheduledAt,
@@ -1020,6 +1180,17 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := replaceEventAirfieldsTx(ctx, tx, created.ID, original.AirfieldIDs); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy airfields")
+		return
+	}
+	aircraftInputs := make([]aircraftInput, 0, len(original.Aircraft))
+	for _, item := range original.Aircraft {
+		aircraftInputs = append(aircraftInputs, aircraftInput{
+			ID:        &item.ID,
+			SortOrder: item.SortOrder,
+		})
+	}
+	if _, err := replaceEventAircraftTx(ctx, tx, created.ID, aircraftInputs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to copy aircraft attachments")
 		return
 	}
 
@@ -2135,6 +2306,10 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 	if err != nil {
 		return nil, err
 	}
+	aircraftMap, err := h.fetchAircraftForEvents(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 
 	airfieldMap, err := h.fetchAirfieldsForEvents(ctx, ids)
 	if err != nil {
@@ -2150,6 +2325,7 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 	copy(attached, events)
 	for i := range attached {
 		attached[i].ParticipantIDs = participantMap[attached[i].ID]
+		attached[i].Aircraft = aircraftMap[attached[i].ID]
 		attached[i].Innhopps = innhoppMap[attached[i].ID]
 		attached[i].AirfieldIDs = airfieldMap[attached[i].ID]
 		attached[i].RemainingSlots = remainingSlotsMap[attached[i].ID]
@@ -2255,6 +2431,260 @@ func (h *Handler) fetchAirfieldsForEvents(ctx context.Context, eventIDs []int64)
 	}
 
 	return result, nil
+}
+
+func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.db.Query(r.Context(),
+		`SELECT id, name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+         FROM aircraft
+         ORDER BY created_at DESC, id DESC`,
+	)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list aircraft")
+		return
+	}
+	defer rows.Close()
+	var items []Aircraft
+	var ids []int64
+	for rows.Next() {
+		var item Aircraft
+		if err := rows.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse aircraft")
+			return
+		}
+		items = append(items, item)
+		ids = append(ids, item.ID)
+	}
+	if err := rows.Err(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to list aircraft")
+		return
+	}
+	bandsByAircraft, err := h.fetchAircraftSlotBands(r.Context(), ids)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft bands")
+		return
+	}
+	for i := range items {
+		items[i].SlotPricingBands = bandsByAircraft[items[i].ID]
+	}
+	httpx.WriteJSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) getAircraftByID(ctx context.Context, aircraftID int64) (Aircraft, error) {
+	row := h.db.QueryRow(ctx,
+		`SELECT id, name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+         FROM aircraft WHERE id = $1`,
+		aircraftID,
+	)
+	var item Aircraft
+	if err := row.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		return Aircraft{}, err
+	}
+	bandsByAircraft, err := h.fetchAircraftSlotBands(ctx, []int64{aircraftID})
+	if err != nil {
+		return Aircraft{}, err
+	}
+	item.SlotPricingBands = bandsByAircraft[aircraftID]
+	return item, nil
+}
+
+func (h *Handler) getAircraft(w http.ResponseWriter, r *http.Request) {
+	aircraftID, err := strconv.ParseInt(chi.URLParam(r, "aircraftID"), 10, 64)
+	if err != nil || aircraftID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid aircraft id")
+		return
+	}
+	item, err := h.getAircraftByID(r.Context(), aircraftID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "aircraft not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) createAircraft(w http.ResponseWriter, r *http.Request) {
+	var payload aircraftPayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	items, err := normalizeAircraftPayloads([]aircraftPayload{payload})
+	if err != nil || len(items) == 0 {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create aircraft")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	aircraftID, err := upsertAircraftTx(r.Context(), tx, items[0])
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create aircraft")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to create aircraft")
+		return
+	}
+	item, err := h.getAircraftByID(r.Context(), aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, item)
+}
+
+func (h *Handler) updateAircraft(w http.ResponseWriter, r *http.Request) {
+	aircraftID, err := strconv.ParseInt(chi.URLParam(r, "aircraftID"), 10, 64)
+	if err != nil || aircraftID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid aircraft id")
+		return
+	}
+	var payload aircraftPayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	payload.ID = &aircraftID
+	items, err := normalizeAircraftPayloads([]aircraftPayload{payload})
+	if err != nil || len(items) == 0 {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update aircraft")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err := upsertAircraftTx(r.Context(), tx, items[0]); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "aircraft not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "failed to update aircraft")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update aircraft")
+		return
+	}
+	item, err := h.getAircraftByID(r.Context(), aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) deleteAircraft(w http.ResponseWriter, r *http.Request) {
+	aircraftID, err := strconv.ParseInt(chi.URLParam(r, "aircraftID"), 10, 64)
+	if err != nil || aircraftID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid aircraft id")
+		return
+	}
+	var attachedCount int
+	if err := h.db.QueryRow(r.Context(), `SELECT COUNT(*) FROM event_aircraft WHERE aircraft_id = $1`, aircraftID).Scan(&attachedCount); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to validate aircraft delete")
+		return
+	}
+	if attachedCount > 0 {
+		httpx.Error(w, http.StatusConflict, "cannot delete aircraft while attached to events")
+		return
+	}
+	tag, err := h.db.Exec(r.Context(), `DELETE FROM aircraft WHERE id = $1`, aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to delete aircraft")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "aircraft not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) fetchAircraftForEvents(ctx context.Context, eventIDs []int64) (map[int64][]Aircraft, error) {
+	result := make(map[int64][]Aircraft, len(eventIDs))
+	rows, err := h.db.Query(ctx,
+		`SELECT ea.event_id, a.id, a.name, a.pricing_model, a.rate_currency, a.rate_per_minute,
+                a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot, a.notes,
+                ea.sort_order, a.created_at, a.updated_at
+         FROM event_aircraft ea
+         JOIN aircraft a ON a.id = ea.aircraft_id
+         WHERE ea.event_id = ANY($1)
+         ORDER BY ea.event_id, ea.sort_order ASC, a.id ASC`,
+		eventIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	aircraftByID := map[int64]Aircraft{}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var eventID int64
+		var item Aircraft
+		if err := rows.Scan(
+			&eventID, &item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute,
+			&item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes,
+			&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		result[eventID] = append(result[eventID], item)
+		if _, ok := aircraftByID[item.ID]; !ok {
+			aircraftByID[item.ID] = item
+			ids = append(ids, item.ID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return result, nil
+	}
+	bandsByAircraft, err := h.fetchAircraftSlotBands(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for eventID, aircraftList := range result {
+		for i := range aircraftList {
+			aircraftList[i].SlotPricingBands = bandsByAircraft[aircraftList[i].ID]
+		}
+		result[eventID] = aircraftList
+	}
+	return result, nil
+}
+
+func (h *Handler) fetchAircraftSlotBands(ctx context.Context, aircraftIDs []int64) (map[int64][]AircraftSlotPricingBand, error) {
+	result := make(map[int64][]AircraftSlotPricingBand, len(aircraftIDs))
+	rows, err := h.db.Query(ctx,
+		`SELECT id, aircraft_id, max_distance_km, slot_multiplier, sort_order, created_at, updated_at
+         FROM aircraft_slot_pricing_bands
+         WHERE aircraft_id = ANY($1)
+         ORDER BY aircraft_id, sort_order ASC, id ASC`,
+		aircraftIDs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var band AircraftSlotPricingBand
+		if err := rows.Scan(&band.ID, &band.AircraftID, &band.MaxDistanceKm, &band.SlotMultiplier, &band.SortOrder, &band.CreatedAt, &band.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result[band.AircraftID] = append(result[band.AircraftID], band)
+	}
+	return result, rows.Err()
 }
 
 func (h *Handler) listAirfields(w http.ResponseWriter, r *http.Request) {
@@ -2571,6 +3001,7 @@ func scanInnhopp(row pgx.Row, includeImages bool) (Innhopp, error) {
 		&innhopp.Sequence,
 		&innhopp.Name,
 		&coords,
+		&innhopp.AircraftID,
 		&innhopp.TakeoffAirfieldID,
 		&innhopp.LandingAirfieldID,
 		&elevation,
@@ -2680,7 +3111,7 @@ func scanInnhopp(row pgx.Row, includeImages bool) (Innhopp, error) {
 func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64, includeImages bool) (map[int64][]Innhopp, error) {
 	result := make(map[int64][]Innhopp, len(eventIDs))
 	rows, err := h.db.Query(ctx,
-		`SELECT id, event_id, sequence, name, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
+		`SELECT id, event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
@@ -2791,6 +3222,18 @@ func normalizeCurrency(raw string) string {
 		return currency[:8]
 	}
 	return currency
+}
+
+func isValidCurrencyCode(v string) bool {
+	if len(v) != 3 {
+		return false
+	}
+	for _, r := range v {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeOptionalMoney(value *float64) *float64 {
@@ -2992,6 +3435,17 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := inputs[0]
+	if in.AircraftID != nil {
+		var exists bool
+		if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM event_aircraft WHERE event_id = $1 AND aircraft_id = $2)`, eventID, *in.AircraftID).Scan(&exists); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to validate aircraft")
+			return
+		}
+		if !exists {
+			httpx.Error(w, http.StatusBadRequest, "aircraft_id must reference aircraft attached to the event")
+			return
+		}
+	}
 
 	ownersJSON, err := encodeLandOwners(in.LandOwners)
 	if err != nil {
@@ -3007,26 +3461,26 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	var created Innhopp
 	row := h.db.QueryRow(r.Context(),
 		`INSERT INTO event_innhopps (
-            event_id, sequence, name, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
+            event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
             reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
             primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
             secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
             risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
         )
         VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19, $20,
-            $21, $22, $23, $24,
-            $25, $26, $27, $28, $29, $30, $31::jsonb, $32::jsonb, $33
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16, $17,
+            $18, $19, $20, $21,
+            $22, $23, $24, $25,
+            $26, $27, $28, $29, $30, $31, $32::jsonb, $33::jsonb, $34
         )
-        RETURNING id, event_id, sequence, name, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
+        RETURNING id, event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
                   primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                   secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                   risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                   created_at`,
-		eventID, in.Sequence, in.Name, in.Coordinates, in.TakeoffAirfieldID, in.LandingAirfieldID, in.Elevation, in.ScheduledAt, strings.TrimSpace(payload.Notes),
+		eventID, in.Sequence, in.Name, in.Coordinates, in.AircraftID, in.TakeoffAirfieldID, in.LandingAirfieldID, in.Elevation, in.ScheduledAt, strings.TrimSpace(payload.Notes),
 		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad, in.LandingDistanceByAir, in.LandingDistanceByRoad,
 		in.PrimaryLandingArea.Name, in.PrimaryLandingArea.Description, in.PrimaryLandingArea.Size, in.PrimaryLandingArea.Obstacles,
 		in.SecondaryLandingArea.Name, in.SecondaryLandingArea.Description, in.SecondaryLandingArea.Size, in.SecondaryLandingArea.Obstacles,
@@ -3069,6 +3523,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		&created.Sequence,
 		&created.Name,
 		&coords,
+		&created.AircraftID,
 		&takeoff,
 		&landing,
 		&elevation,
@@ -3279,6 +3734,14 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 			elevation = payload.Elevation
 		}
 
+		var aircraftID *int64
+		if payload.AircraftID != nil {
+			if *payload.AircraftID <= 0 {
+				return nil, errors.New("innhopps[" + strconv.Itoa(i) + "].aircraft_id must be positive")
+			}
+			aircraftID = payload.AircraftID
+		}
+
 		var distanceByAir *float64
 		if payload.DistanceByAir != nil {
 			if *payload.DistanceByAir < 0 {
@@ -3314,33 +3777,34 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 		}
 
 		innhopps = append(innhopps, innhoppInput{
-			ID:                   payload.ID,
-			Sequence:             sequence,
-			Name:                 name,
-			Coordinates:          coordinates,
-			Elevation:            elevation,
-			TakeoffAirfieldID:    takeoff,
-			LandingAirfieldID:    landing,
-			ScheduledAt:          scheduled,
-			Notes:                strings.TrimSpace(payload.Notes),
-			ReasonForChoice:      strings.TrimSpace(payload.ReasonForChoice),
-			AdjustAltimeterAAD:   strings.TrimSpace(payload.AdjustAltimeterAAD),
-			Notam:                strings.TrimSpace(payload.Notam),
-			DistanceByAir:        distanceByAir,
-			DistanceByRoad:       distanceByRoad,
-			LandingDistanceByAir: landingDistanceByAir,
+			ID:                    payload.ID,
+			Sequence:              sequence,
+			Name:                  name,
+			Coordinates:           coordinates,
+			AircraftID:            aircraftID,
+			Elevation:             elevation,
+			TakeoffAirfieldID:     takeoff,
+			LandingAirfieldID:     landing,
+			ScheduledAt:           scheduled,
+			Notes:                 strings.TrimSpace(payload.Notes),
+			ReasonForChoice:       strings.TrimSpace(payload.ReasonForChoice),
+			AdjustAltimeterAAD:    strings.TrimSpace(payload.AdjustAltimeterAAD),
+			Notam:                 strings.TrimSpace(payload.Notam),
+			DistanceByAir:         distanceByAir,
+			DistanceByRoad:        distanceByRoad,
+			LandingDistanceByAir:  landingDistanceByAir,
 			LandingDistanceByRoad: landingDistanceByRoad,
-			PrimaryLandingArea:   normalizeLandingAreaPayload(payload.PrimaryLandingArea),
-			SecondaryLandingArea: normalizeLandingAreaPayload(payload.SecondaryLandingArea),
-			RiskAssessment:       strings.TrimSpace(payload.RiskAssessment),
-			SafetyPrecautions:    strings.TrimSpace(payload.SafetyPrecautions),
-			Jumprun:              strings.TrimSpace(payload.Jumprun),
-			Hospital:             strings.TrimSpace(payload.Hospital),
-			RescueBoat:           payload.RescueBoat,
-			MinimumRequirements:  strings.TrimSpace(payload.MinimumRequirements),
-			LandOwners:           normalizeLandOwnersPayload(payload.LandOwners),
-			LandOwnerPermission:  payload.LandOwnerPermission,
-			ImageFiles:           normalizeImageFiles(payload.ImageFiles),
+			PrimaryLandingArea:    normalizeLandingAreaPayload(payload.PrimaryLandingArea),
+			SecondaryLandingArea:  normalizeLandingAreaPayload(payload.SecondaryLandingArea),
+			RiskAssessment:        strings.TrimSpace(payload.RiskAssessment),
+			SafetyPrecautions:     strings.TrimSpace(payload.SafetyPrecautions),
+			Jumprun:               strings.TrimSpace(payload.Jumprun),
+			Hospital:              strings.TrimSpace(payload.Hospital),
+			RescueBoat:            payload.RescueBoat,
+			MinimumRequirements:   strings.TrimSpace(payload.MinimumRequirements),
+			LandOwners:            normalizeLandOwnersPayload(payload.LandOwners),
+			LandOwnerPermission:   payload.LandOwnerPermission,
+			ImageFiles:            normalizeImageFiles(payload.ImageFiles),
 		})
 	}
 
@@ -3352,6 +3816,136 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 	})
 
 	return innhopps, nil
+}
+
+func normalizeAircraftPricingModel(raw string) (AircraftPricingModel, error) {
+	model := AircraftPricingModel(strings.ToLower(strings.TrimSpace(raw)))
+	if model == "" {
+		model = AircraftPricingModelTime
+	}
+	switch model {
+	case AircraftPricingModelTime, AircraftPricingModelSlot:
+		return model, nil
+	default:
+		return "", errors.New("pricing_model must be one of: time, slot")
+	}
+}
+
+func normalizeAircraftPayloads(raw []aircraftPayload) ([]aircraftInput, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	items := make([]aircraftInput, 0, len(raw))
+	for i, payload := range raw {
+		name := strings.TrimSpace(payload.Name)
+		if name == "" {
+			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].name is required")
+		}
+		model, err := normalizeAircraftPricingModel(payload.PricingModel)
+		if err != nil {
+			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "]." + err.Error())
+		}
+		currency := normalizeCurrency(payload.RateCurrency)
+		if !isValidCurrencyCode(currency) {
+			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].rate_currency must be a 3-letter ISO code")
+		}
+		sortOrder := i
+		if payload.SortOrder != nil {
+			sortOrder = *payload.SortOrder
+		}
+		item := aircraftInput{
+			ID:           payload.ID,
+			Name:         name,
+			PricingModel: model,
+			RateCurrency: currency,
+			Notes:        strings.TrimSpace(payload.Notes),
+			SortOrder:    sortOrder,
+		}
+		if payload.ID != nil && *payload.ID <= 0 {
+			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].id must be positive")
+		}
+		if payload.RatePerMinute != nil {
+			if *payload.RatePerMinute < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].rate_per_minute must be zero or positive")
+			}
+			val := *payload.RatePerMinute
+			item.RatePerMinute = &val
+		}
+		if payload.CruisingSpeedKmh != nil {
+			if *payload.CruisingSpeedKmh < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].cruising_speed_kmh must be zero or positive")
+			}
+			val := *payload.CruisingSpeedKmh
+			item.CruisingSpeedKmh = &val
+		}
+		if payload.MinimumLoadDuration != nil {
+			if *payload.MinimumLoadDuration < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].minimum_load_duration must be zero or positive")
+			}
+			val := *payload.MinimumLoadDuration
+			item.MinimumLoadDuration = &val
+		}
+		if payload.PricePerSlot != nil {
+			if *payload.PricePerSlot < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].price_per_slot must be zero or positive")
+			}
+			val := *payload.PricePerSlot
+			item.PricePerSlot = &val
+		}
+		switch model {
+		case AircraftPricingModelTime:
+			if item.RatePerMinute == nil {
+				zero := 0.0
+				item.RatePerMinute = &zero
+			}
+			if item.CruisingSpeedKmh == nil {
+				defaultSpeed := 180.0
+				item.CruisingSpeedKmh = &defaultSpeed
+			}
+			if item.MinimumLoadDuration == nil {
+				zero := 0.0
+				item.MinimumLoadDuration = &zero
+			}
+		case AircraftPricingModelSlot:
+			if item.PricePerSlot == nil {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].price_per_slot is required for slot pricing")
+			}
+			if len(payload.SlotPricingBands) == 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands is required for slot pricing")
+			}
+			lastMax := -1.0
+			for j, bandPayload := range payload.SlotPricingBands {
+				if bandPayload.MaxDistanceKm == nil || bandPayload.SlotMultiplier == nil {
+					return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands[" + strconv.Itoa(j) + "] requires max_distance_km and slot_multiplier")
+				}
+				if *bandPayload.MaxDistanceKm <= 0 {
+					return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands[" + strconv.Itoa(j) + "].max_distance_km must be positive")
+				}
+				if *bandPayload.SlotMultiplier <= 0 {
+					return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands[" + strconv.Itoa(j) + "].slot_multiplier must be positive")
+				}
+				if *bandPayload.MaxDistanceKm < lastMax {
+					return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands must be sorted by max_distance_km")
+				}
+				lastMax = *bandPayload.MaxDistanceKm
+				bandSort := j
+				if bandPayload.SortOrder != nil {
+					bandSort = *bandPayload.SortOrder
+				}
+				if bandPayload.ID != nil && *bandPayload.ID <= 0 {
+					return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands[" + strconv.Itoa(j) + "].id must be positive")
+				}
+				item.SlotPricingBands = append(item.SlotPricingBands, aircraftSlotPricingBandInput{
+					ID:             bandPayload.ID,
+					MaxDistanceKm:  *bandPayload.MaxDistanceKm,
+					SlotMultiplier: *bandPayload.SlotMultiplier,
+					SortOrder:      bandSort,
+				})
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 func replaceEventParticipantsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64) error {
@@ -3400,6 +3994,134 @@ func replaceEventAirfieldsTx(ctx context.Context, tx pgx.Tx, eventID int64, airf
 	return nil
 }
 
+func upsertAircraftTx(ctx context.Context, tx pgx.Tx, item aircraftInput) (int64, error) {
+	if item.ID != nil {
+		tag, err := tx.Exec(ctx,
+			`UPDATE aircraft
+             SET name = $1, pricing_model = $2, rate_currency = $3, rate_per_minute = $4,
+                 cruising_speed_kmh = $5, minimum_load_duration = $6, price_per_slot = $7, notes = $8, updated_at = NOW()
+             WHERE id = $9`,
+			item.Name, item.PricingModel, item.RateCurrency, item.RatePerMinute,
+			item.CruisingSpeedKmh, item.MinimumLoadDuration, item.PricePerSlot, item.Notes, *item.ID,
+		)
+		if err != nil {
+			return 0, err
+		}
+		if tag.RowsAffected() == 0 {
+			return 0, pgx.ErrNoRows
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM aircraft_slot_pricing_bands WHERE aircraft_id = $1`, *item.ID); err != nil {
+			return 0, err
+		}
+		for _, band := range item.SlotPricingBands {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+                 VALUES ($1, $2, $3, $4)`,
+				*item.ID, band.MaxDistanceKm, band.SlotMultiplier, band.SortOrder,
+			); err != nil {
+				return 0, err
+			}
+		}
+		return *item.ID, nil
+	}
+
+	var aircraftID int64
+	if err := tx.QueryRow(ctx,
+		`INSERT INTO aircraft
+            (name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes)
+         VALUES
+            ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id`,
+		item.Name, item.PricingModel, item.RateCurrency, item.RatePerMinute,
+		item.CruisingSpeedKmh, item.MinimumLoadDuration, item.PricePerSlot, item.Notes,
+	).Scan(&aircraftID); err != nil {
+		return 0, err
+	}
+	for _, band := range item.SlotPricingBands {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+             VALUES ($1, $2, $3, $4)`,
+			aircraftID, band.MaxDistanceKm, band.SlotMultiplier, band.SortOrder,
+		); err != nil {
+			return 0, err
+		}
+	}
+	return aircraftID, nil
+}
+
+func replaceEventAircraftTx(ctx context.Context, tx pgx.Tx, eventID int64, aircraft []aircraftInput) ([]int64, error) {
+	if _, err := tx.Exec(ctx, `DELETE FROM event_aircraft WHERE event_id = $1`, eventID); err != nil {
+		return nil, err
+	}
+	if len(aircraft) == 0 {
+		return nil, nil
+	}
+	ids := make([]int64, 0, len(aircraft))
+	for _, item := range aircraft {
+		aircraftID, err := upsertAircraftTx(ctx, tx, item)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO event_aircraft (event_id, aircraft_id, sort_order)
+             VALUES ($1, $2, $3)`,
+			eventID, aircraftID, item.SortOrder,
+		); err != nil {
+			return nil, err
+		}
+		ids = append(ids, aircraftID)
+	}
+	return ids, nil
+}
+
+func fetchAttachedAircraftIDsTx(ctx context.Context, tx pgx.Tx, eventID int64) (map[int64]struct{}, error) {
+	rows, err := tx.Query(ctx, `SELECT aircraft_id FROM event_aircraft WHERE event_id = $1`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[int64]struct{}{}
+	for rows.Next() {
+		var aircraftID int64
+		if err := rows.Scan(&aircraftID); err != nil {
+			return nil, err
+		}
+		result[aircraftID] = struct{}{}
+	}
+	return result, rows.Err()
+}
+
+func validateInnhoppAircraftAssignments(innhopps []innhoppInput, attachedAircraftIDs map[int64]struct{}) error {
+	for i, innhopp := range innhopps {
+		if innhopp.AircraftID == nil {
+			continue
+		}
+		if _, ok := attachedAircraftIDs[*innhopp.AircraftID]; !ok {
+			return fmt.Errorf("innhopps[%d].aircraft_id must reference aircraft attached to the event", i)
+		}
+	}
+	return nil
+}
+
+func ensureNoDetachedAircraftInUseTx(ctx context.Context, tx pgx.Tx, eventID int64, allowedAircraftIDs map[int64]struct{}) error {
+	rows, err := tx.Query(ctx, `SELECT id, aircraft_id FROM event_innhopps WHERE event_id = $1 AND aircraft_id IS NOT NULL`, eventID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var innhoppID int64
+		var aircraftID int64
+		if err := rows.Scan(&innhoppID, &aircraftID); err != nil {
+			return err
+		}
+		if _, ok := allowedAircraftIDs[aircraftID]; !ok {
+			return fmt.Errorf("cannot detach aircraft %d because it is still assigned to innhopp %d", aircraftID, innhoppID)
+		}
+	}
+	return rows.Err()
+}
+
 func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innhopps []innhoppInput) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1`, eventID); err != nil {
 		return err
@@ -3420,22 +4142,23 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		}
 
 		if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
-                event_id, sequence, name, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
+                event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16,
-                $17, $18, $19, $20,
-                $21, $22, $23, $24,
-                $25, $26, $27, $28, $29, $30, $31::jsonb, $32::jsonb, $33
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                $11, $12, $13, $14, $15, $16, $17,
+                $18, $19, $20, $21,
+                $22, $23, $24, $25,
+                $26, $27, $28, $29, $30, $31, $32::jsonb, $33::jsonb, $34
             )`,
 			eventID,
 			innhopp.Sequence,
 			innhopp.Name,
 			innhopp.Coordinates,
+			innhopp.AircraftID,
 			innhopp.TakeoffAirfieldID,
 			innhopp.LandingAirfieldID,
 			innhopp.Elevation,

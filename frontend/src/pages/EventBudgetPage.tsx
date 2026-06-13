@@ -43,9 +43,6 @@ const parameterLabels: Record<string, string> = {
   crew_on_load_count: 'Crew on load',
   confirm_load_count: 'Confirm load count',
   full_load_count: 'Full load count',
-  aircraft_price_per_minute: 'Aircraft rate per min',
-  minimum_load_duration: 'Minimum Load Duration',
-  aircraft_cruising_speed_kmh: 'Aircraft speed km/h',
   target_markup_percent: 'Target markup %',
   optional_tip_percent: 'Optional tip %',
   cost_drift_percent: 'Cost drift %',
@@ -91,6 +88,8 @@ const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = 
   full: 'full_capacity_case'
 };
 const AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER = ':missing-distance';
+const AUTO_AIRCRAFT_MISSING_AIRCRAFT_MARKER = ':missing-aircraft';
+const AUTO_AIRCRAFT_SLOT_OVERFLOW_MARKER = ':slot-overflow';
 const AUTO_AIRCRAFT_LINE_ITEM_PREFIX = '[auto-aircraft-innhopp]:';
 const AUTO_ESTIMATE_LINE_ITEM_PREFIX = '[auto-estimate]:';
 const AUTO_ESTIMATE_WARNING_MARKER = ':estimate-generated';
@@ -148,7 +147,6 @@ const EventBudgetPage = () => {
   const [eventRegistrationTotal, setEventRegistrationTotal] = useState('');
   const [eventCurrencyInput, setEventCurrencyInput] = useState('EUR');
   const [pendingBaseCurrency, setPendingBaseCurrency] = useState('EUR');
-  const [aircraftCurrency, setAircraftCurrency] = useState('EUR');
   const [displayCurrency, setDisplayCurrency] = useState('EUR');
   const [costSplitMode, setCostSplitMode] = useState<CostSplitMode>('amount');
   const isPercentageSplitMode = costSplitMode === 'percentage';
@@ -423,7 +421,6 @@ const EventBudgetPage = () => {
         setParameters({});
         setSelectedCurrencies(['EUR']);
         setPendingBaseCurrency('EUR');
-        setAircraftCurrency('EUR');
         setLiveRates({});
         return;
       }
@@ -446,9 +443,6 @@ const EventBudgetPage = () => {
       setLiveRates(currenciesResp.live_rates || {});
       setPendingBaseCurrency(currenciesResp.base_currency || evtBudget.base_currency || 'EUR');
       const loadedBaseCurrency = currenciesResp.base_currency || evtBudget.base_currency || 'EUR';
-      setAircraftCurrency(
-        currenciesResp.aircraft_currency || evtBudget.aircraft_currency || loadedBaseCurrency
-      );
       setEstimateCurrencies((prev) => {
         const next: Record<string, string> = { ...prev, ...(assumptionsResp.estimate_currencies || {}) };
         ESTIMATE_PARAMETER_KEYS.forEach((key) => {
@@ -512,7 +506,6 @@ const EventBudgetPage = () => {
       setParameters({});
       setSelectedCurrencies(['EUR']);
       setPendingBaseCurrency('EUR');
-      setAircraftCurrency('EUR');
       setDisplayCurrency('EUR');
       setLiveRates({});
       setLoading(false);
@@ -573,8 +566,7 @@ const EventBudgetPage = () => {
     try {
       await createEventBudget(activeEventID, {
         name: 'Event budget',
-        base_currency: 'EUR',
-        aircraft_currency: 'EUR'
+        base_currency: 'EUR'
       });
       await loadBudgetData(activeEventID);
     } catch (err) {
@@ -636,13 +628,9 @@ const EventBudgetPage = () => {
         }
       }
       const resolvedBaseCurrency = pendingBaseCurrency || baseCurrency;
-      const resolvedAircraftCurrency = aircraftCurrency || resolvedBaseCurrency;
-      const payload = Array.from(
-        new Set([resolvedBaseCurrency, resolvedAircraftCurrency, ...selectedCurrencies])
-      );
+      const payload = Array.from(new Set([resolvedBaseCurrency, ...selectedCurrencies]));
       const updatedBudget = await updateBudget(budget.id, {
-        base_currency: resolvedBaseCurrency,
-        aircraft_currency: resolvedAircraftCurrency
+        base_currency: resolvedBaseCurrency
       });
       const currenciesResp = await updateBudgetCurrencies(budget.id, payload);
       const assumptionsPayload = { ...parameters };
@@ -663,9 +651,6 @@ const EventBudgetPage = () => {
       setSelectedCurrencies(nextCurrencies);
       setLiveRates(currenciesResp.live_rates || {});
       setPendingBaseCurrency(currenciesResp.base_currency || updatedBudget.base_currency || resolvedBaseCurrency);
-      setAircraftCurrency(
-        currenciesResp.aircraft_currency || updatedBudget.aircraft_currency || resolvedAircraftCurrency
-      );
       if (!nextCurrencies.includes(displayCurrency)) {
         setDisplayCurrency(currenciesResp.base_currency || updatedBudget.base_currency || resolvedBaseCurrency);
       }
@@ -695,7 +680,7 @@ const EventBudgetPage = () => {
 
   const onRemoveCurrency = (code: string) => {
     const normalized = code.trim().toUpperCase();
-    if (normalized === pendingBaseCurrency || normalized === aircraftCurrency) return;
+    if (normalized === pendingBaseCurrency) return;
     setSelectedCurrencies((prev) => prev.filter((curr) => curr !== normalized));
     setNewLineItem((prev) => ({
       ...prev,
@@ -919,6 +904,10 @@ const EventBudgetPage = () => {
     () => new Map((activeEventData?.innhopps || []).map((innhopp) => [innhopp.id, innhopp])),
     [activeEventData?.innhopps]
   );
+  const aircraftByID = useMemo(
+    () => new Map((activeEventData?.aircraft || []).map((aircraft) => [aircraft.id, aircraft])),
+    [activeEventData?.aircraft]
+  );
   const airfieldsByID = useMemo(() => new Map(airfields.map((airfield) => [airfield.id, airfield])), [airfields]);
   const typeBadgeClassNames: Record<EntryType, string> = {
     Innhopp: 'schedule-type-badge schedule-type-badge--innhopp',
@@ -928,15 +917,16 @@ const EventBudgetPage = () => {
     Meal: 'schedule-type-badge schedule-type-badge--meal',
     Other: 'schedule-type-badge schedule-type-badge--other'
   };
-  const budgetAircraftSpeedKmh =
-    parameters.aircraft_cruising_speed_kmh ??
-    summary?.parameters?.aircraft_cruising_speed_kmh ??
-    summary?.assumptions?.aircraft_cruising_speed_kmh ??
-    null;
   const warningMessageForNotes = (notes?: string) => {
     if (typeof notes !== 'string') return null;
+    if (notes.includes(AUTO_AIRCRAFT_MISSING_AIRCRAFT_MARKER)) {
+      return 'No aircraft assigned to this innhopp.';
+    }
     if (notes.includes(AUTO_AIRCRAFT_MISSING_DISTANCE_MARKER)) {
       return 'Distance missing; minimum load duration used.';
+    }
+    if (notes.includes(AUTO_AIRCRAFT_SLOT_OVERFLOW_MARKER)) {
+      return 'Distance exceeds the highest slot band; last band used as fallback.';
     }
     if (notes.includes(AUTO_ESTIMATE_LINE_ITEM_PREFIX) || notes.includes(AUTO_ESTIMATE_WARNING_MARKER)) {
       return 'Estimate-generated fallback line item.';
@@ -944,6 +934,7 @@ const EventBudgetPage = () => {
     return null;
   };
   const aircraftPerInnhoppRows = useMemo(() => {
+    const fallbackAircraftCostCurrency = (baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
     const seedRows = (activeEventData?.innhopps || []).map((innhopp) => {
       const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
       const label = innhopp.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
@@ -956,7 +947,7 @@ const EventBudgetPage = () => {
           unitCost: 0,
           totalCost: 0,
           displayTotalCost: 0,
-          costCurrency: aircraftCurrency,
+          costCurrency: fallbackAircraftCostCurrency,
           hasMissingDistanceWarning: false
         };
       });
@@ -978,7 +969,7 @@ const EventBudgetPage = () => {
           innhopp?.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
         const converted = convertAmountToDisplayCurrency(
           Number(item.line_total || 0),
-          (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency
+          (item.cost_currency || fallbackAircraftCostCurrency).trim().toUpperCase() || fallbackAircraftCostCurrency
         );
         if (existing) {
           existing.minutes += Number(item.quantity || 0);
@@ -997,14 +988,15 @@ const EventBudgetPage = () => {
           unitCost: Number(item.unit_cost || 0),
           totalCost: Number(item.line_total || 0),
           displayTotalCost: converted,
-          costCurrency: (item.cost_currency || aircraftCurrency).trim().toUpperCase() || aircraftCurrency,
+          costCurrency:
+            (item.cost_currency || fallbackAircraftCostCurrency).trim().toUpperCase() || fallbackAircraftCostCurrency,
           hasMissingDistanceWarning: warningMessageForNotes(item.notes) !== null
         });
       });
     return Array.from(byInnhoppID.values()).sort(
       (a, b) => a.sequence - b.sequence || a.sortOrder - b.sortOrder || a.key - b.key
     );
-  }, [lineItems, innhoppsByID, activeEventData?.innhopps, aircraftCurrency, baseCurrency, effectiveDisplayCurrency, liveRates]);
+  }, [lineItems, innhoppsByID, activeEventData?.innhopps, baseCurrency, effectiveDisplayCurrency, liveRates]);
   const aircraftPerInnhoppSplit = useMemo(() => {
     const scaledRows = aircraftPerInnhoppRows.map((row) => ({
       ...row,
@@ -2234,6 +2226,10 @@ const EventBudgetPage = () => {
                               ((innhopp.landing_airfield_id == null || innhopp.landing_airfield_id === innhopp.takeoff_airfield_id)
                                 ? takeoff?.name || null
                                 : null);
+                            const aircraft =
+                              typeof innhopp.aircraft_id === 'number' && innhopp.aircraft_id > 0
+                                ? aircraftByID.get(innhopp.aircraft_id) || null
+                                : null;
                             const elevationDiff =
                               typeof innhopp.elevation === 'number' && typeof takeoff?.elevation === 'number'
                                 ? innhopp.elevation - takeoff.elevation
@@ -2257,6 +2253,8 @@ const EventBudgetPage = () => {
                               innhoppTakeoffName: takeoff?.name || null,
                               innhoppLandingName: landingName,
                               innhoppDistanceByAir: innhopp.distance_by_air ?? null,
+                              innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
+                              innhoppMinimumLoadDuration: aircraft?.minimum_load_duration ?? null,
                               innhoppElevationDiff: elevationDiff,
                               innhoppPrimaryName: innhopp.primary_landing_area?.name || null,
                               innhoppPrimarySize: innhopp.primary_landing_area?.size || null,
@@ -2371,7 +2369,6 @@ const EventBudgetPage = () => {
           closing={previewClosing}
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
-          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
           typeBadgeClassNames={typeBadgeClassNames}
           onNavigateToEntry={(entry) => {
             if (!entry.to) return;
@@ -2458,22 +2455,12 @@ const EventBudgetPage = () => {
               )}
               {parametersTab === 'aircraft' && (
                 <div className="budget-assumptions-row budget-assumptions-row--aircraft">
-                  {renderNumericParameterField('aircraft_price_per_minute')}
-                  <label className="form-field">
-                    <span>Aircraft currency</span>
-                    <select
-                      value={aircraftCurrency}
-                      onChange={(e) => setAircraftCurrency(e.target.value)}
-                    >
-                      {orderedSelectedCurrencies.map((code) => (
-                        <option key={code} value={code}>
-                          {code}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {renderNumericParameterField('aircraft_cruising_speed_kmh')}
-                  {renderNumericParameterField('minimum_load_duration')}
+                  <div className="form-field form-field-full-span">
+                    <span>Aircraft settings</span>
+                    <p className="muted">
+                      Aircraft pricing, currency, speed, slot bands, and minimum load duration are now managed on event details.
+                    </p>
+                  </div>
                 </div>
               )}
               {parametersTab === 'pricing' && (
@@ -2580,7 +2567,7 @@ const EventBudgetPage = () => {
                     {orderedSelectedCurrencies.map((code) => (
                       <span className="budget-currency-chip" key={code} title={rateTooltip(code)}>
                         <span>{code}</span>
-                        {code !== pendingBaseCurrency && code !== aircraftCurrency ? (
+                        {code !== pendingBaseCurrency ? (
                           <button
                             type="button"
                             className="budget-currency-chip-remove"

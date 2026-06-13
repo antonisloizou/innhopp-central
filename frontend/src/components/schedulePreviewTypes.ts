@@ -24,6 +24,9 @@ export type ScheduleEntry = {
   innhoppTakeoffName?: string | null;
   innhoppLandingName?: string | null;
   innhoppDistanceByAir?: number | null;
+  innhoppAircraftSpeedKmh?: number | null;
+  innhoppMinimumLoadDuration?: number | null;
+  innhoppAircraftWarning?: string | null;
   innhoppElevationDiff?: number | null;
   innhoppPrimaryName?: string | null;
   innhoppPrimarySize?: string | null;

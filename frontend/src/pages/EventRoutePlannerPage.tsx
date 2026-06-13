@@ -3,13 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Accommodation, Event, copyEvent, deleteEvent, getEvent, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
 import { GroundCrew, listGroundCrews, listMeals, listOthers, listTransports, Meal, OtherLogistic, Transport } from '../api/logistics';
-import { getBudgetAssumptions, getEventBudget } from '../api/budgets';
 import { useAuth } from '../auth/AuthProvider';
 import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import { formatEventLocal, getEventLocalDateKey, getEventLocalTimeParts, parseEventLocal } from '../utils/eventDate';
 import { parseCoordinates } from '../utils/coordinates';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import EventGearMenu from '../components/EventGearMenu';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
@@ -219,7 +219,6 @@ const EventRoutePlannerPage = () => {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [loading, setLoading] = useState(true);
-  const [budgetAircraftSpeedKmh, setBudgetAircraftSpeedKmh] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
@@ -241,31 +240,6 @@ const EventRoutePlannerPage = () => {
   const [previewEntry, setPreviewEntry] = useState<RoutePlannerEntry | null>(null);
   const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<RoutePlannerEntry | null>(null);
   const [previewClosing, setPreviewClosing] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadBudgetSpeed = async () => {
-      if (!eventId) return;
-      setBudgetAircraftSpeedKmh(null);
-      try {
-        const budget = await getEventBudget(Number(eventId));
-        const assumptions = await getBudgetAssumptions(budget.id);
-        if (cancelled) return;
-        const speed = assumptions?.values?.aircraft_cruising_speed_kmh;
-        if (typeof speed === 'number' && Number.isFinite(speed) && speed > 0) {
-          setBudgetAircraftSpeedKmh(speed);
-        } else {
-          setBudgetAircraftSpeedKmh(null);
-        }
-      } catch {
-        if (!cancelled) setBudgetAircraftSpeedKmh(null);
-      }
-    };
-    void loadBudgetSpeed();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
 
   const resolveLocationStop = useCallback(
     (name: string | null | undefined) => {
@@ -460,6 +434,11 @@ const EventRoutePlannerPage = () => {
     Other: 'schedule-type-badge schedule-type-badge--other'
   };
 
+  const aircraftByID = useMemo(() => {
+    const entries = (eventData?.aircraft || []).map((aircraft) => [aircraft.id, aircraft] as const);
+    return new Map(entries);
+  }, [eventData?.aircraft]);
+
   const buildEntriesForDay = useCallback(
     (day: DayBucket) => {
       const entries: RoutePlannerEntry[] = [];
@@ -470,6 +449,8 @@ const EventRoutePlannerPage = () => {
         const landingName =
           landing?.name ||
           ((item.landing_airfield_id == null || item.landing_airfield_id === item.takeoff_airfield_id) ? takeoff?.name || null : null);
+        const aircraft = item.aircraft_id ? aircraftByID.get(item.aircraft_id) || null : null;
+        const aircraftWarning = getInnhoppAircraftWarning(item, eventData?.aircraft || []);
         const elevationDiff =
           typeof item.elevation === 'number' && typeof takeoff?.elevation === 'number' ? item.elevation - takeoff.elevation : null;
         const routePoints = hasText(item.coordinates)
@@ -506,6 +487,8 @@ const EventRoutePlannerPage = () => {
           innhoppTakeoffName: takeoff?.name || null,
           innhoppLandingName: landingName,
           innhoppDistanceByAir: item.distance_by_air ?? null,
+          innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
+          innhoppAircraftWarning: aircraftWarning,
           innhoppElevationDiff: elevationDiff,
           innhoppPrimaryName: item.primary_landing_area?.name || null,
           innhoppPrimarySize: item.primary_landing_area?.size || null,
@@ -696,7 +679,7 @@ const EventRoutePlannerPage = () => {
         return a.sortValue - b.sortValue;
       });
     },
-    [airfields, eventData, participantOnly, resolveLocationStop]
+    [aircraftByID, airfields, eventData, participantOnly, resolveLocationStop]
   );
 
   const entriesByDay = useMemo(
@@ -1334,6 +1317,9 @@ const EventRoutePlannerPage = () => {
                                 </div>
                               </div>
                               {entry.subtitle ? <div className="muted event-schedule-wrap-text">{entry.subtitle}</div> : null}
+                              {entry.type === 'Innhopp' && entry.innhoppAircraftWarning ? (
+                                <div className="muted event-schedule-wrap-text">{entry.innhoppAircraftWarning}</div>
+                              ) : null}
                               {!entry.disabled && entry.routePoints.length > 1 ? (
                                 <div className="muted event-route-planner-missing-note">
                                   {entry.routePoints.length} route points will be included
@@ -1357,7 +1343,6 @@ const EventRoutePlannerPage = () => {
           closing={previewClosing}
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
-          budgetAircraftSpeedKmh={budgetAircraftSpeedKmh}
           typeBadgeClassNames={typeBadgeClassNames}
         />
       ) : null}
