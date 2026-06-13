@@ -30,117 +30,15 @@ func NewHandler(db *pgxpool.Pool) *Handler {
 	return &Handler{db: db}
 }
 
-func BackfillAircraftAssignmentsFromBudgetParams(ctx context.Context, db *pgxpool.Pool) error {
-	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	type legacyEvent struct {
-		EventID          int64
-		EventName        string
-		BudgetID         int64
-		AircraftCurrency string
-	}
-
-	rows, err := tx.Query(ctx, `
-		SELECT e.id, e.name, b.id, b.aircraft_currency
-		FROM events e
-		JOIN event_budgets b ON b.event_id = e.id
-		WHERE EXISTS (
-			SELECT 1
-			FROM event_innhopps i
-			WHERE i.event_id = e.id
-			  AND i.aircraft_id IS NULL
-		)
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM event_aircraft ea
-			WHERE ea.event_id = e.id
-		)
-		ORDER BY e.id ASC
-	`)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	eventsToBackfill := make([]legacyEvent, 0)
-	for rows.Next() {
-		var item legacyEvent
-		if err := rows.Scan(&item.EventID, &item.EventName, &item.BudgetID, &item.AircraftCurrency); err != nil {
-			return err
-		}
-		eventsToBackfill = append(eventsToBackfill, item)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, item := range eventsToBackfill {
-		aircraftName := strings.TrimSpace(item.EventName)
-		if aircraftName == "" {
-			aircraftName = "Event"
-		}
-		aircraftName += " Aircraft"
-
-		ratePerMinute := defaultAssumptions["aircraft_price_per_minute"]
-		cruisingSpeedKmh := defaultAssumptions["aircraft_cruising_speed_kmh"]
-		minimumLoadDuration := defaultAssumptions["minimum_load_duration"]
-		if err := tx.QueryRow(ctx, `
-			SELECT
-				COALESCE(MAX(CASE WHEN key = 'aircraft_price_per_minute' THEN value_num END)::double precision, $2),
-				COALESCE(MAX(CASE WHEN key = 'aircraft_cruising_speed_kmh' THEN value_num END)::double precision, $3),
-				COALESCE(MAX(CASE WHEN key = 'minimum_load_duration' THEN value_num END)::double precision, $4)
-			FROM budget_assumptions
-			WHERE budget_id = $1
-		`, item.BudgetID, ratePerMinute, cruisingSpeedKmh, minimumLoadDuration).Scan(&ratePerMinute, &cruisingSpeedKmh, &minimumLoadDuration); err != nil {
-			return err
-		}
-
-		var aircraftID int64
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO aircraft
-				(name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, notes)
-			VALUES
-				($1, 'time', $2, $3, $4, $5, '')
-			RETURNING id
-		`, aircraftName, normalizeCurrency(item.AircraftCurrency), ratePerMinute, cruisingSpeedKmh, minimumLoadDuration).Scan(&aircraftID); err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO event_aircraft (event_id, aircraft_id, sort_order)
-			VALUES ($1, $2, 0)
-			ON CONFLICT (event_id, aircraft_id) DO NOTHING
-		`, item.EventID, aircraftID); err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(ctx, `
-			UPDATE event_innhopps
-			SET aircraft_id = $2
-			WHERE event_id = $1
-			  AND aircraft_id IS NULL
-		`, item.EventID, aircraftID); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit(ctx)
-}
-
 type Budget struct {
-	ID               int64     `json:"id"`
-	EventID          int64     `json:"event_id"`
-	Name             string    `json:"name"`
-	BaseCurrency     string    `json:"base_currency"`
-	AircraftCurrency string    `json:"-"`
-	Status           string    `json:"status"`
-	Notes            string    `json:"notes,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+	EventID      int64     `json:"event_id"`
+	Name         string    `json:"name"`
+	BaseCurrency string    `json:"base_currency"`
+	Status       string    `json:"status"`
+	Notes        string    `json:"notes,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type BudgetSection struct {
@@ -233,9 +131,6 @@ var defaultAssumptions = map[string]float64{
 	"crew_on_load_count":                      2,
 	"confirm_load_count":                      1,
 	"full_load_count":                         2,
-	"aircraft_price_per_minute":               0,
-	"minimum_load_duration":                   0,
-	"aircraft_cruising_speed_kmh":             180,
 	"target_markup_percent":                   20,
 	"optional_tip_percent":                    8,
 	"cost_drift_percent":                      10,
@@ -245,14 +140,6 @@ var defaultAssumptions = map[string]float64{
 	"estimate_food_per_day":                   0,
 	"estimate_staff_salary_per_person_day":    0,
 }
-
-var legacyAircraftAssumptionKeys = map[string]struct{}{
-	"aircraft_price_per_minute":   {},
-	"minimum_load_duration":       {},
-	"aircraft_cruising_speed_kmh": {},
-}
-
-var activeBudgetAssumptionDefaults = filterLegacyAircraftAssumptions(defaultAssumptions)
 
 var estimateAssumptionKeys = map[string]struct{}{
 	"estimate_accommodation_per_person_night": {},
@@ -267,8 +154,6 @@ const autoAircraftMissingAircraftSuffix = ":missing-aircraft"
 const autoAircraftSlotOverflowSuffix = ":slot-overflow"
 const autoEstimateLineItemNotePrefix = "[auto-estimate]"
 const autoEstimateWarningSuffix = ":estimate-generated"
-const legacyPlannedLoadCountKey = "planned_load_count"
-const fullLoadCountKey = "full_load_count"
 
 func (h *Handler) EventBudgetRoutes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
@@ -354,34 +239,6 @@ func clampNonNegative(v float64) float64 {
 		return 0
 	}
 	return v
-}
-
-func filterPublicAssumptions(values map[string]float64) map[string]float64 {
-	if len(values) == 0 {
-		return map[string]float64{}
-	}
-	filtered := make(map[string]float64, len(values))
-	for key, value := range values {
-		if _, legacy := legacyAircraftAssumptionKeys[key]; legacy {
-			continue
-		}
-		filtered[key] = value
-	}
-	return filtered
-}
-
-func filterLegacyAircraftAssumptions(values map[string]float64) map[string]float64 {
-	if len(values) == 0 {
-		return map[string]float64{}
-	}
-	filtered := make(map[string]float64, len(values))
-	for key, value := range values {
-		if _, legacy := legacyAircraftAssumptionKeys[key]; legacy {
-			continue
-		}
-		filtered[key] = value
-	}
-	return filtered
 }
 
 type aircraftSlotBand struct {
@@ -757,7 +614,6 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "base_currency must be a 3-letter ISO code")
 		return
 	}
-	aircraftCurrency := baseCurrency
 
 	tx, err := h.db.Begin(r.Context())
 	if err != nil {
@@ -775,15 +631,14 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 	var budget Budget
 	insertErr := tx.QueryRow(
 		r.Context(),
-		`INSERT INTO event_budgets (event_id, name, base_currency, aircraft_currency, status, notes)
-         VALUES ($1, $2, $3, $4, 'draft', $5)
-         RETURNING id, event_id, name, base_currency, aircraft_currency, status, notes, created_at, updated_at`,
+		`INSERT INTO event_budgets (event_id, name, base_currency, status, notes)
+         VALUES ($1, $2, $3, 'draft', $4)
+         RETURNING id, event_id, name, base_currency, status, notes, created_at, updated_at`,
 		eventID,
 		strings.TrimSpace(payload.Name),
 		baseCurrency,
-		aircraftCurrency,
 		strings.TrimSpace(payload.Notes),
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.AircraftCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	if insertErr != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(insertErr, &pgErr) && pgErr.Code == "23505" {
@@ -808,7 +663,7 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for k, v := range activeBudgetAssumptionDefaults {
+	for k, v := range defaultAssumptions {
 		if _, err := tx.Exec(
 			r.Context(),
 			`INSERT INTO budget_assumptions (budget_id, key, value_num) VALUES ($1, $2, $3)`,
@@ -832,18 +687,6 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to initialize currencies")
 		return
 	}
-	if _, err := tx.Exec(
-		r.Context(),
-		`INSERT INTO budget_currencies (budget_id, currency_code, rate_to_base)
-         VALUES ($1, $2, 1)
-         ON CONFLICT (budget_id, currency_code) DO NOTHING`,
-		budget.ID,
-		budget.AircraftCurrency,
-	); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to initialize currencies")
-		return
-	}
-
 	if err := tx.Commit(r.Context()); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create budget")
 		return
@@ -911,10 +754,6 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	aircraftCurrency := current.AircraftCurrency
-	if !isValidCurrencyCode(aircraftCurrency) {
-		aircraftCurrency = baseCurrency
-	}
 	status := current.Status
 	if payload.Status != nil {
 		status = strings.TrimSpace(*payload.Status)
@@ -949,11 +788,11 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRow(
 		r.Context(),
 		`UPDATE event_budgets
-         SET name = $1, base_currency = $2, aircraft_currency = $3, status = $4, notes = $5, updated_at = NOW()
-         WHERE id = $6
-         RETURNING id, event_id, name, base_currency, aircraft_currency, status, notes, created_at, updated_at`,
-		name, baseCurrency, aircraftCurrency, status, notes, budgetID,
-	).Scan(&updated.ID, &updated.EventID, &updated.Name, &updated.BaseCurrency, &updated.AircraftCurrency, &updated.Status, &updated.Notes, &updated.CreatedAt, &updated.UpdatedAt); err != nil {
+         SET name = $1, base_currency = $2, status = $3, notes = $4, updated_at = NOW()
+         WHERE id = $5
+         RETURNING id, event_id, name, base_currency, status, notes, created_at, updated_at`,
+		name, baseCurrency, status, notes, budgetID,
+	).Scan(&updated.ID, &updated.EventID, &updated.Name, &updated.BaseCurrency, &updated.Status, &updated.Notes, &updated.CreatedAt, &updated.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "budget not found")
 			return
@@ -971,17 +810,6 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		baseCurrency,
 	); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync budget currency")
-		return
-	}
-	if _, err := h.db.Exec(
-		r.Context(),
-		`INSERT INTO budget_currencies (budget_id, currency_code, rate_to_base)
-         VALUES ($1, $2, 1)
-         ON CONFLICT (budget_id, currency_code) DO NOTHING`,
-		budgetID,
-		aircraftCurrency,
-	); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft currency")
 		return
 	}
 	if err := h.syncAutoAircraftLineItems(r.Context(), budgetID); err != nil {
@@ -1322,10 +1150,9 @@ func (h *Handler) getAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
-	publicAssumptions := filterPublicAssumptions(assumptions)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"values":              publicAssumptions,
-		"parameters":          publicAssumptions,
+		"values":              assumptions,
+		"parameters":          assumptions,
 		"estimate_currencies": estimateCurrencies,
 	})
 }
@@ -1359,13 +1186,7 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		if k == "" {
 			continue
 		}
-		if k == legacyPlannedLoadCountKey {
-			k = fullLoadCountKey
-		}
 		if _, ok := defaultAssumptions[k]; !ok {
-			continue
-		}
-		if _, legacy := legacyAircraftAssumptionKeys[k]; legacy {
 			continue
 		}
 		if strings.HasSuffix(k, "_percent") && val < 0 {
@@ -1422,10 +1243,9 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
-	publicAssumptions := filterPublicAssumptions(updated)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"values":              publicAssumptions,
-		"parameters":          publicAssumptions,
+		"values":              updated,
+		"parameters":          updated,
 		"estimate_currencies": estimateCurrencies,
 	})
 }
@@ -1458,9 +1278,7 @@ func (h *Handler) listCurrencies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	baseCurrency := normalizeCurrency(budget.BaseCurrency)
-	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
 	codes = appendUniqueCurrency(codes, baseCurrency)
-	codes = appendUniqueCurrency(codes, aircraftCurrency)
 	rates, err := h.fetchLiveCurrencyRates(r.Context(), budget.BaseCurrency, codes)
 	if err != nil || len(rates) == 0 {
 		rates = fallbackRates
@@ -1526,14 +1344,9 @@ func (h *Handler) updateCurrencies(w http.ResponseWriter, r *http.Request) {
 		normalized = append(normalized, BudgetCurrency{CurrencyCode: code})
 	}
 	baseCurrency := normalizeCurrency(budget.BaseCurrency)
-	aircraftCurrency := normalizeCurrency(budget.AircraftCurrency)
 	if !seen[baseCurrency] {
 		normalized = append(normalized, BudgetCurrency{CurrencyCode: baseCurrency})
 		seen[baseCurrency] = true
-	}
-	if !seen[aircraftCurrency] {
-		normalized = append(normalized, BudgetCurrency{CurrencyCode: aircraftCurrency})
-		seen[aircraftCurrency] = true
 	}
 	codes := make([]string, 0, len(normalized))
 	for _, row := range normalized {
@@ -1596,10 +1409,9 @@ func (h *Handler) updateCurrencies(w http.ResponseWriter, r *http.Request) {
 	}
 	rates[baseCurrency] = 1
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"base_currency":     budget.BaseCurrency,
-		"aircraft_currency": budget.AircraftCurrency,
-		"currencies":        codes,
-		"live_rates":        rates,
+		"base_currency": budget.BaseCurrency,
+		"currencies":    codes,
+		"live_rates":    rates,
 	})
 }
 
@@ -1847,11 +1659,11 @@ func (h *Handler) fetchBudgetByEvent(ctx context.Context, eventID int64) (Budget
 	var budget Budget
 	err := h.db.QueryRow(
 		ctx,
-		`SELECT id, event_id, name, base_currency, aircraft_currency, status, notes, created_at, updated_at
+		`SELECT id, event_id, name, base_currency, status, notes, created_at, updated_at
          FROM event_budgets
          WHERE event_id = $1`,
 		eventID,
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.AircraftCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	return budget, err
 }
 
@@ -1859,11 +1671,11 @@ func (h *Handler) fetchBudget(ctx context.Context, budgetID int64) (Budget, erro
 	var budget Budget
 	err := h.db.QueryRow(
 		ctx,
-		`SELECT id, event_id, name, base_currency, aircraft_currency, status, notes, created_at, updated_at
+		`SELECT id, event_id, name, base_currency, status, notes, created_at, updated_at
          FROM event_budgets
          WHERE id = $1`,
 		budgetID,
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.AircraftCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	return budget, err
 }
 
@@ -1884,8 +1696,6 @@ func (h *Handler) fetchAssumptionsWithEstimateCurrencies(ctx context.Context, bu
 		return nil, nil, err
 	}
 	defer rows.Close()
-	var legacyFullLoadCount *float64
-	hasFullLoadCount := false
 	for rows.Next() {
 		var key string
 		var val *float64
@@ -1901,16 +1711,6 @@ func (h *Handler) fetchAssumptionsWithEstimateCurrencies(ctx context.Context, bu
 				goto nextRow
 			}
 		}
-		if key == fullLoadCountKey {
-			hasFullLoadCount = true
-		}
-		if key == legacyPlannedLoadCountKey {
-			if val != nil {
-				v := *val
-				legacyFullLoadCount = &v
-			}
-			goto nextRow
-		}
 		if _, ok := defaultAssumptions[key]; !ok {
 			goto nextRow
 		}
@@ -1921,9 +1721,6 @@ func (h *Handler) fetchAssumptionsWithEstimateCurrencies(ctx context.Context, bu
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
-	}
-	if !hasFullLoadCount && legacyFullLoadCount != nil {
-		values[fullLoadCountKey] = *legacyFullLoadCount
 	}
 	return values, estimateCurrencies, nil
 }
@@ -2111,7 +1908,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	worstAircraftLoads := confirmLoads + 1
 	fullAircraftLoads := fullLoads
 
-	confirmAircraftDerivedCost, _, _, confirmAircraftCurrencies, aircraftErr := h.computeAircraftScenarioTotals(
+	confirmAircraftDerivedCost, _, _, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
 		confirmAircraftLoads,
@@ -2133,7 +1930,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullAircraftCurrencies, aircraftErr := h.computeAircraftScenarioTotals(
+	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
 		fullAircraftLoads,
@@ -2144,15 +1941,6 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	aircraftCurrencyLabel := ""
-	if len(fullAircraftCurrencies) == 1 {
-		aircraftCurrencyLabel = fullAircraftCurrencies[0]
-	} else if len(fullAircraftCurrencies) > 1 {
-		aircraftCurrencyLabel = "MIXED"
-	} else if len(confirmAircraftCurrencies) == 1 {
-		aircraftCurrencyLabel = confirmAircraftCurrencies[0]
-	}
-
 	lineRows, err := h.db.Query(
 		ctx,
 		`SELECT section_id, quantity, unit_cost, cost_currency, service_date, COALESCE(notes, '')
@@ -2340,9 +2128,6 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 			sectionData["derived_total"] = total
 			sectionData["air_minutes"] = roundMoney(fullAircraftMinutes)
 			sectionData["air_distance_km"] = roundMoney(fullAircraftDistance)
-			if aircraftCurrencyLabel != "" {
-				sectionData["aircraft_currency"] = aircraftCurrencyLabel
-			}
 			sectionData["total"] = total
 		} else {
 			switch budgetMethod {
@@ -2361,15 +2146,14 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 	if !aircraftSectionPresent {
 		sectionTotals = append(sectionTotals, map[string]any{
-			"section_id":        int64(0),
-			"code":              "aircraft",
-			"name":              "Aircraft",
-			"total":             roundMoney(fullAircraftDerivedCost),
-			"manual_total":      float64(0),
-			"derived_total":     roundMoney(fullAircraftDerivedCost),
-			"air_minutes":       roundMoney(fullAircraftMinutes),
-			"air_distance_km":   roundMoney(fullAircraftDistance),
-			"aircraft_currency": aircraftCurrencyLabel,
+			"section_id":      int64(0),
+			"code":            "aircraft",
+			"name":            "Aircraft",
+			"total":           roundMoney(fullAircraftDerivedCost),
+			"manual_total":    float64(0),
+			"derived_total":   roundMoney(fullAircraftDerivedCost),
+			"air_minutes":     roundMoney(fullAircraftMinutes),
+			"air_distance_km": roundMoney(fullAircraftDistance),
 		})
 		expectedCost += fullAircraftDerivedCost
 	}
@@ -2501,12 +2285,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		})
 	}
 
-	publicAssumptions := filterPublicAssumptions(assumptions)
-
 	return BudgetSummary{
 		Budget:                budget,
-		Parameters:            publicAssumptions,
-		Assumptions:           publicAssumptions,
+		Parameters:            assumptions,
+		Assumptions:           assumptions,
 		SectionTotals:         sectionTotals,
 		DepositAmount:         depositAmountBase,
 		MainInvoiceAmount:     mainInvoiceAmountBase,

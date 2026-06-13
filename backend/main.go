@@ -64,9 +64,6 @@ func main() {
 	if err := registrations.BackfillStaffRegistrations(backfillCtx, pool); err != nil {
 		log.Printf("staff registration backfill failed: %v", err)
 	}
-	if err := budgets.BackfillAircraftAssignmentsFromBudgetParams(backfillCtx, pool); err != nil {
-		log.Printf("aircraft backfill failed: %v", err)
-	}
 	cancelBackfill()
 	runRegistrationExpirySweep(pool)
 	go startRegistrationExpiryWorker(pool)
@@ -636,16 +633,15 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             base_currency TEXT NOT NULL DEFAULT 'EUR',
-            aircraft_currency TEXT NOT NULL DEFAULT 'EUR',
             status TEXT NOT NULL DEFAULT 'draft',
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
 		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS base_currency TEXT NOT NULL DEFAULT 'EUR'`,
-		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS aircraft_currency TEXT NOT NULL DEFAULT 'EUR'`,
 		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`ALTER TABLE event_budgets DROP COLUMN IF EXISTS aircraft_currency`,
 		`CREATE TABLE IF NOT EXISTS budget_sections (
             id SERIAL PRIMARY KEY,
             budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
@@ -703,6 +699,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS value_text TEXT`,
 		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`DELETE FROM budget_assumptions WHERE key = 'aircraft_load_count'`,
+		`DELETE FROM budget_assumptions
+         WHERE key IN ('aircraft_price_per_minute', 'aircraft_cruising_speed_kmh', 'minimum_load_duration', 'planned_load_count')`,
 		`CREATE TABLE IF NOT EXISTS budget_scenarios (
             id SERIAL PRIMARY KEY,
             budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,
