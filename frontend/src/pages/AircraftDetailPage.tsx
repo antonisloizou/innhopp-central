@@ -13,7 +13,7 @@ import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPage
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
 
 const emptyBand = (sortOrder: number): AircraftSlotPricingBandInput => ({
-  max_distance_km: 0,
+  max_distance_km: 40,
   slot_multiplier: 1,
   sort_order: sortOrder
 });
@@ -207,7 +207,16 @@ const AircraftDetailPage = () => {
             <span>Pricing model</span>
             <select
               value={form.pricing_model}
-              onChange={(e) => setForm((prev) => ({ ...prev, pricing_model: e.target.value as AircraftPricingModel }))}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  pricing_model: e.target.value as AircraftPricingModel,
+                  slot_pricing_bands:
+                    e.target.value === 'slot' && (!prev.slot_pricing_bands || prev.slot_pricing_bands.length === 0)
+                      ? [emptyBand(0)]
+                      : prev.slot_pricing_bands
+                }))
+              }
             >
               <option value="time">Time</option>
               <option value="slot">Slot</option>

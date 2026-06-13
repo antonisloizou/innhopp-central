@@ -1407,12 +1407,6 @@ const InnhoppDetailPage = () => {
                   </option>
                 ))}
               </select>
-              <span className="muted">
-                {selectedAircraft
-                  ? `${selectedAircraft.name} · ${selectedAircraft.pricing_model === 'time' ? 'Time priced' : 'Slot priced'}`
-                  : 'Assign an aircraft to enable aircraft-based costing and time estimates.'}
-              </span>
-              {selectedAircraftWarning ? <span className="muted">{selectedAircraftWarning}</span> : null}
             </label>
             <div
               className={`form-grid innhopp-location-grid form-field-full-span${

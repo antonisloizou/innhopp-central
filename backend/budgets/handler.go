@@ -638,8 +638,8 @@ func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, li
 	}
 }
 
-func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
-	if loadCount <= 0 {
+func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+	if participantCount <= 0 {
 		return aircraftComputedMetric{}
 	}
 	if item.PricePerSlot == nil || *item.PricePerSlot < 0 || len(item.SlotBands) == 0 {
@@ -659,7 +659,7 @@ func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, li
 		}
 	}
 	slotOverflow := !found
-	quantity := roundMoney(float64(loadCount) * selected.SlotMultiplier)
+	quantity := roundMoney(float64(participantCount) * selected.SlotMultiplier)
 	if quantity <= 0 {
 		return aircraftComputedMetric{}
 	}
@@ -670,32 +670,32 @@ func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, li
 		UnitCost:      unitCost,
 		CostCurrency:  normalizeCurrency(item.RateCurrency),
 		BaseCost:      roundMoney(toBaseAmount(quantity*unitCost, rateToBase)),
-		AirDistanceKm: distance * float64(loadCount),
+		AirDistanceKm: distance * float64(participantCount),
 		SlotOverflow:  slotOverflow,
 		Valid:         true,
 	}
 }
 
-func computeAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+func computeAircraftMetric(item eventAircraftInnhopp, loadCount int, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
 	if item.AircraftID == nil || strings.TrimSpace(item.AircraftName) == "" {
 		return aircraftComputedMetric{MissingAircraft: true}
 	}
 	switch strings.ToLower(strings.TrimSpace(item.PricingModel)) {
 	case "slot":
-		return computeSlotBasedAircraftMetric(item, loadCount, liveRates, fallbackRates)
+		return computeSlotBasedAircraftMetric(item, participantCount, liveRates, fallbackRates)
 	default:
 		return computeTimeBasedAircraftMetric(item, loadCount, liveRates, fallbackRates)
 	}
 }
 
-func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int64, loadCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, currencies []string, err error) {
+func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int64, loadCount int, participantCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, currencies []string, err error) {
 	items, err := h.fetchAircraftInnhopps(ctx, eventID)
 	if err != nil {
 		return 0, 0, 0, nil, err
 	}
 	currencySet := map[string]struct{}{}
 	for _, item := range items {
-		metric := computeAircraftMetric(item, loadCount, liveRates, fallbackRates)
+		metric := computeAircraftMetric(item, loadCount, participantCount, liveRates, fallbackRates)
 		if !metric.Valid {
 			continue
 		}
@@ -2115,6 +2115,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		ctx,
 		budget.EventID,
 		confirmAircraftLoads,
+		confirmParticipants,
 		liveRates,
 		fallbackRates,
 	)
@@ -2125,6 +2126,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		ctx,
 		budget.EventID,
 		worstAircraftLoads,
+		worstParticipants,
 		liveRates,
 		fallbackRates,
 	)
@@ -2135,6 +2137,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		ctx,
 		budget.EventID,
 		fullAircraftLoads,
+		fullParticipants,
 		liveRates,
 		fallbackRates,
 	)
@@ -2650,6 +2653,10 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 	}
 
 	fullLoadCount := int(clampNonNegative(assumptions["full_load_count"]))
+	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
+	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
+	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
+	_, _, fullParticipants := scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoadCount)
 	liveRates, _ := h.fetchLiveCurrencyRates(ctx, budget.BaseCurrency, nil)
 	if liveRates == nil {
 		liveRates = map[string]float64{}
@@ -2681,7 +2688,7 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		if fullLoadCount <= 0 {
 			continue
 		}
-		metric := computeAircraftMetric(row, fullLoadCount, liveRates, fallbackRates)
+		metric := computeAircraftMetric(row, fullLoadCount, fullParticipants, liveRates, fallbackRates)
 		if !metric.Valid {
 			continue
 		}

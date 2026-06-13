@@ -261,7 +261,7 @@ const toAircraftFormRow = (aircraft: EventAircraft, index: number): AircraftForm
       max_distance_km: band.max_distance_km,
       slot_multiplier: band.slot_multiplier,
       sort_order: band.sort_order ?? bandIndex
-    })) || []
+    })) || [{ max_distance_km: 40, slot_multiplier: 1, sort_order: 0 }]
 });
 
 const emptyAircraftFormRow = (sortOrder: number): AircraftFormRow => ({
@@ -274,7 +274,7 @@ const emptyAircraftFormRow = (sortOrder: number): AircraftFormRow => ({
   price_per_slot: 0,
   notes: '',
   sort_order: sortOrder,
-  slot_pricing_bands: [{ max_distance_km: 20, slot_multiplier: 1, sort_order: 0 }]
+  slot_pricing_bands: [{ max_distance_km: 40, slot_multiplier: 1, sort_order: 0 }]
 });
 
 const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
@@ -1504,6 +1504,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   };
 
   const handleAttachAircraft = () => {
+    if (selectedAircraftId === '__new__') {
+      handleAddAircraftRow();
+      setSelectedAircraftId('');
+      return;
+    }
     const id = Number(selectedAircraftId);
     if (!id) return;
     const item = allAircraft.find((candidate) => candidate.id === id);
@@ -2247,11 +2252,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                     <div className="card-header">
                       <strong>{row.name.trim() || `Aircraft ${index + 1}`}</strong>
                       <div className="card-actions">
-                        {row.id ? (
-                          <Link to={`/aircraft/${row.id}`} className="ghost" onClick={saveDetailState}>
-                            Open page
-                          </Link>
-                        ) : null}
                         <button type="button" className="ghost danger" onClick={() => handleRemoveAircraftRow(index)}>
                           Remove
                         </button>
@@ -2266,7 +2266,15 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         <span>Pricing model</span>
                         <select
                           value={row.pricing_model}
-                          onChange={(e) => updateAircraftRow(index, { pricing_model: e.target.value as AircraftFormRow['pricing_model'] })}
+                          onChange={(e) =>
+                            updateAircraftRow(index, {
+                              pricing_model: e.target.value as AircraftFormRow['pricing_model'],
+                              slot_pricing_bands:
+                                e.target.value === 'slot' && (!row.slot_pricing_bands || row.slot_pricing_bands.length === 0)
+                                  ? [{ max_distance_km: 40, slot_multiplier: 1, sort_order: 0 }]
+                                  : row.slot_pricing_bands
+                            })
+                          }
                         >
                           <option value="time">Time</option>
                           <option value="slot">Slot</option>
@@ -2382,8 +2390,19 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             <div className="form-grid event-detail-top-margin">
               <label className="form-field">
                 <span>Attach existing aircraft</span>
-                <select value={selectedAircraftId} onChange={(e) => setSelectedAircraftId(e.target.value)}>
+                <select
+                  value={selectedAircraftId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedAircraftId(val);
+                    if (val === '__new__') {
+                      handleAddAircraftRow();
+                      setSelectedAircraftId('');
+                    }
+                  }}
+                >
                   <option value="">Choose aircraft</option>
+                  <option value="__new__">Create new aircraft…</option>
                   {availableAircraft.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
@@ -2395,13 +2414,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                 <button type="button" className="primary" onClick={handleAttachAircraft} disabled={!selectedAircraftId}>
                   Attach aircraft
                 </button>
-                <button type="button" className="ghost" onClick={handleAddAircraftRow}>
-                  Create inline
-                </button>
-                <Link to="/aircraft/new" className="ghost" onClick={saveDetailState}>
-                  Open full create page
-                </Link>
               </div>
+            </div>
+            <div className="form-actions event-detail-top-margin">
+              <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
+                Save
+              </button>
+              {message && <span className="muted">{message}</span>}
             </div>
           </>
         )}

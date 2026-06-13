@@ -356,6 +356,194 @@ func TestSyncAutoAircraftLineItemsSameAirfieldZeroDistanceUsesMinimumWithoutWarn
 	}
 }
 
+func TestSyncAutoAircraftLineItemsUsesParticipantsForSlotPricedAircraft(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'full_load_size' THEN 14
+           WHEN 'crew_on_load_count' THEN 2
+           WHEN 'confirm_load_count' THEN 1
+           WHEN 'full_load_count' THEN 2
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var aircraftID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO aircraft (name, pricing_model, rate_currency, price_per_slot, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Slot Aircraft', 'slot', 'EUR', 100, 180, 10)
+         RETURNING id`,
+	).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+         VALUES ($1, 20, 1, 0), ($1, 40, 1.5, 1)`,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert slot bands failed: %v", err)
+	}
+
+	var innhoppID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, distance_by_air)
+         VALUES ($1, 1, 'Slot Innhopp', $2, 30)
+         RETURNING id`,
+		eventID,
+		aircraftID,
+	).Scan(&innhoppID); err != nil {
+		t.Fatalf("insert innhopp failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	if err := h.syncAutoAircraftLineItems(ctx, budgetID); err != nil {
+		t.Fatalf("sync auto aircraft line items failed: %v", err)
+	}
+
+	var qty float64
+	var unitCost float64
+	if err := db.QueryRow(
+		ctx,
+		`SELECT quantity, unit_cost
+         FROM budget_line_items
+         WHERE budget_id = $1
+           AND notes LIKE '[auto-aircraft-innhopp]:' || $2
+         LIMIT 1`,
+		budgetID,
+		strconv.FormatInt(innhoppID, 10)+"%",
+	).Scan(&qty, &unitCost); err != nil {
+		t.Fatalf("load generated line item failed: %v", err)
+	}
+
+	// full participants = (14 - 2) * 2 = 24; matching slot band multiplier = 1.5
+	if qty != 36 {
+		t.Fatalf("quantity mismatch: got %.2f want 36.00", qty)
+	}
+	if unitCost != 100 {
+		t.Fatalf("unit cost mismatch: got %.2f want 100.00", unitCost)
+	}
+}
+
+func TestGetSummaryUsesParticipantsForSlotPricedAircraft(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'full_load_size' THEN 14
+           WHEN 'crew_on_load_count' THEN 2
+           WHEN 'confirm_load_count' THEN 1
+           WHEN 'full_load_count' THEN 2
+           WHEN 'cost_drift_percent' THEN 10
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count', 'cost_drift_percent')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var aircraftID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO aircraft (name, pricing_model, rate_currency, price_per_slot, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Slot Aircraft', 'slot', 'EUR', 100, 180, 10)
+         RETURNING id`,
+	).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+         VALUES ($1, 20, 1, 0), ($1, 40, 1.5, 1)`,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert slot bands failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, distance_by_air)
+         VALUES ($1, 1, 'Slot Innhopp', $2, 30)`,
+		eventID,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert innhopp failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Get("/api/budgets/{budgetID}/summary", h.getSummary)
+	req := httptest.NewRequest(http.MethodGet, "/api/budgets/"+strconv.FormatInt(budgetID, 10)+"/summary", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload BudgetSummary
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode summary failed: %v", err)
+	}
+
+	if payload.ExpectedCost != 3600 {
+		t.Fatalf("expected cost mismatch: got %.2f want 3600.00", payload.ExpectedCost)
+	}
+	if payload.CostWithDrift != 3960 {
+		t.Fatalf("cost with drift mismatch: got %.2f want 3960.00", payload.CostWithDrift)
+	}
+
+	aircraftTotal := 0.0
+	for _, section := range payload.SectionTotals {
+		code, _ := section["code"].(string)
+		total, _ := section["total"].(float64)
+		if code == "aircraft" {
+			aircraftTotal = total
+			break
+		}
+	}
+	if aircraftTotal != 3600 {
+		t.Fatalf("aircraft section total mismatch: got %.2f want 3600.00", aircraftTotal)
+	}
+}
+
 func TestBackfillAircraftAssignmentsFromBudgetParamsCreatesEditableEventAircraft(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
