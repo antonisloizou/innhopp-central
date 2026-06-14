@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -306,6 +307,46 @@ func displayInnhoppLabel(sequence int64, name string) string {
 		return fmt.Sprintf("#%d %s", sequence, displayName)
 	}
 	return displayName
+}
+
+func (h *Handler) collectBudgetSummaryCurrencyCodes(ctx context.Context, budgetID int64, eventID int64, estimateCurrencies map[string]string, initial []string) ([]string, error) {
+	codes := slices.Clone(initial)
+	for _, currency := range estimateCurrencies {
+		codes = appendUniqueCurrency(codes, currency)
+	}
+
+	lineItemRows, err := h.db.Query(
+		ctx,
+		`SELECT DISTINCT COALESCE(cost_currency, '')
+         FROM budget_line_items
+         WHERE budget_id = $1`,
+		budgetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer lineItemRows.Close()
+
+	for lineItemRows.Next() {
+		var currency string
+		if err := lineItemRows.Scan(&currency); err != nil {
+			return nil, err
+		}
+		codes = appendUniqueCurrency(codes, currency)
+	}
+	if err := lineItemRows.Err(); err != nil {
+		return nil, err
+	}
+
+	aircraftRows, err := h.fetchAircraftInnhopps(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range aircraftRows {
+		codes = appendUniqueCurrency(codes, item.RateCurrency)
+	}
+
+	return codes, nil
 }
 
 func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]eventAircraftInnhopp, error) {
@@ -1867,6 +1908,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		if !foundEventCurrency {
 			currencyCodes = append(currencyCodes, eventCurrency)
 		}
+	}
+	currencyCodes, err = h.collectBudgetSummaryCurrencyCodes(ctx, budgetID, budget.EventID, estimateCurrencies, currencyCodes)
+	if err != nil {
+		return BudgetSummary{}, err
 	}
 	liveRates, liveErr := h.fetchLiveCurrencyRates(ctx, budget.BaseCurrency, currencyCodes)
 	if liveErr != nil {

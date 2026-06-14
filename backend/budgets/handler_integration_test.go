@@ -593,6 +593,87 @@ func TestGetSummaryUsesParticipantsForSlotPricedAircraft(t *testing.T) {
 	}
 }
 
+func TestCollectBudgetSummaryCurrencyCodesIncludesDerivedSourceCurrencies(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO budget_line_items (budget_id, section_id, name, quantity, unit_cost, cost_currency)
+         SELECT $1, id, 'Transport', 1, 100, 'NOK'
+         FROM budget_sections
+         WHERE budget_id = $1 AND code = 'transport_activities'
+         LIMIT 1`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("insert NOK line item failed: %v", err)
+	}
+
+	var aircraftID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO aircraft (name, pricing_model, rate_currency, price_per_slot, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Slot Aircraft', 'slot', 'SEK', 100, 180, 10)
+         RETURNING id`,
+	).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+         VALUES ($1, 20, 1, 0)`,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert slot bands failed: %v", err)
+	}
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, distance_by_air)
+         VALUES ($1, 1, 'Slot Innhopp', $2, 10)`,
+		eventID,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert innhopp failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	codes, err := h.collectBudgetSummaryCurrencyCodes(
+		ctx,
+		budgetID,
+		eventID,
+		map[string]string{"estimate_transport_per_day": "GBP"},
+		[]string{"EUR"},
+	)
+	if err != nil {
+		t.Fatalf("collect summary currency codes failed: %v", err)
+	}
+
+	expected := map[string]bool{"EUR": true, "NOK": true, "SEK": true, "GBP": true}
+	if len(codes) != len(expected) {
+		t.Fatalf("currency code count mismatch: got %v want %v", codes, expected)
+	}
+	for _, code := range codes {
+		if !expected[code] {
+			t.Fatalf("unexpected currency code %q in %v", code, codes)
+		}
+		delete(expected, code)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("missing expected currency codes: %v", expected)
+	}
+}
+
 func openBudgetTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")

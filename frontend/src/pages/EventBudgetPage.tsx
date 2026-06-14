@@ -29,6 +29,12 @@ import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverl
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { useAuth } from '../auth/AuthProvider';
 import { canUseStaffMapsActions } from '../auth/access';
+import {
+  collectBudgetCurrencyCodes,
+  convertAmountViaBaseCurrency,
+  mergeCurrencyRates,
+  normalizeBudgetCurrency
+} from '../utils/budgetCurrency';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import {
   CostSplitMode,
@@ -242,7 +248,8 @@ const EventBudgetPage = () => {
     cost_currency: 'EUR',
     notes: ''
   });
-  const dedupeCurrencies = (codes: string[]) => Array.from(new Set(codes.map((c) => c.trim().toUpperCase()).filter(Boolean)));
+  const dedupeCurrencies = (codes: string[]) =>
+    Array.from(new Set(codes.map((code) => normalizeBudgetCurrency(code, '')).filter(Boolean)));
 
   const routeEventID = Number(eventId);
   const routeHasEventID = Number.isFinite(routeEventID) && routeEventID > 0;
@@ -263,7 +270,7 @@ const EventBudgetPage = () => {
     [events, activeEventID]
   );
   const baseCurrency = budget?.base_currency || 'EUR';
-  const eventCurrency = (activeEventData?.currency || 'EUR').trim().toUpperCase() || 'EUR';
+  const eventCurrency = normalizeBudgetCurrency(activeEventData?.currency, 'EUR');
   const eventRegistrationAmount = useMemo(() => {
     const deposit = Number(activeEventData?.deposit_amount || 0);
     const mainInvoice = Number(activeEventData?.main_invoice_amount || 0);
@@ -276,8 +283,8 @@ const EventBudgetPage = () => {
     setEventCurrencyInput(eventCurrency);
   }, [eventCurrency, activeEventID]);
   const orderedSelectedCurrencies = useMemo(() => {
-    const base = (pendingBaseCurrency || baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
-    const normalized = selectedCurrencies.map((code) => code.trim().toUpperCase()).filter(Boolean);
+    const base = normalizeBudgetCurrency(pendingBaseCurrency || baseCurrency || 'EUR');
+    const normalized = selectedCurrencies.map((code) => normalizeBudgetCurrency(code, '')).filter(Boolean);
     const unique = Array.from(new Set(normalized.filter((code) => code !== base)));
     return [base, ...unique];
   }, [selectedCurrencies, pendingBaseCurrency, baseCurrency]);
@@ -315,15 +322,13 @@ const EventBudgetPage = () => {
       maximumFractionDigits: 2
     }).format(amount || 0);
   const convertAmountToDisplayCurrency = (amount: number, sourceCurrency: string) => {
-    const source = (sourceCurrency || baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
-    const target = (effectiveDisplayCurrency || baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
-    const safeAmount = Number(amount || 0);
-    if (source === target) return safeAmount;
-    const sourceRate = source === baseCurrency ? 1 : liveRates[source] || 1;
-    const targetRate = target === baseCurrency ? 1 : liveRates[target] || 1;
-    if (sourceRate <= 0 || targetRate <= 0) return safeAmount;
-    const baseAmount = safeAmount / sourceRate;
-    return baseAmount * targetRate;
+    return convertAmountViaBaseCurrency({
+      amount,
+      sourceCurrency,
+      baseCurrency,
+      targetCurrency: effectiveDisplayCurrency,
+      rates: liveRates
+    });
   };
   const convertBaseAmountToDisplayCurrency = (amount: number) =>
     convertAmountToDisplayCurrency(amount, baseCurrency);
@@ -441,7 +446,7 @@ const EventBudgetPage = () => {
           ? dedupeCurrencies(currenciesResp.currencies)
           : ['EUR']
       );
-      setLiveRates(currenciesResp.live_rates || {});
+      setLiveRates(mergeCurrencyRates(summaryResp.live_fx_rates, currenciesResp.live_rates));
       setPendingBaseCurrency(currenciesResp.base_currency || evtBudget.base_currency || 'EUR');
       const loadedBaseCurrency = currenciesResp.base_currency || evtBudget.base_currency || 'EUR';
       setEstimateCurrencies((prev) => {
@@ -517,9 +522,15 @@ const EventBudgetPage = () => {
 
   useEffect(() => {
     if (!budget) return;
-    const base = (pendingBaseCurrency || budget.base_currency || 'EUR').trim().toUpperCase();
+    const base = normalizeBudgetCurrency(pendingBaseCurrency || budget.base_currency || 'EUR');
     if (base.length !== 3) return;
-    const currencies = Array.from(new Set([base, ...selectedCurrencies.map((c) => c.trim().toUpperCase())]));
+    const currencies = collectBudgetCurrencyCodes({
+      baseCurrency: base,
+      selectedCurrencies,
+      lineItems,
+      estimateCurrencies,
+      eventCurrency
+    });
     let cancelled = false;
     const refreshRates = async () => {
       try {
@@ -537,7 +548,7 @@ const EventBudgetPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [budget?.id, budget?.base_currency, pendingBaseCurrency, selectedCurrencies]);
+  }, [budget?.id, budget?.base_currency, pendingBaseCurrency, selectedCurrencies, lineItems, estimateCurrencies, eventCurrency]);
   useEffect(() => {
     if (!budget?.id) return;
     const storageKey = `budget-estimate-currencies:${budget.id}`;
@@ -628,8 +639,8 @@ const EventBudgetPage = () => {
           setEvents((prev) => prev.map((ev) => (ev.id === updatedEvent.id ? updatedEvent : ev)));
         }
       }
-      const resolvedBaseCurrency = pendingBaseCurrency || baseCurrency;
-      const payload = Array.from(new Set([resolvedBaseCurrency, ...selectedCurrencies]));
+      const resolvedBaseCurrency = normalizeBudgetCurrency(pendingBaseCurrency || baseCurrency);
+      const payload = dedupeCurrencies([resolvedBaseCurrency, ...selectedCurrencies]);
       const updatedBudget = await updateBudget(budget.id, {
         base_currency: resolvedBaseCurrency
       });
@@ -650,7 +661,6 @@ const EventBudgetPage = () => {
         : [resolvedBaseCurrency];
       setBudget(updatedBudget);
       setSelectedCurrencies(nextCurrencies);
-      setLiveRates(currenciesResp.live_rates || {});
       setPendingBaseCurrency(currenciesResp.base_currency || updatedBudget.base_currency || resolvedBaseCurrency);
       if (!nextCurrencies.includes(displayCurrency)) {
         setDisplayCurrency(currenciesResp.base_currency || updatedBudget.base_currency || resolvedBaseCurrency);
@@ -659,6 +669,7 @@ const EventBudgetPage = () => {
         getBudgetSummary(budget.id),
         listBudgetLineItems(budget.id)
       ]);
+      setLiveRates(mergeCurrencyRates(latestSummary.live_fx_rates, currenciesResp.live_rates));
       setSummary(latestSummary);
       setLineItems(Array.isArray(latestLineItems) ? latestLineItems : []);
     } catch (err) {
