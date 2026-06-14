@@ -37,6 +37,9 @@ const (
 	PermissionViewBudget            Permission = "budget:view"
 	PermissionManageBudget          Permission = "budget:manage"
 	PermissionApproveBudget         Permission = "budget:approve"
+	PermissionViewAccounting        Permission = "accounting:view"
+	PermissionManageAccounting      Permission = "accounting:manage"
+	PermissionApproveAccounting     Permission = "accounting:approve"
 	PermissionViewSession           Permission = "session:view"
 )
 
@@ -149,6 +152,21 @@ var RoleMatrix = map[Permission][]Role{
 		RoleGroundCrew,
 	},
 	PermissionApproveBudget: {
+		RoleAdmin,
+		RoleStaff,
+	},
+	PermissionViewAccounting: {
+		RoleAdmin,
+		RoleStaff,
+		RoleGroundCrew,
+		RoleParticipant,
+	},
+	PermissionManageAccounting: {
+		RoleAdmin,
+		RoleStaff,
+		RoleGroundCrew,
+	},
+	PermissionApproveAccounting: {
 		RoleAdmin,
 		RoleStaff,
 	},

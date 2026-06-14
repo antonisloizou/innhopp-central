@@ -46,6 +46,10 @@ import CommunicationsPage from './pages/CommunicationsPage';
 import EventRoutePlannerPage from './pages/EventRoutePlannerPage';
 import EventBudgetPage from './pages/EventBudgetPage';
 import EventAirfieldsUsagePage from './pages/EventAirfieldsUsagePage';
+import FinanceSummaryPage from './pages/FinanceSummaryPage';
+import EventAccountingPage from './pages/EventAccountingPage';
+import BudgetsOverviewPage from './pages/BudgetsOverviewPage';
+import AccountingOverviewPage from './pages/AccountingOverviewPage';
 import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
@@ -58,7 +62,11 @@ const App = () => (
           <Route index element={<Navigate to="/events" replace />} />
           <Route path="events" element={<EventCalendarPage />} />
           {budgetsV1Enabled ? (
-            <Route path="budgets" element={<ParticipantRouteGuard><EventBudgetPage /></ParticipantRouteGuard>} />
+            <>
+              <Route path="finance" element={<ParticipantRouteGuard><FinanceSummaryPage /></ParticipantRouteGuard>} />
+              <Route path="finance/accounting" element={<ParticipantRouteGuard><AccountingOverviewPage /></ParticipantRouteGuard>} />
+              <Route path="budgets" element={<ParticipantRouteGuard><BudgetsOverviewPage /></ParticipantRouteGuard>} />
+            </>
           ) : null}
           <Route path="communications" element={<ParticipantRouteGuard><CommunicationsPage /></ParticipantRouteGuard>} />
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
@@ -69,7 +77,10 @@ const App = () => (
           <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/comms" element={<ParticipantRouteGuard eventParam="eventId"><EventCommsPage /></ParticipantRouteGuard>} />
           {budgetsV1Enabled ? (
-            <Route path="events/:eventId/budget" element={<ParticipantRouteGuard eventParam="eventId"><EventBudgetPage /></ParticipantRouteGuard>} />
+            <>
+              <Route path="events/:eventId/budget" element={<ParticipantRouteGuard eventParam="eventId"><EventBudgetPage /></ParticipantRouteGuard>} />
+              <Route path="events/:eventId/accounting" element={<ParticipantRouteGuard eventParam="eventId"><EventAccountingPage /></ParticipantRouteGuard>} />
+            </>
           ) : null}
           <Route path="registrations/:registrationId" element={<ParticipantRouteGuard><RegistrationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />

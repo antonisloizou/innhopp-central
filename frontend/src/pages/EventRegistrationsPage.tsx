@@ -4,6 +4,7 @@ import { copyEvent, deleteEvent, Event, getEvent } from '../api/events';
 import { listParticipantProfiles, ParticipantProfile } from '../api/participants';
 import { createEventRegistration, listEventRegistrations, Registration, RegistrationStatus } from '../api/registrations';
 import EventGearMenu from '../components/EventGearMenu';
+import EventPageTitle from '../components/EventPageTitle';
 import {
   formatEventLocalDateInputFromDate,
   formatEventLocal,
@@ -290,15 +291,7 @@ const EventRegistrationsPage = () => {
   return (
     <section className="stack">
       <header className="page-header">
-        <div className="event-schedule-headline-text">
-          <div className="event-header-top">
-            <h2 className="event-detail-title">{eventData.name}: Registrations</h2>
-          </div>
-          <p className="event-location">{eventData.location || 'Location TBD'}</p>
-          <div className="event-detail-header-badges">
-            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-          </div>
-        </div>
+        <EventPageTitle event={eventData} section="Registrations" />
         <EventGearMenu
           eventId={eventData.id}
           currentPage="registrations"

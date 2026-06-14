@@ -36,7 +36,7 @@ const Layout = () => {
         { to: '/events', label: 'Events' },
         { to: '/participants', label: 'Participants' },
         { to: '/logistics', label: 'Logistics' },
-        ...(budgetsV1Enabled ? [{ to: '/budgets', label: 'Budgets' }] : []),
+        ...(budgetsV1Enabled ? [{ to: '/finance', label: 'Finance' }] : []),
         { to: '/communications', label: 'Communications' }
       ];
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {

@@ -37,6 +37,7 @@ import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import EventGearMenu from '../components/EventGearMenu';
+import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { updateInnhopp, getInnhopp, Innhopp } from '../api/events';
@@ -1593,6 +1594,7 @@ const EventSchedulePage = () => {
   }, [timePicker]);
 
   const previewOverlayEntry = previewEntry ?? renderedPreviewEntry;
+
   const overlayOpen = Boolean(timePicker || renderedPreviewEntry);
 
   useEffect(() => {
@@ -1639,10 +1641,8 @@ const EventSchedulePage = () => {
   if (!eventData) return <p className="error-text">Event not found.</p>;
 
   const totalSlots = eventData.slots ?? 0;
-  const remaining = Math.max(eventData.remaining_slots ?? 0, 0);
   const participantLookup = new Map(participants.map((participant) => [participant.id, participant]));
   const nonStaffCount = countVisibleParticipants(eventData.participant_ids, participantLookup);
-  const isFull = remaining === 0;
   const pastEvent = eventData.status === 'past';
   const openCreateFromDayMenu = (dayKey: string, type: EntryType) => {
     if (!eventId) return;
@@ -1715,20 +1715,7 @@ const EventSchedulePage = () => {
   return (
     <section className="stack">
       <header className="page-header">
-        <div className="event-schedule-headline-text">
-          <div className="event-header-top">
-            <h2 className="event-detail-title">{eventData.name}: Schedule</h2>
-          </div>
-          <p className="event-location">{eventData.location || 'Location TBD'}</p>
-          <div className="event-detail-header-badges">
-            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-            {!pastEvent && (
-              <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-              </span>
-            )}
-          </div>
-        </div>
+        <EventPageTitle event={eventData} section="Schedule" showSlotsBadge={!pastEvent} />
         {!participantOnly && (
           <EventGearMenu
             eventId={eventData.id}

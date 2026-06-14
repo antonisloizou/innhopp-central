@@ -10,6 +10,7 @@ import {
 } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import ScheduleCostPanel from '../components/ScheduleCostPanel';
 
 const AccommodationDetailPage = () => {
   const { eventId, accommodationId } = useParams();
@@ -279,6 +280,14 @@ const AccommodationDetailPage = () => {
           </div>
         </form>
       </article>
+      {eventId && accommodationId ? (
+        <ScheduleCostPanel
+          eventId={Number(eventId)}
+          scheduleType="accommodation"
+          scheduleId={Number(accommodationId)}
+          defaultName={form.name || 'Accommodation'}
+        />
+      ) : null}
       {lockNotice}
     </section>
   );

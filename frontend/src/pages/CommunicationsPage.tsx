@@ -1976,6 +1976,277 @@ const insertIntoActiveTemplateField = (snippet: string) => {
       <article className="card stack">
         <header
           className="card-header event-detail-section-header"
+          onClick={() => toggleSection('templates')}
+        >
+          <div className="event-detail-section-header-main">
+            <button
+              className="ghost"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection('templates');
+              }}
+            >
+              {openSections.templates ? '▾' : '▸'}
+            </button>
+            <h3 className="event-detail-section-title">Email Templates</h3>
+          </div>
+        </header>
+        {openSections.templates && (
+          <div className="stack">
+            <div className="comms-template-top-grid">
+              <form className="stack comms-template-form" onSubmit={handleSaveTemplate}>
+                <div className="form-grid comms-template-grid">
+                  <label className="form-field comms-field-span">
+                    <span>Template to edit</span>
+                    <select
+                      value={selectedTemplateEditorId}
+                      onChange={(e) => setSelectedTemplateEditorId(e.target.value)}
+                    >
+                      <option value={createTemplateEditorOption}>Create new template</option>
+                      {templates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>Name</span>
+                    <input value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Deposit reminder" />
+                  </label>
+                  <label className="form-field comms-field-span">
+                    <span>Subject template</span>
+                    <input
+                      ref={subjectTemplateRef}
+                      value={templateForm.subject_template}
+                      onFocus={() => {
+                        activeTemplateFieldRef.current = 'subject_template';
+                      }}
+                      onChange={(e) => setTemplateForm((prev) => ({ ...prev, subject_template: e.target.value }))}
+                      placeholder="Deposit reminder for {{event_name}}"
+                    />
+                  </label>
+                  <label className="form-field comms-field-span">
+                    <span>Body template</span>
+                    <div className="comms-body-editor" ref={bodyTemplateEditorRef}>
+                      <div
+                        ref={bodyTemplateOverlayRef}
+                        className="comms-body-editor-overlay"
+                        aria-hidden="true"
+                        dangerouslySetInnerHTML={{ __html: bodyEditorOverlayHtml }}
+                      />
+                      {bodyLinkEditor.open ? (
+                        <div className="comms-selection-highlight-layer" aria-hidden="true">
+                          {bodyLinkEditor.highlightRects.map((rect, index) => (
+                            <span
+                              key={`${rect.left}-${rect.top}-${index}`}
+                              className="comms-selection-highlight-rect"
+                              style={{
+                                left: `${rect.left}px`,
+                                top: `${rect.top}px`,
+                                width: `${rect.width}px`,
+                                height: `${rect.height}px`
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
+                      {bodyLinkEditor.open ? (
+                        <div
+                          ref={bodyLinkPopoverRef}
+                          className={`comms-selection-link-popover${bodyLinkEditor.expanded ? ' is-expanded' : ''}`}
+                          style={
+                            {
+                              left: `${linkPopoverLayout.left}px`,
+                              top: `${bodyLinkEditor.top}px`,
+                              width: linkPopoverLayout.width,
+                              '--comms-link-caret-left': `${linkPopoverLayout.caretLeft}px`
+                            } as CSSProperties
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="comms-selection-link-icon"
+                            aria-label={bodyLinkEditor.expanded ? 'Link tool' : 'Add link to selected text'}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                            }}
+                            onClick={handleExpandBodyLinkEditor}
+                          >
+                            <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">link</span>
+                          </button>
+                          {bodyLinkEditor.expanded ? (
+                            <>
+                              <input
+                                ref={bodyLinkInputRef}
+                                type="text"
+                                value={bodyLinkDraft}
+                                onChange={(event) => setBodyLinkDraft(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    handleSaveBodySelectionLink();
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    closeBodyLinkEditor();
+                                  }
+                                }}
+                                placeholder="https://example.com"
+                                aria-label="Link URL"
+                              />
+                              <button
+                                type="button"
+                                className="comms-selection-link-action"
+                                aria-label="Save link"
+                                disabled={!canSaveBodyLink}
+                                onClick={handleSaveBodySelectionLink}
+                              >
+                                <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">check</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="comms-selection-link-action"
+                                aria-label="Close link editor"
+                                onClick={closeBodyLinkEditor}
+                              >
+                                <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">close</span>
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <textarea
+                        ref={bodyTemplateRef}
+                        className="comms-body-template-textarea"
+                        value={templateForm.body_template}
+                        onFocus={() => {
+                          activeTemplateFieldRef.current = 'body_template';
+                        }}
+                        onBlur={() => {
+                          requestAnimationFrame(() => {
+                            const active = document.activeElement as HTMLElement | null;
+                            if (active && bodyLinkPopoverRef.current?.contains(active)) {
+                              return;
+                            }
+                            if (document.activeElement !== bodyLinkInputRef.current) {
+                              closeBodyLinkEditor();
+                            }
+                          });
+                        }}
+                        onChange={(e) => {
+                          closeBodyLinkEditor();
+                          const result = applyBodyTemplateEditorTextChange(
+                            templateForm.body_template,
+                            e.target.value,
+                            bodyLinks
+                          );
+                          setBodyLinks(result.links);
+                          setTemplateForm((prev) => ({ ...prev, body_template: result.value }));
+                          if (result.selectionStart !== null) {
+                            requestAnimationFrame(() => {
+                              const textarea = bodyTemplateRef.current;
+                              if (!textarea) return;
+                              textarea.setSelectionRange(result.selectionStart, result.selectionStart);
+                            });
+                          }
+                        }}
+                        onClick={handleBodyTemplateClick}
+                        onSelect={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
+                        onKeyUp={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
+                        onMouseUp={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
+                        onScroll={() => {
+                          syncBodyTemplateOverlayScroll();
+                          requestAnimationFrame(updateBodyLinkEditorFromSelection);
+                        }}
+                        placeholder={'Hi {{participant_name}},\nYour deposit for {{event_name}} is due on {{deposit_due_at}}.'}
+                      />
+                    </div>
+                    <div className="detail-actions comms-template-actions">
+                      <button
+                        className="primary"
+                        type="submit"
+                        disabled={creatingTemplate || !derivedTemplateKey || templateKeyDuplicate}
+                      >
+                        {creatingTemplate
+                          ? 'Saving…'
+                          : selectedTemplateEditorId === createTemplateEditorOption
+                            ? 'Create template'
+                            : 'Save template'}
+                      </button>
+                      <div className="comms-template-tools" role="toolbar" aria-label="Body template tools">
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={handleInsertImageClick}
+                        >
+                          Insert image
+                        </button>
+                        <input
+                          ref={bodyImageInputRef}
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={handleBodyImageSelected}
+                        />
+                      </div>
+                    </div>
+                  </label>
+                </div>
+                {templateKeyDuplicate ? (
+                  <p className="error-text comms-inline-note">A template with this generated name/key already exists.</p>
+                ) : null}
+              </form>
+
+              <div className="comms-preview-column">
+                <span className="comms-preview-label">Placeholder reference</span>
+                <section className="comms-preview-panel">
+                  <p className="muted comms-inline-note">Click a placeholder to insert it to the template.</p>
+                  <div className="comms-token-groups">
+                    {templateTokenGroups.map((group) => (
+                      <section key={group.label} className="comms-token-group">
+                        <h4 className="comms-token-group-title">{group.label}</h4>
+                        <div className="comms-token-list">
+                          {group.tokens.map((token) => (
+                            <button
+                              key={token}
+                              type="button"
+                              className="comms-token-chip"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                              }}
+                              onClick={() => insertPlaceholderToken(token)}
+                            >
+                              {`{{${token}}}`}
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <TemplateRenderedPreview
+              label={<>Rendered preview: {templateForm.name.trim() || 'No template selected'}</>}
+              subject={renderedEditorSubjectPreview}
+              subjectFallback="No subject preview yet"
+              body={renderedEditorBodyPreview}
+              bodyHtml={renderedEditorBodyPreviewLayoutHtml}
+              bodyFallback="No body preview yet"
+              bodyRef={editorPreviewBodyRef}
+              panelElement="aside"
+            />
+          </div>
+        )}
+      </article>
+
+      <article className="card stack">
+        <header
+          className="card-header event-detail-section-header"
           onClick={() => toggleSection('campaign')}
         >
           <div className="event-detail-section-header-main">
@@ -2271,277 +2542,6 @@ const insertIntoActiveTemplateField = (snippet: string) => {
             </div>
             {!audiencePreview && previewLoading ? <p className="muted">Loading audience…</p> : null}
           </>
-        )}
-      </article>
-
-      <article className="card stack">
-        <header
-          className="card-header event-detail-section-header"
-          onClick={() => toggleSection('templates')}
-        >
-          <div className="event-detail-section-header-main">
-            <button
-              className="ghost"
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleSection('templates');
-              }}
-            >
-              {openSections.templates ? '▾' : '▸'}
-            </button>
-            <h3 className="event-detail-section-title">Email Templates</h3>
-          </div>
-        </header>
-        {openSections.templates && (
-          <div className="stack">
-            <div className="comms-template-top-grid">
-              <form className="stack comms-template-form" onSubmit={handleSaveTemplate}>
-                <div className="form-grid comms-template-grid">
-                  <label className="form-field comms-field-span">
-                    <span>Template to edit</span>
-                    <select
-                      value={selectedTemplateEditorId}
-                      onChange={(e) => setSelectedTemplateEditorId(e.target.value)}
-                    >
-                      <option value={createTemplateEditorOption}>Create new template</option>
-                      {templates.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    <span>Name</span>
-                    <input value={templateForm.name} onChange={(e) => setTemplateForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Deposit reminder" />
-                  </label>
-                  <label className="form-field comms-field-span">
-                    <span>Subject template</span>
-                    <input
-                      ref={subjectTemplateRef}
-                      value={templateForm.subject_template}
-                      onFocus={() => {
-                        activeTemplateFieldRef.current = 'subject_template';
-                      }}
-                      onChange={(e) => setTemplateForm((prev) => ({ ...prev, subject_template: e.target.value }))}
-                      placeholder="Deposit reminder for {{event_name}}"
-                    />
-                  </label>
-                  <label className="form-field comms-field-span">
-                    <span>Body template</span>
-                    <div className="comms-body-editor" ref={bodyTemplateEditorRef}>
-                      <div
-                        ref={bodyTemplateOverlayRef}
-                        className="comms-body-editor-overlay"
-                        aria-hidden="true"
-                        dangerouslySetInnerHTML={{ __html: bodyEditorOverlayHtml }}
-                      />
-                      {bodyLinkEditor.open ? (
-                        <div className="comms-selection-highlight-layer" aria-hidden="true">
-                          {bodyLinkEditor.highlightRects.map((rect, index) => (
-                            <span
-                              key={`${rect.left}-${rect.top}-${index}`}
-                              className="comms-selection-highlight-rect"
-                              style={{
-                                left: `${rect.left}px`,
-                                top: `${rect.top}px`,
-                                width: `${rect.width}px`,
-                                height: `${rect.height}px`
-                              }}
-                            />
-                          ))}
-                        </div>
-                      ) : null}
-                      {bodyLinkEditor.open ? (
-                        <div
-                          ref={bodyLinkPopoverRef}
-                          className={`comms-selection-link-popover${bodyLinkEditor.expanded ? ' is-expanded' : ''}`}
-                          style={
-                            {
-                              left: `${linkPopoverLayout.left}px`,
-                              top: `${bodyLinkEditor.top}px`,
-                              width: linkPopoverLayout.width,
-                              '--comms-link-caret-left': `${linkPopoverLayout.caretLeft}px`
-                            } as CSSProperties
-                          }
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="comms-selection-link-icon"
-                            aria-label={bodyLinkEditor.expanded ? 'Link tool' : 'Add link to selected text'}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                            }}
-                            onClick={handleExpandBodyLinkEditor}
-                          >
-                            <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">link</span>
-                          </button>
-                          {bodyLinkEditor.expanded ? (
-                            <>
-                              <input
-                                ref={bodyLinkInputRef}
-                                type="text"
-                                value={bodyLinkDraft}
-                                onChange={(event) => setBodyLinkDraft(event.target.value)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'Enter') {
-                                    event.preventDefault();
-                                    handleSaveBodySelectionLink();
-                                  }
-                                  if (event.key === 'Escape') {
-                                    event.preventDefault();
-                                    closeBodyLinkEditor();
-                                  }
-                                }}
-                                placeholder="https://example.com"
-                                aria-label="Link URL"
-                              />
-                              <button
-                                type="button"
-                                className="comms-selection-link-action"
-                                aria-label="Save link"
-                                disabled={!canSaveBodyLink}
-                                onClick={handleSaveBodySelectionLink}
-                              >
-                                <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">check</span>
-                              </button>
-                              <button
-                                type="button"
-                                className="comms-selection-link-action"
-                                aria-label="Close link editor"
-                                onClick={closeBodyLinkEditor}
-                              >
-                                <span className="material-symbols-outlined comms-selection-link-glyph" aria-hidden="true">close</span>
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      <textarea
-                        ref={bodyTemplateRef}
-                        className="comms-body-template-textarea"
-                        value={templateForm.body_template}
-                        onFocus={() => {
-                          activeTemplateFieldRef.current = 'body_template';
-                        }}
-                        onBlur={() => {
-                          requestAnimationFrame(() => {
-                            const active = document.activeElement as HTMLElement | null;
-                            if (active && bodyLinkPopoverRef.current?.contains(active)) {
-                              return;
-                            }
-                            if (document.activeElement !== bodyLinkInputRef.current) {
-                              closeBodyLinkEditor();
-                            }
-                          });
-                        }}
-                        onChange={(e) => {
-                          closeBodyLinkEditor();
-                          const result = applyBodyTemplateEditorTextChange(
-                            templateForm.body_template,
-                            e.target.value,
-                            bodyLinks
-                          );
-                          setBodyLinks(result.links);
-                          setTemplateForm((prev) => ({ ...prev, body_template: result.value }));
-                          if (result.selectionStart !== null) {
-                            requestAnimationFrame(() => {
-                              const textarea = bodyTemplateRef.current;
-                              if (!textarea) return;
-                              textarea.setSelectionRange(result.selectionStart, result.selectionStart);
-                            });
-                          }
-                        }}
-                        onClick={handleBodyTemplateClick}
-                        onSelect={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
-                        onKeyUp={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
-                        onMouseUp={() => requestAnimationFrame(updateBodyLinkEditorFromSelection)}
-                        onScroll={() => {
-                          syncBodyTemplateOverlayScroll();
-                          requestAnimationFrame(updateBodyLinkEditorFromSelection);
-                        }}
-                        placeholder={'Hi {{participant_name}},\nYour deposit for {{event_name}} is due on {{deposit_due_at}}.'}
-                      />
-                    </div>
-                    <div className="detail-actions comms-template-actions">
-                      <button
-                        className="primary"
-                        type="submit"
-                        disabled={creatingTemplate || !derivedTemplateKey || templateKeyDuplicate}
-                      >
-                        {creatingTemplate
-                          ? 'Saving…'
-                          : selectedTemplateEditorId === createTemplateEditorOption
-                            ? 'Create template'
-                            : 'Save template'}
-                      </button>
-                      <div className="comms-template-tools" role="toolbar" aria-label="Body template tools">
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={handleInsertImageClick}
-                        >
-                          Insert image
-                        </button>
-                        <input
-                          ref={bodyImageInputRef}
-                          type="file"
-                          accept="image/*"
-                          style={{ display: 'none' }}
-                          onChange={handleBodyImageSelected}
-                        />
-                      </div>
-                    </div>
-                  </label>
-                </div>
-                {templateKeyDuplicate ? (
-                  <p className="error-text comms-inline-note">A template with this generated name/key already exists.</p>
-                ) : null}
-              </form>
-
-              <div className="comms-preview-column">
-                <span className="comms-preview-label">Placeholder reference</span>
-                <section className="comms-preview-panel">
-                  <p className="muted comms-inline-note">Click a placeholder to insert it to the template.</p>
-                  <div className="comms-token-groups">
-                    {templateTokenGroups.map((group) => (
-                      <section key={group.label} className="comms-token-group">
-                        <h4 className="comms-token-group-title">{group.label}</h4>
-                        <div className="comms-token-list">
-                          {group.tokens.map((token) => (
-                            <button
-                              key={token}
-                              type="button"
-                              className="comms-token-chip"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                              }}
-                              onClick={() => insertPlaceholderToken(token)}
-                            >
-                              {`{{${token}}}`}
-                            </button>
-                          ))}
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                </section>
-              </div>
-            </div>
-
-            <TemplateRenderedPreview
-              label={<>Rendered preview: {templateForm.name.trim() || 'No template selected'}</>}
-              subject={renderedEditorSubjectPreview}
-              subjectFallback="No subject preview yet"
-              body={renderedEditorBodyPreview}
-              bodyHtml={renderedEditorBodyPreviewLayoutHtml}
-              bodyFallback="No body preview yet"
-              bodyRef={editorPreviewBodyRef}
-              panelElement="aside"
-            />
-          </div>
         )}
       </article>
 

@@ -24,6 +24,7 @@ import { ISO_CURRENCY_CODES } from '../constants/currencies';
 import { Event, Season, copyEvent, deleteEvent, listEvents, listSeasons, updateEvent } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
 import EventGearMenu from '../components/EventGearMenu';
+import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { useAuth } from '../auth/AuthProvider';
@@ -1440,15 +1441,7 @@ const EventBudgetPage = () => {
     <section className="stack">
       <header className="page-header">
         {routeHasEventID && activeEventData ? (
-          <div className="event-schedule-headline-text">
-            <div className="event-header-top">
-              <h2 className="event-detail-title">{activeEventData.name}: Budget</h2>
-            </div>
-            <p className="event-location">{activeEventData.location || 'Location TBD'}</p>
-            <div className="event-detail-header-badges">
-              <span className={`badge status-${activeEventData.status}`}>{activeEventData.status}</span>
-            </div>
-          </div>
+          <EventPageTitle event={activeEventData} section="Budget" />
         ) : (
           <div>
             <h2>Budgets</h2>

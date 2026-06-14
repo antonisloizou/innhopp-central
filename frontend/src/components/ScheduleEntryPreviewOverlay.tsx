@@ -52,9 +52,6 @@ const ScheduleEntryPreviewOverlay = ({
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           onClose();
-        } else if (e.key === 'Enter' && entry.to && onNavigateToEntry) {
-          onNavigateToEntry(entry);
-          onClose();
         }
       }}
     >
@@ -62,10 +59,6 @@ const ScheduleEntryPreviewOverlay = ({
         className={`card overlay-panel-with-close event-schedule-preview-panel${closing ? ' event-schedule-preview-panel--closing' : ''}`}
         onClick={(e) => {
           e.stopPropagation();
-          if (entry.to && onNavigateToEntry) {
-            onNavigateToEntry(entry);
-            onClose();
-          }
         }}
       >
         <button
@@ -198,23 +191,38 @@ const ScheduleEntryPreviewOverlay = ({
                   entry.innhoppLandOwnerPermission == null ? '—' : entry.innhoppLandOwnerPermission ? 'Yes' : 'No'
                 )
               );
-              if (entry.innhoppCoordinates && canOpenMapsActions) {
+              if ((entry.innhoppCoordinates && canOpenMapsActions) || (entry.to && onNavigateToEntry)) {
                 fields.push(
-                  <div key="open-maps" className="event-schedule-preview-action-grid form-field-full-span">
-                    <div>
-                      <button
-                        type="button"
-                        className="link-button event-schedule-preview-link"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          window.open(
-                            `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entry.innhoppCoordinates || '')}`,
-                            '_blank'
-                          );
-                        }}
-                      >
-                        Open in Maps
-                      </button>
+                  <div key="actions" className="event-schedule-preview-action-grid form-field-full-span">
+                    <div className="event-schedule-preview-action-row">
+                      {entry.innhoppCoordinates && canOpenMapsActions ? (
+                        <button
+                          type="button"
+                          className="link-button event-schedule-preview-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(
+                              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entry.innhoppCoordinates || '')}`,
+                              '_blank'
+                            );
+                          }}
+                        >
+                          Open in Maps
+                        </button>
+                      ) : null}
+                      {entry.to && onNavigateToEntry ? (
+                        <button
+                          type="button"
+                          className="link-button event-schedule-preview-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigateToEntry(entry);
+                            onClose();
+                          }}
+                        >
+                          Open details
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -255,9 +263,20 @@ const ScheduleEntryPreviewOverlay = ({
                         >
                           Open in Maps
                         </button>
-                      ) : (
-                        '—'
-                      )}
+                      ) : null}
+                      {entry.to && onNavigateToEntry ? (
+                        <button
+                          type="button"
+                          className="link-button event-schedule-preview-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigateToEntry(entry);
+                            onClose();
+                          }}
+                        >
+                          Open details
+                        </button>
+                      ) : null}
                     </div>
                   </>
                 ) : (
@@ -307,40 +326,88 @@ const ScheduleEntryPreviewOverlay = ({
                         </div>
                       </div>
                     ) : null}
-                    {canOpenMapsActions &&
+                    {((canOpenMapsActions &&
                     (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
                     entry.transportRouteOrigin &&
-                    entry.transportRouteDestination ? (
+                    entry.transportRouteDestination) || (entry.to && onNavigateToEntry)) ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
-                        <button
-                          type="button"
-                          className="link-button event-schedule-preview-link"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window.open(
-                              `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(entry.transportRouteOrigin || '')}&destination=${encodeURIComponent(entry.transportRouteDestination || '')}`,
-                              '_blank'
-                            );
-                          }}
-                        >
-                          Open route
-                        </button>
+                        {canOpenMapsActions &&
+                        (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
+                        entry.transportRouteOrigin &&
+                        entry.transportRouteDestination ? (
+                          <button
+                            type="button"
+                            className="link-button event-schedule-preview-link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(entry.transportRouteOrigin || '')}&destination=${encodeURIComponent(entry.transportRouteDestination || '')}`,
+                                '_blank'
+                              );
+                            }}
+                          >
+                            Open route
+                          </button>
+                        ) : null}
+                        {entry.to && onNavigateToEntry ? (
+                          <button
+                            type="button"
+                            className="link-button event-schedule-preview-link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNavigateToEntry(entry);
+                              onClose();
+                            }}
+                          >
+                            Open details
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
-                    {entry.type === 'Other' && entry.coordinates && canOpenMapsActions ? (
+                    {entry.type === 'Other' && (entry.coordinates && canOpenMapsActions || (entry.to && onNavigateToEntry)) ? (
+                      <div className="form-field-full-span event-schedule-preview-action-row">
+                        {entry.coordinates && canOpenMapsActions ? (
+                          <button
+                            type="button"
+                            className="link-button event-schedule-preview-link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(
+                                `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entry.coordinates || '')}`,
+                                '_blank'
+                              );
+                            }}
+                          >
+                            Open in Maps
+                          </button>
+                        ) : null}
+                        {entry.to && onNavigateToEntry ? (
+                          <button
+                            type="button"
+                            className="link-button event-schedule-preview-link"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNavigateToEntry(entry);
+                              onClose();
+                            }}
+                          >
+                            Open details
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {entry.type === 'Meal' && entry.to && onNavigateToEntry ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
                         <button
                           type="button"
                           className="link-button event-schedule-preview-link"
                           onClick={(e) => {
                             e.stopPropagation();
-                            window.open(
-                              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entry.coordinates || '')}`,
-                              '_blank'
-                            );
+                            onNavigateToEntry(entry);
+                            onClose();
                           }}
                         >
-                          Open in Maps
+                          Open details
                         </button>
                       </div>
                     ) : null}

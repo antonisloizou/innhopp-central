@@ -914,7 +914,7 @@ func (h *Handler) listLineItems(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.db.Query(
 		r.Context(),
-		`SELECT li.id, li.budget_id, li.section_id, s.code, s.name, li.name, li.service_date, li.location_label,
+		`SELECT li.id, li.budget_id, li.section_id, s.code, s.name, li.name, li.service_date, COALESCE(li.location_label, ''),
                 li.innhopp_id, li.quantity, li.unit_cost, li.cost_currency, li.sort_order, li.notes, li.created_at, li.updated_at
          FROM budget_line_items li
          JOIN budget_sections s ON s.id = li.section_id

@@ -31,6 +31,7 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import ScheduleCostPanel from '../components/ScheduleCostPanel';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import { parseCoordinates } from '../utils/coordinates';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
@@ -2464,6 +2465,14 @@ const InnhoppDetailPage = () => {
           </div>
         </article>
       </form>
+      {!isCreateMode && eventId && innhoppId ? (
+        <ScheduleCostPanel
+          eventId={Number(eventId)}
+          scheduleType="innhopp"
+          scheduleId={Number(innhoppId)}
+          defaultName={form.name ? `Innhopp #${form.sequence}: ${form.name}` : 'Innhopp'}
+        />
+      ) : null}
       {lockNotice}
     </section>
   );

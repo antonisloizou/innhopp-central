@@ -213,6 +213,53 @@ func TestCreateBudgetDoesNotPersistLegacyAircraftAssumptions(t *testing.T) {
 	}
 }
 
+func TestListLineItemsAllowsNullLocationLabel(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO budget_line_items (budget_id, section_id, name, service_date, location_label, quantity, unit_cost, cost_currency)
+         SELECT $1, id, 'Legacy Hotel', NOW()::date, NULL, 1, 100, 'EUR'
+         FROM budget_sections
+         WHERE budget_id = $1 AND code = 'food_accommodation'
+         LIMIT 1`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("insert legacy line item failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Get("/api/budgets/{budgetID}/line-items", h.listLineItems)
+	req := httptest.NewRequest(http.MethodGet, "/api/budgets/"+strconv.FormatInt(budgetID, 10)+"/line-items", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload []BudgetLineItem
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode list response failed: %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("line item count mismatch: got %d want 1", len(payload))
+	}
+	if payload[0].Description != "" {
+		t.Fatalf("description mismatch: got %q want empty string", payload[0].Description)
+	}
+}
+
 func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()

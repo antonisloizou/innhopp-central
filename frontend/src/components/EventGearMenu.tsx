@@ -7,6 +7,7 @@ export type EventGearMenuPage =
   | 'details'
   | 'route'
   | 'budget'
+  | 'accounting'
   | 'registrations'
   | 'manifest'
   | 'communications';
@@ -26,6 +27,7 @@ const eventMenuPages: Array<{ key: EventGearMenuPage; label: string; path: (even
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
   { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
+  { key: 'accounting', label: 'Accounting', path: (eventId) => `/events/${eventId}/accounting` },
   { key: 'registrations', label: 'Registrations', path: (eventId) => `/events/${eventId}/registrations` },
   { key: 'manifest', label: 'Manifest', path: (eventId) => `/manifests?eventId=${eventId}` },
   { key: 'communications', label: 'Communications', path: (eventId) => `/events/${eventId}/comms` }
@@ -83,7 +85,7 @@ const EventGearMenu = ({
       {open && (
         <div className="event-schedule-menu" id={menuId} role="menu">
           {eventMenuPages
-            .filter((item) => (budgetsV1Enabled ? true : item.key !== 'budget'))
+            .filter((item) => (budgetsV1Enabled ? true : item.key !== 'budget' && item.key !== 'accounting'))
             .filter((item) => item.key !== currentPage)
             .map((item) => (
               <button

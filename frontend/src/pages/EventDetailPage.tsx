@@ -68,6 +68,7 @@ import {
 } from '../api/logistics';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import EventGearMenu from '../components/EventGearMenu';
+import EventPageTitle from '../components/EventPageTitle';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
@@ -1800,27 +1801,16 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   return (
     <section {...editGuardProps}>
       <header className="page-header">
-        <div className="event-schedule-headline-text">
-          <div className="event-header-top">
+        <EventPageTitle
+          event={eventData}
+          section="Details"
+          showSlotsBadge={!pastEvent}
+          titleWrapper={(title) => (
             <DetailPageLockTitle locked={locked} onToggleLocked={toggleLocked}>
-              <h2 className="event-detail-title">{eventData.name}: Details</h2>
+              {title}
             </DetailPageLockTitle>
-          </div>
-          <p className="event-location">{eventData.location || 'Location TBD'}</p>
-          <div className="event-detail-header-badges">
-            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-            {!pastEvent &&
-              (() => {
-                const remaining = Math.max(eventData.remaining_slots ?? 0, 0);
-                const isFull = remaining === 0;
-                return (
-                  <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                    {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
-                  </span>
-                );
-              })()}
-          </div>
-        </div>
+          )}
+        />
         <EventGearMenu
           eventId={eventData.id}
           currentPage="details"

@@ -11,6 +11,7 @@ import { parseCoordinates } from '../utils/coordinates';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import EventGearMenu from '../components/EventGearMenu';
+import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 
@@ -190,6 +191,30 @@ const iconNameByType: Record<StopVisualType, string> = {
 
 type RouteMapOverlay = 'hybrid' | 'roadmap';
 
+const materialSymbolsFontFace = '18px "Material Symbols Outlined"';
+const markerFontGateDelayMs = 1200;
+
+const hasLoadedMaterialSymbols = () => {
+  if (typeof document === 'undefined' || !('fonts' in document)) return true;
+  return document.fonts.check(materialSymbolsFontFace, iconNameByType.generic);
+};
+
+const waitForMaterialSymbols = async () => {
+  if (typeof document === 'undefined' || !('fonts' in document)) return true;
+  if (document.fonts.check(materialSymbolsFontFace, iconNameByType.generic)) return true;
+
+  try {
+    await Promise.race([
+      document.fonts.load(materialSymbolsFontFace, iconNameByType.generic),
+      document.fonts.ready
+    ]);
+  } catch {
+    // Fall through and re-check the font status.
+  }
+
+  return document.fonts.check(materialSymbolsFontFace, iconNameByType.generic);
+};
+
 const renderPreviewIcon = (type: StopVisualType) => <span className="material-symbols-outlined">{iconNameByType[type]}</span>;
 
 const buildAdvancedMarkerContent = (type: StopVisualType) => {
@@ -240,6 +265,31 @@ const EventRoutePlannerPage = () => {
   const [previewEntry, setPreviewEntry] = useState<RoutePlannerEntry | null>(null);
   const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<RoutePlannerEntry | null>(null);
   const [previewClosing, setPreviewClosing] = useState(false);
+  const [markerFontReady, setMarkerFontReady] = useState(() => hasLoadedMaterialSymbols());
+  const [markerGlyphGateOpen, setMarkerGlyphGateOpen] = useState(() => hasLoadedMaterialSymbols());
+
+  useEffect(() => {
+    if (markerFontReady) {
+      setMarkerGlyphGateOpen(true);
+      return;
+    }
+
+    let cancelled = false;
+    const gateTimer = window.setTimeout(() => {
+      if (!cancelled) setMarkerGlyphGateOpen(true);
+    }, markerFontGateDelayMs);
+
+    void waitForMaterialSymbols().then((ready) => {
+      if (cancelled || !ready) return;
+      setMarkerFontReady(true);
+      setMarkerGlyphGateOpen(true);
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(gateTimer);
+    };
+  }, [markerFontReady]);
 
   const resolveLocationStop = useCallback(
     (name: string | null | undefined) => {
@@ -915,6 +965,11 @@ const EventRoutePlannerPage = () => {
           map
         });
 
+        if (maps.marker?.AdvancedMarkerElement && !markerGlyphGateOpen) {
+          fitPreviewRouteToMap(maps, map);
+          return;
+        }
+
         mapMarkersRef.current = previewGeometry.map((stop) => {
           const handleMarkerClick = () => {
             const entry = entryById.get(stop.entryId);
@@ -965,7 +1020,7 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [entryById, fitPreviewRouteToMap, previewGeometry]);
+  }, [entryById, fitPreviewRouteToMap, markerGlyphGateOpen, markerFontReady, previewGeometry]);
 
   useEffect(() => {
     if (!previewFullscreen || !mapInstanceRef.current || previewGeometry.length === 0) return;
@@ -1089,15 +1144,7 @@ const EventRoutePlannerPage = () => {
   return (
     <section className="stack">
       <header className="page-header">
-        <div className="event-schedule-headline-text">
-          <div className="event-header-top">
-            <h2 className="event-detail-title">{eventData.name}: Route</h2>
-          </div>
-          <p className="event-location">{eventData.location || 'Location TBD'}</p>
-          <div className="event-detail-header-badges">
-            <span className={`badge status-${eventData.status}`}>{eventData.status}</span>
-          </div>
-        </div>
+        <EventPageTitle event={eventData} section="Route" />
         <EventGearMenu
           eventId={eventData.id}
           currentPage="route"

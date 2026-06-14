@@ -7,8 +7,11 @@ Build an accounting module that tracks actual financial events for an event and 
 - `schedule_item` remains generic for all schedule page entries.
 - Add optional cost records linked to schedule items: `schedule_item_cost`.
 - Budget line items are generated/synced from schedule item costs.
+- `schedule_item_cost.estimated_amount` is the planning baseline used for budget sync and later variance comparison.
 - Accounting starts when costs are invoiced (accrual view), not only when paid (cash view).
 - Payments are tracked separately and allocated to costs.
+- Invoiced and paid totals are derived from posted documents and payment allocations, not edited directly on the cost row.
+- Finance reporting must expose line-level deltas for `estimate -> invoiced`, `invoiced -> paid`, and `budget -> actual`.
 
 ## Scope (V1)
 - Planned costs linked to schedule items.
@@ -17,6 +20,7 @@ Build an accounting module that tracks actual financial events for an event and 
 - Accounting documents and entries for invoice/credit/adjustment.
 - Payment capture and allocation.
 - Budget vs actual reporting (planned vs invoiced vs paid).
+- Explicit variance tracking per cost line and per budget section.
 - Audit trail and status derivation rules.
 
 ## Out of Scope (V1)
@@ -45,6 +49,8 @@ Create new backend package `backend/accounting` with:
 
 ### Frontend
 - Extend schedule UI with optional cost panel per schedule item.
+- Replace top-level `Budgets` navigation entry with `Finance`.
+- Add finance landing page similar to logistics, with summary cards linking to existing budget views and the new accounting workspace.
 - Add accounting workspace tab/page under event context.
 - Add budget actuals columns in budget UI.
 
@@ -90,6 +96,10 @@ Add all core tables and enums needed for schedule-linked planning costs and acco
   - `schedule_items`
   - `budget_line_items`
   - `vendors` (where available)
+- Ensure `schedule_item_costs` stores the planning baseline and sync link fields needed for later comparisons:
+  - `estimated_amount`
+  - `currency`
+  - `budget_line_item_id`
 - Add indexes:
   - event and schedule-item access paths
   - document/date and status filters
@@ -99,6 +109,7 @@ Add all core tables and enums needed for schedule-linked planning costs and acco
 - App boots with new schema on empty DB.
 - Existing DB upgrades non-destructively.
 - FK and constraint violations are enforced at DB level.
+- Schema supports deriving estimate, invoiced, paid, and variance values per cost line.
 
 ---
 
@@ -163,6 +174,7 @@ Allow schedule items to optionally carry planned costs and synchronize to budget
   - upsert/delete linked `budget_line_item`
   - preserve user-edited budget fields where required (define sync strategy)
 - Add idempotent sync function in service layer.
+- Treat the schedule item cost estimate as the authoritative planned amount for budget comparison.
 
 **Acceptance Criteria**
 - Financially-relevant schedule items produce budget lines automatically.
@@ -237,6 +249,7 @@ Expose endpoints for documents, entries, payments, allocations, and rollups.
   - `POST /api/events/{eventID}/accounting/payments`
   - `POST /api/accounting/payments/{paymentID}/allocations`
   - `GET /api/events/{eventID}/accounting/budget-actuals`
+- Ensure the rollup payload can drive both the finance landing cards and the per-line comparison table.
 - Validate amount precision, currency code, foreign keys, and date formats.
 
 **Acceptance Criteria**
@@ -258,13 +271,18 @@ Provide reporting projections per line and total for planned/invoiced/paid/open/
   - `invoiced_amount`
   - `paid_amount`
   - `open_invoice_amount`
+  - `estimate_to_invoice_variance_amount`
+  - `invoice_to_paid_variance_amount`
   - `variance_vs_budget`
   - `variance_percent`
+  - `invoiced_variance_vs_budget`
+  - `paid_variance_vs_budget`
 - Include totals per event and grouping by section/category.
 
 **Acceptance Criteria**
 - Projection is deterministic for a fixed dataset.
 - Credited lines and partial payments compute correctly.
+- Every line can show the amount progression from estimate to invoiced to paid without manual calculation in the frontend.
 
 ---
 
@@ -316,11 +334,12 @@ Create event-level accounting workspace for document posting and payment trackin
 **Implementation**
 - Add page `frontend/src/pages/EventAccountingPage.tsx`.
 - Sections:
+  - finance summary cards for budget/accrual/cash status
   - document list + create form
   - entry posting form
   - payment recording + allocation
-  - line status table
-- Add route and navigation entry from event context.
+  - line status table with estimate, invoiced, paid, and delta columns
+- Add route and navigation entry from event context and the finance landing page.
 
 **Acceptance Criteria**
 - Users can post invoices/credits and record payments end-to-end.
@@ -340,6 +359,8 @@ Expose planned vs invoiced vs paid vs variance directly in budget workspace.
   - invoiced
   - paid
   - open amount
+  - estimate to invoiced variance
+  - invoiced to paid variance
   - variance amount and percent
 - Add toggle between accrual and cash emphasis.
 
@@ -444,5 +465,5 @@ Ship module behind controlled rollout and monitor correctness.
 - Planned costs are synchronized into budget lines.
 - Invoices/credits/payments are recordable and auditable.
 - Cost status reflects real accounting activity.
-- Budget page shows planned vs actual (invoiced and paid).
+- Finance pages show estimate vs invoiced vs paid and compare those actuals back to budget.
 - Core flows are covered by automated tests.
