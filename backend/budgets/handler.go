@@ -2510,9 +2510,38 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		return err
 	}
 
+	overrideRows, err := h.db.Query(
+		ctx,
+		`SELECT schedule_item_id
+         FROM schedule_item_costs
+         WHERE event_id = $1
+           AND schedule_item_type = 'innhopp'
+           AND status = 'expected'`,
+		budget.EventID,
+	)
+	if err != nil {
+		return err
+	}
+	defer overrideRows.Close()
+
+	overrideInnhoppIDs := map[int64]struct{}{}
+	for overrideRows.Next() {
+		var scheduleItemID int64
+		if err := overrideRows.Scan(&scheduleItemID); err != nil {
+			return err
+		}
+		overrideInnhoppIDs[scheduleItemID] = struct{}{}
+	}
+	if err := overrideRows.Err(); err != nil {
+		return err
+	}
+
 	items := make([]generatedLineItem, 0)
 	for _, row := range rows {
 		if fullLoadCount <= 0 {
+			continue
+		}
+		if _, overridden := overrideInnhoppIDs[row.InnhoppID]; overridden {
 			continue
 		}
 		metric := computeAircraftMetric(row, fullLoadCount, fullParticipants, liveRates, fallbackRates)
@@ -2642,6 +2671,10 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 	return h.syncAutoEstimateLineItems(ctx, budgetID)
 }
 
+func (h *Handler) SyncAutoAircraftLineItems(ctx context.Context, budgetID int64) error {
+	return h.syncAutoAircraftLineItems(ctx, budgetID)
+}
+
 func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64) error {
 	budget, err := h.fetchBudget(ctx, budgetID)
 	if err != nil {
@@ -2721,7 +2754,7 @@ func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64)
 	}
 
 	manualDaysByCode := map[string]map[string]bool{}
-	if budgetMethod == 2 {
+	if budgetMethod != 1 {
 		rows, err := tx.Query(
 			ctx,
 			`SELECT s.code, li.service_date
@@ -2787,7 +2820,7 @@ func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64)
 			return
 		}
 		dayKey := day.Format("2006-01-02")
-		if budgetMethod == 2 && manualDaysByCode[sectionCode] != nil && manualDaysByCode[sectionCode][dayKey] {
+		if manualDaysByCode[sectionCode] != nil && manualDaysByCode[sectionCode][dayKey] {
 			return
 		}
 		dateCopy := day

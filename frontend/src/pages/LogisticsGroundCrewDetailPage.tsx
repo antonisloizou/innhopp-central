@@ -17,7 +17,7 @@ import { Airfield, listAirfields } from '../api/airfields';
 import { OtherLogistic, listOthers, Meal, listMeals } from '../api/logistics';
 import { fromEventLocalPickerDate, parseEventLocal, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
-import ScheduleCostPanel from '../components/ScheduleCostPanel';
+import DetailCostCard from '../components/DetailCostCard';
 
 type VehicleRow = {
   name: string;
@@ -1124,7 +1124,7 @@ const LogisticsGroundCrewDetailPage = () => {
         )}
       </form>
       {selectedEventId && groundCrewId ? (
-        <ScheduleCostPanel
+        <DetailCostCard
           eventId={Number(selectedEventId)}
           scheduleType="ground_crew"
           scheduleId={Number(groundCrewId)}

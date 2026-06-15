@@ -32,6 +32,18 @@ export type ScheduleItemCost = {
   updated_at: string;
 };
 
+export type ScheduleItemCostSuggestion = {
+  name: string;
+  estimated_amount: number;
+  currency: string;
+  description?: string | null;
+};
+
+export type ScheduleItemCostsResponse = {
+  costs: ScheduleItemCost[];
+  suggested_expected?: ScheduleItemCostSuggestion | null;
+};
+
 export type AccountingDocument = {
   id: number;
   event_id: number;
@@ -145,7 +157,7 @@ export const listAccountingDocuments = (eventId: number) =>
   apiRequest<AccountingDocument[]>(`/accounting/events/${eventId}/documents`);
 
 export const listScheduleItemCosts = (eventId: number, scheduleType: string, scheduleId: number) =>
-  apiRequest<ScheduleItemCost[]>(`/accounting/events/${eventId}/schedule-costs/${scheduleType}/${scheduleId}`);
+  apiRequest<ScheduleItemCostsResponse>(`/accounting/events/${eventId}/schedule-costs/${scheduleType}/${scheduleId}`);
 
 export const createScheduleItemCost = (
   eventId: number,
@@ -157,6 +169,7 @@ export const createScheduleItemCost = (
     owner?: string;
     estimated_amount: number;
     currency?: string;
+    status?: ScheduleItemCostStatus;
     notes?: string;
   }
 ) =>

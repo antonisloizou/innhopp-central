@@ -6,7 +6,7 @@ import { Meal, deleteMeal, getMeal, updateMeal } from '../api/logistics';
 import { Event, listEvents } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
-import ScheduleCostPanel from '../components/ScheduleCostPanel';
+import DetailCostCard from '../components/DetailCostCard';
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
 const LogisticsMealDetailPage = () => {
@@ -239,7 +239,7 @@ const LogisticsMealDetailPage = () => {
         </form>
       </article>
       {form.event_id && mealId ? (
-        <ScheduleCostPanel
+        <DetailCostCard
           eventId={Number(form.event_id)}
           scheduleType="meal"
           scheduleId={Number(mealId)}

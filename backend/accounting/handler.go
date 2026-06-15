@@ -2,7 +2,9 @@ package accounting
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/auth"
+	"github.com/innhopp/central/backend/budgets"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/rbac"
 )
@@ -167,6 +170,18 @@ type scheduleTarget struct {
 	Name         string
 	ServiceDate  *time.Time
 	SectionCode  string
+}
+
+type scheduleItemCostSuggestion struct {
+	Name            string  `json:"name"`
+	EstimatedAmount float64 `json:"estimated_amount"`
+	Currency        string  `json:"currency"`
+	Description     string  `json:"description,omitempty"`
+}
+
+type scheduleItemCostsResponse struct {
+	Costs             []ScheduleItemCost          `json:"costs"`
+	SuggestedExpected *scheduleItemCostSuggestion `json:"suggested_expected,omitempty"`
 }
 
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
@@ -1143,26 +1158,38 @@ func (h *Handler) getBudgetActuals(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.Query(r.Context(), `
-		WITH synced_schedule_costs AS (
+		WITH schedule_cost_lines AS (
 			SELECT
-				sc.id AS line_id,
+				MIN(sc.id) AS line_id,
 				'schedule_cost'::text AS line_kind,
-				sc.id AS schedule_item_cost_id,
+				MIN(sc.id) AS schedule_item_cost_id,
 				sc.schedule_item_type,
 				sc.schedule_item_id,
-				li.id AS budget_line_item_id,
+				MAX(sc.budget_line_item_id) FILTER (WHERE sc.status = 'expected' AND sc.budget_line_item_id IS NOT NULL) AS budget_line_item_id,
 				li.section_id,
 				bs.code AS section_code,
 				bs.name AS section_name,
-				COALESCE(NULLIF(TRIM(sc.name), ''), li.name) AS name,
-				sc.status,
-				COALESCE(NULLIF(TRIM(sc.currency), ''), li.cost_currency, 'EUR') AS currency,
-				COALESCE(sc.estimated_amount, 0)::numeric(16,2) AS planned_amount,
-				(li.quantity * li.unit_cost)::numeric(16,2) AS budget_amount
+				COALESCE(
+					MAX(NULLIF(TRIM(sc.name), '')) FILTER (WHERE sc.status = 'expected'),
+					MAX(NULLIF(TRIM(sc.name), '')),
+					MAX(li.name)
+				) AS name,
+				'expected'::text AS status,
+				COALESCE(
+					MAX(NULLIF(TRIM(sc.currency), '')) FILTER (WHERE sc.status = 'expected'),
+					MAX(NULLIF(TRIM(sc.currency), '')),
+					MAX(li.cost_currency),
+					'EUR'
+				) AS currency,
+				COALESCE(SUM(CASE WHEN sc.status = 'expected' THEN sc.estimated_amount ELSE 0 END), 0)::numeric(16,2) AS planned_amount,
+				COALESCE(SUM(CASE WHEN sc.status = 'invoiced' THEN sc.estimated_amount ELSE 0 END), 0)::numeric(16,2) AS invoiced_amount,
+				COALESCE(SUM(CASE WHEN sc.status = 'paid' THEN sc.estimated_amount ELSE 0 END), 0)::numeric(16,2) AS paid_amount,
+				COALESCE(MAX(li.quantity * li.unit_cost), 0)::numeric(16,2) AS budget_amount
 			FROM schedule_item_costs sc
 			LEFT JOIN budget_line_items li ON li.id = sc.budget_line_item_id
 			LEFT JOIN budget_sections bs ON bs.id = li.section_id
 			WHERE sc.event_id = $1
+			GROUP BY sc.schedule_item_type, sc.schedule_item_id, li.section_id, bs.code, bs.name
 		),
 		budget_only_lines AS (
 			SELECT
@@ -1179,6 +1206,8 @@ func (h *Handler) getBudgetActuals(w http.ResponseWriter, r *http.Request) {
 				'expected'::text AS status,
 				COALESCE(NULLIF(TRIM(li.cost_currency), ''), 'EUR') AS currency,
 				(li.quantity * li.unit_cost)::numeric(16,2) AS planned_amount,
+				0::numeric(16,2) AS invoiced_amount,
+				0::numeric(16,2) AS paid_amount,
 				(li.quantity * li.unit_cost)::numeric(16,2) AS budget_amount
 			FROM event_budgets b
 			JOIN budget_line_items li ON li.budget_id = b.id
@@ -1188,38 +1217,32 @@ func (h *Handler) getBudgetActuals(w http.ResponseWriter, r *http.Request) {
 			  AND sc.id IS NULL
 		),
 		planned_lines AS (
-			SELECT * FROM synced_schedule_costs
+			SELECT * FROM schedule_cost_lines
 			UNION ALL
 			SELECT * FROM budget_only_lines
 		),
-		invoiced_totals AS (
+		budget_only_invoiced_totals AS (
 			SELECT
-				CASE
-					WHEN ae.schedule_item_cost_id IS NOT NULL THEN 'schedule_cost'
-					ELSE 'budget_only'
-				END AS line_kind,
-				COALESCE(ae.schedule_item_cost_id, ae.budget_line_item_id) AS line_id,
+				ae.budget_line_item_id AS line_id,
 				COALESCE(SUM(ae.amount), 0)::numeric(16,2) AS invoiced_amount
 			FROM accounting_entries ae
 			JOIN accounting_documents ad ON ad.id = ae.document_id
 			WHERE ae.event_id = $1
-			  AND (ae.schedule_item_cost_id IS NOT NULL OR ae.budget_line_item_id IS NOT NULL)
+			  AND ae.schedule_item_cost_id IS NULL
+			  AND ae.budget_line_item_id IS NOT NULL
 			  AND ad.status <> 'voided'
-			GROUP BY 1, 2
+			GROUP BY 1
 		),
-		paid_totals AS (
+		budget_only_paid_totals AS (
 			SELECT
-				CASE
-					WHEN ae.schedule_item_cost_id IS NOT NULL THEN 'schedule_cost'
-					ELSE 'budget_only'
-				END AS line_kind,
-				COALESCE(ae.schedule_item_cost_id, ae.budget_line_item_id) AS line_id,
+				ae.budget_line_item_id AS line_id,
 				COALESCE(SUM(pa.amount), 0)::numeric(16,2) AS paid_amount
 			FROM payment_allocations pa
 			JOIN accounting_entries ae ON ae.id = pa.accounting_entry_id
 			WHERE ae.event_id = $1
-			  AND (ae.schedule_item_cost_id IS NOT NULL OR ae.budget_line_item_id IS NOT NULL)
-			GROUP BY 1, 2
+			  AND ae.schedule_item_cost_id IS NULL
+			  AND ae.budget_line_item_id IS NOT NULL
+			GROUP BY 1
 		)
 		SELECT
 			pl.line_kind,
@@ -1236,11 +1259,17 @@ func (h *Handler) getBudgetActuals(w http.ResponseWriter, r *http.Request) {
 			pl.currency,
 			pl.planned_amount::float8,
 			pl.budget_amount::float8,
-			COALESCE(it.invoiced_amount, 0)::float8,
-			COALESCE(pt.paid_amount, 0)::float8
+			CASE
+				WHEN pl.line_kind = 'schedule_cost' THEN pl.invoiced_amount::float8
+				ELSE COALESCE(it.invoiced_amount, 0)::float8
+			END AS invoiced_amount,
+			CASE
+				WHEN pl.line_kind = 'schedule_cost' THEN pl.paid_amount::float8
+				ELSE COALESCE(pt.paid_amount, 0)::float8
+			END AS paid_amount
 		FROM planned_lines pl
-		LEFT JOIN invoiced_totals it ON it.line_kind = pl.line_kind AND it.line_id = pl.line_id
-		LEFT JOIN paid_totals pt ON pt.line_kind = pl.line_kind AND pt.line_id = pl.line_id
+		LEFT JOIN budget_only_invoiced_totals it ON pl.line_kind = 'budget_only' AND it.line_id = pl.line_id
+		LEFT JOIN budget_only_paid_totals pt ON pl.line_kind = 'budget_only' AND pt.line_id = pl.line_id
 		ORDER BY pl.section_code, pl.name, pl.line_id
 	`, eventID)
 	if err != nil {
@@ -1393,17 +1422,300 @@ func parseOptionalDate(raw string) (*time.Time, error) {
 
 func deriveStatus(invoiced, paid float64) string {
 	switch {
-	case invoiced <= 0 && paid <= 0:
-		return "expected"
-	case invoiced > 0 && paid <= 0:
-		return "invoiced"
-	case paid > 0 && paid < invoiced:
-		return "partially_paid"
-	case invoiced > 0 && paid >= invoiced:
+	case paid > 0:
 		return "paid"
+	case invoiced > 0:
+		return "invoiced"
 	default:
-		return "committed"
+		return "expected"
 	}
+}
+
+type aircraftSlotBand struct {
+	MaxDistanceKm  float64
+	SlotMultiplier float64
+}
+
+type innhoppAircraftEstimate struct {
+	InnhoppName          string
+	AircraftName         string
+	PricingModel         string
+	RateCurrency         string
+	DistanceByAirKm      *float64
+	LandingDistanceByAir *float64
+	TakeoffAirfieldID    int64
+	LandingAirfieldID    int64
+	RatePerMinute        *float64
+	CruisingSpeedKmh     *float64
+	MinimumLoadDuration  *float64
+	PricePerSlot         *float64
+	SlotBands            []aircraftSlotBand
+}
+
+func clampNonNegative(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
+func roundMoney(v float64) float64 {
+	return math.Round(v*100) / 100
+}
+
+func scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoads int) (int, int, int) {
+	confirmParticipants := int(clampNonNegative(float64((fullLoadSize - crewOnLoad) * confirmLoads)))
+	worstParticipants := int(clampNonNegative(float64((fullLoadSize - crewOnLoad) * confirmLoads)))
+	fullParticipants := int(clampNonNegative(float64((fullLoadSize - crewOnLoad) * fullLoads)))
+	return confirmParticipants, worstParticipants, fullParticipants
+}
+
+func computeTimeBasedEstimatedAmount(item innhoppAircraftEstimate, loadCount int) (float64, string, bool) {
+	if loadCount <= 0 {
+		return 0, "", false
+	}
+	speed := 180.0
+	if item.CruisingSpeedKmh != nil && *item.CruisingSpeedKmh > 0 {
+		speed = *item.CruisingSpeedKmh
+	}
+	minLoadDuration := 0.0
+	if item.MinimumLoadDuration != nil && *item.MinimumLoadDuration > 0 {
+		minLoadDuration = *item.MinimumLoadDuration
+	}
+	unitCost := 0.0
+	if item.RatePerMinute != nil && *item.RatePerMinute > 0 {
+		unitCost = roundMoney(*item.RatePerMinute)
+	}
+	sameAirfield := item.LandingAirfieldID <= 0 || item.LandingAirfieldID == item.TakeoffAirfieldID
+	missingDistance := item.TakeoffAirfieldID <= 0 || item.DistanceByAirKm == nil || *item.DistanceByAirKm < 0
+	totalDistanceKm := 0.0
+	if !missingDistance {
+		if sameAirfield {
+			totalDistanceKm = *item.DistanceByAirKm * 2 * float64(loadCount)
+		} else {
+			if item.LandingAirfieldID <= 0 || *item.DistanceByAirKm <= 0 || item.LandingDistanceByAir == nil || *item.LandingDistanceByAir < 0 {
+				missingDistance = true
+			} else {
+				outboundKm := *item.DistanceByAirKm * float64(loadCount)
+				returnToTakeoffKm := *item.DistanceByAirKm * math.Max(float64(loadCount-1), 0)
+				finalLandingKm := math.Max(*item.LandingDistanceByAir, 0)
+				totalDistanceKm = outboundKm + returnToTakeoffKm + finalLandingKm
+			}
+		}
+	}
+	totalMinutes := 0.0
+	if !missingDistance && totalDistanceKm > 0 {
+		totalMinutes = (totalDistanceKm / speed) * 60
+	}
+	minimumMinutes := minLoadDuration * float64(loadCount)
+	if totalMinutes < minimumMinutes {
+		totalMinutes = minimumMinutes
+	}
+	totalMinutes = math.Ceil(totalMinutes)
+	if totalMinutes <= 0 || unitCost <= 0 {
+		return 0, "", false
+	}
+	return roundMoney(totalMinutes * unitCost), normalizeCurrency(item.RateCurrency), true
+}
+
+func computeSlotBasedEstimatedAmount(item innhoppAircraftEstimate, participantCount int) (float64, string, bool) {
+	if participantCount <= 0 || item.PricePerSlot == nil || *item.PricePerSlot < 0 || len(item.SlotBands) == 0 {
+		return 0, "", false
+	}
+	if item.DistanceByAirKm == nil || *item.DistanceByAirKm < 0 {
+		return 0, "", false
+	}
+	distance := *item.DistanceByAirKm
+	selected := item.SlotBands[0]
+	for _, band := range item.SlotBands {
+		selected = band
+		if distance <= band.MaxDistanceKm {
+			break
+		}
+	}
+	quantity := roundMoney(float64(participantCount) * selected.SlotMultiplier)
+	if quantity <= 0 {
+		return 0, "", false
+	}
+	unitCost := roundMoney(*item.PricePerSlot)
+	return roundMoney(quantity * unitCost), normalizeCurrency(item.RateCurrency), true
+}
+
+func (h *Handler) computeInnhoppExpectedCostSuggestion(ctx context.Context, eventID int64, scheduleID int64) (*scheduleItemCostSuggestion, error) {
+	var generatedName string
+	var generatedDescription string
+	var generatedAmount float64
+	var generatedCurrency string
+	if err := h.db.QueryRow(
+		ctx,
+		`SELECT li.name,
+                COALESCE(li.location_label, ''),
+                (li.quantity * li.unit_cost)::float8,
+                COALESCE(NULLIF(TRIM(li.cost_currency), ''), 'EUR')
+         FROM event_budgets b
+         JOIN budget_line_items li ON li.budget_id = b.id
+         JOIN budget_sections bs ON bs.id = li.section_id
+         WHERE b.event_id = $1
+           AND bs.code = 'aircraft'
+           AND li.innhopp_id = $2
+           AND COALESCE(li.notes, '') LIKE '[auto-aircraft-innhopp]:%'
+         ORDER BY li.sort_order ASC, li.id ASC
+         LIMIT 1`,
+		eventID,
+		scheduleID,
+	).Scan(&generatedName, &generatedDescription, &generatedAmount, &generatedCurrency); err == nil {
+		return &scheduleItemCostSuggestion{
+			Name:            strings.TrimSpace(generatedName),
+			EstimatedAmount: roundMoney(generatedAmount),
+			Currency:        normalizeCurrency(generatedCurrency),
+			Description:     strings.TrimSpace(generatedDescription),
+		}, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	var item innhoppAircraftEstimate
+	var distanceByAir sql.NullFloat64
+	var landingDistanceByAir sql.NullFloat64
+	var ratePerMinute sql.NullFloat64
+	var cruisingSpeedKmh sql.NullFloat64
+	var minimumLoadDuration sql.NullFloat64
+	var pricePerSlot sql.NullFloat64
+	if err := h.db.QueryRow(
+		ctx,
+		`SELECT COALESCE(i.name, ''), COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
+                i.distance_by_air, i.landing_distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0),
+                a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
+         FROM event_innhopps i
+         LEFT JOIN event_aircraft ea ON ea.event_id = i.event_id AND ea.aircraft_id = i.aircraft_id
+         LEFT JOIN aircraft a ON a.id = ea.aircraft_id
+         WHERE i.event_id = $1 AND i.id = $2`,
+		eventID,
+		scheduleID,
+	).Scan(
+		&item.InnhoppName,
+		&item.AircraftName,
+		&item.PricingModel,
+		&item.RateCurrency,
+		&distanceByAir,
+		&landingDistanceByAir,
+		&item.TakeoffAirfieldID,
+		&item.LandingAirfieldID,
+		&ratePerMinute,
+		&cruisingSpeedKmh,
+		&minimumLoadDuration,
+		&pricePerSlot,
+	); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(item.AircraftName) == "" {
+		return nil, nil
+	}
+	if distanceByAir.Valid {
+		val := distanceByAir.Float64
+		item.DistanceByAirKm = &val
+	}
+	if landingDistanceByAir.Valid {
+		val := landingDistanceByAir.Float64
+		item.LandingDistanceByAir = &val
+	}
+	if ratePerMinute.Valid {
+		val := ratePerMinute.Float64
+		item.RatePerMinute = &val
+	}
+	if cruisingSpeedKmh.Valid {
+		val := cruisingSpeedKmh.Float64
+		item.CruisingSpeedKmh = &val
+	}
+	if minimumLoadDuration.Valid {
+		val := minimumLoadDuration.Float64
+		item.MinimumLoadDuration = &val
+	}
+	if pricePerSlot.Valid {
+		val := pricePerSlot.Float64
+		item.PricePerSlot = &val
+	}
+
+	rows, err := h.db.Query(
+		ctx,
+		`SELECT max_distance_km, slot_multiplier
+         FROM aircraft_slot_pricing_bands
+         WHERE aircraft_id = (
+           SELECT aircraft_id FROM event_innhopps WHERE event_id = $1 AND id = $2
+         )
+         ORDER BY sort_order ASC, id ASC`,
+		eventID,
+		scheduleID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var band aircraftSlotBand
+		if err := rows.Scan(&band.MaxDistanceKm, &band.SlotMultiplier); err != nil {
+			return nil, err
+		}
+		item.SlotBands = append(item.SlotBands, band)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	fullLoadSizeValue := defaultBudgetAssumptions["full_load_size"]
+	crewOnLoadValue := defaultBudgetAssumptions["crew_on_load_count"]
+	confirmLoadsValue := defaultBudgetAssumptions["confirm_load_count"]
+	fullLoadCountValue := defaultBudgetAssumptions["full_load_count"]
+	if err := h.db.QueryRow(
+		ctx,
+		`SELECT COALESCE(MAX(CASE WHEN key = 'full_load_size' THEN value_num END), $2),
+                COALESCE(MAX(CASE WHEN key = 'crew_on_load_count' THEN value_num END), $3),
+                COALESCE(MAX(CASE WHEN key = 'confirm_load_count' THEN value_num END), $4),
+                COALESCE(MAX(CASE WHEN key = 'full_load_count' THEN value_num END), $5)
+         FROM budget_assumptions
+         WHERE budget_id = (SELECT id FROM event_budgets WHERE event_id = $1)`,
+		eventID,
+		fullLoadSizeValue,
+		crewOnLoadValue,
+		confirmLoadsValue,
+		fullLoadCountValue,
+	).Scan(&fullLoadSizeValue, &crewOnLoadValue, &confirmLoadsValue, &fullLoadCountValue); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	fullLoadSize := int(fullLoadSizeValue)
+	crewOnLoad := int(crewOnLoadValue)
+	confirmLoads := int(confirmLoadsValue)
+	fullLoadCount := int(fullLoadCountValue)
+	_, _, fullParticipants := scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoadCount)
+	var amount float64
+	var currency string
+	var ok bool
+	if strings.EqualFold(strings.TrimSpace(item.PricingModel), "slot") {
+		amount, currency, ok = computeSlotBasedEstimatedAmount(item, fullParticipants)
+	} else {
+		amount, currency, ok = computeTimeBasedEstimatedAmount(item, fullLoadCount)
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &scheduleItemCostSuggestion{
+		Name:            strings.TrimSpace(item.AircraftName),
+		EstimatedAmount: amount,
+		Currency:        currency,
+		Description:     strings.TrimSpace(item.InnhoppName),
+	}, nil
+}
+
+func (h *Handler) syncAutoAircraftBudgetForEvent(ctx context.Context, eventID int64) error {
+	var budgetID int64
+	if err := h.db.QueryRow(ctx, `SELECT id FROM event_budgets WHERE event_id = $1`, eventID).Scan(&budgetID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	return budgets.NewHandler(h.db).SyncAutoAircraftLineItems(ctx, budgetID)
 }
 
 func (h *Handler) listScheduleCosts(w http.ResponseWriter, r *http.Request) {
@@ -1449,7 +1761,16 @@ func (h *Handler) listScheduleCosts(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to read schedule costs")
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, costs)
+	response := scheduleItemCostsResponse{Costs: costs}
+	if normalizeScheduleType(scheduleType) == "innhopp" {
+		suggestion, err := h.computeInnhoppExpectedCostSuggestion(r.Context(), eventID, scheduleID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to build expected cost suggestion")
+			return
+		}
+		response.SuggestedExpected = suggestion
+	}
+	httpx.WriteJSON(w, http.StatusOK, response)
 }
 
 type ScheduleItemCost struct {
@@ -1531,6 +1852,10 @@ func normalizeScheduleType(raw string) string {
 	}
 }
 
+func isInnhoppScheduleType(scheduleType string) bool {
+	return normalizeScheduleType(scheduleType) == "innhopp"
+}
+
 func (h *Handler) resolveScheduleTarget(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, eventID int64, scheduleType string, scheduleID int64) (*scheduleTarget, error) {
@@ -1539,11 +1864,15 @@ func (h *Handler) resolveScheduleTarget(ctx context.Context, db interface {
 		var name string
 		var sequence int64
 		var scheduledAt *time.Time
-		err := db.QueryRow(ctx, `SELECT name, sequence, scheduled_at FROM innhopps WHERE id = $1 AND event_id = $2`, scheduleID, eventID).Scan(&name, &sequence, &scheduledAt)
+		err := db.QueryRow(ctx, `SELECT name, sequence, scheduled_at FROM event_innhopps WHERE id = $1 AND event_id = $2`, scheduleID, eventID).Scan(&name, &sequence, &scheduledAt)
 		if err != nil {
 			return nil, err
 		}
-		return &scheduleTarget{ScheduleType: "innhopp", ScheduleID: scheduleID, Name: "Innhopp #" + strconv.FormatInt(sequence, 10) + ": " + name, ServiceDate: scheduledAt, SectionCode: "aircraft"}, nil
+		label := strings.TrimSpace(name)
+		if label == "" {
+			label = "Innhopp #" + strconv.FormatInt(sequence, 10)
+		}
+		return &scheduleTarget{ScheduleType: "innhopp", ScheduleID: scheduleID, Name: label, ServiceDate: scheduledAt, SectionCode: "aircraft"}, nil
 	case "transport":
 		var pickup, destination string
 		var scheduledAt *time.Time
@@ -1623,6 +1952,7 @@ func (h *Handler) createScheduleCost(w http.ResponseWriter, r *http.Request) {
 		Owner           string  `json:"owner"`
 		EstimatedAmount float64 `json:"estimated_amount"`
 		Currency        string  `json:"currency"`
+		Status          string  `json:"status"`
 		Notes           string  `json:"notes"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
@@ -1631,6 +1961,16 @@ func (h *Handler) createScheduleCost(w http.ResponseWriter, r *http.Request) {
 	}
 	if payload.EstimatedAmount < 0 {
 		httpx.Error(w, http.StatusBadRequest, "estimated_amount must be non-negative")
+		return
+	}
+	status := strings.TrimSpace(payload.Status)
+	if status == "" {
+		status = "expected"
+	}
+	switch status {
+	case "expected", "invoiced", "paid", "committed", "partially_paid", "cancelled", "disputed":
+	default:
+		httpx.Error(w, http.StatusBadRequest, "invalid status")
 		return
 	}
 	tx, err := h.db.Begin(r.Context())
@@ -1649,9 +1989,9 @@ func (h *Handler) createScheduleCost(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO schedule_item_costs (
 			event_id, schedule_item_type, schedule_item_id, name, category, owner, estimated_amount, currency, status, notes, created_by_account_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'expected', $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, event_id, schedule_item_type, schedule_item_id, budget_line_item_id, vendor_id, name, category, owner, estimated_amount, currency, status, notes, created_at, updated_at
-	`, eventID, target.ScheduleType, scheduleID, name, strings.TrimSpace(payload.Category), strings.TrimSpace(payload.Owner), payload.EstimatedAmount, normalizeCurrency(payload.Currency), strings.TrimSpace(payload.Notes), createdBy).Scan(
+	`, eventID, target.ScheduleType, scheduleID, name, strings.TrimSpace(payload.Category), strings.TrimSpace(payload.Owner), payload.EstimatedAmount, normalizeCurrency(payload.Currency), status, strings.TrimSpace(payload.Notes), createdBy).Scan(
 		&cost.ID, &cost.EventID, &cost.ScheduleItemType, &cost.ScheduleItemID, &cost.BudgetLineItemID, &cost.VendorID, &cost.Name, &cost.Category, &cost.Owner, &cost.EstimatedAmount, &cost.Currency, &cost.Status, &cost.Notes, &cost.CreatedAt, &cost.UpdatedAt,
 	); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create schedule cost")
@@ -1664,6 +2004,12 @@ func (h *Handler) createScheduleCost(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to commit schedule cost")
 		return
+	}
+	if isInnhoppScheduleType(target.ScheduleType) {
+		if err := h.syncAutoAircraftBudgetForEvent(r.Context(), eventID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
+			return
+		}
 	}
 	httpx.WriteJSON(w, http.StatusCreated, cost)
 }
@@ -1699,7 +2045,7 @@ func (h *Handler) updateScheduleCost(w http.ResponseWriter, r *http.Request) {
 		status = "expected"
 	}
 	switch status {
-	case "expected", "committed", "invoiced", "partially_paid", "paid", "cancelled", "disputed":
+	case "expected", "invoiced", "paid", "committed", "partially_paid", "cancelled", "disputed":
 	default:
 		httpx.Error(w, http.StatusBadRequest, "invalid status")
 		return
@@ -1753,6 +2099,12 @@ func (h *Handler) updateScheduleCost(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to commit schedule cost")
 		return
 	}
+	if isInnhoppScheduleType(current.ScheduleItemType) {
+		if err := h.syncAutoAircraftBudgetForEvent(r.Context(), eventID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
+			return
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, current)
 }
 
@@ -1772,7 +2124,8 @@ func (h *Handler) deleteScheduleCost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var budgetLineItemID *int64
-	if err := tx.QueryRow(r.Context(), `SELECT budget_line_item_id FROM schedule_item_costs WHERE id = $1 AND event_id = $2`, costID, eventID).Scan(&budgetLineItemID); err != nil {
+	var scheduleType string
+	if err := tx.QueryRow(r.Context(), `SELECT budget_line_item_id, COALESCE(schedule_item_type, '') FROM schedule_item_costs WHERE id = $1 AND event_id = $2`, costID, eventID).Scan(&budgetLineItemID, &scheduleType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "schedule cost not found")
 			return
@@ -1794,10 +2147,28 @@ func (h *Handler) deleteScheduleCost(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to commit schedule cost deletion")
 		return
 	}
+	if isInnhoppScheduleType(scheduleType) {
+		if err := h.syncAutoAircraftBudgetForEvent(r.Context(), eventID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
+			return
+		}
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *Handler) syncBudgetLineForScheduleCost(ctx context.Context, tx pgx.Tx, target *scheduleTarget, cost *ScheduleItemCost) error {
+	if cost.Status != "expected" {
+		if cost.BudgetLineItemID != nil && *cost.BudgetLineItemID > 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM budget_line_items WHERE id = $1`, *cost.BudgetLineItemID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE schedule_item_costs SET budget_line_item_id = NULL, updated_at = NOW() WHERE id = $1`, cost.ID); err != nil {
+				return err
+			}
+			cost.BudgetLineItemID = nil
+		}
+		return nil
+	}
 	budgetID, err := h.ensureEventBudget(ctx, tx, cost.EventID, cost.Currency)
 	if err != nil {
 		return err
@@ -1808,20 +2179,21 @@ func (h *Handler) syncBudgetLineForScheduleCost(ctx context.Context, tx pgx.Tx, 
 	}
 	serviceDate := toOptionalDate(target.ServiceDate)
 	note := "[schedule-cost:" + strconv.FormatInt(cost.ID, 10) + "]"
+	locationLabel := target.Name
 	if cost.BudgetLineItemID != nil && *cost.BudgetLineItemID > 0 {
 		_, err = tx.Exec(ctx, `
 			UPDATE budget_line_items
-			SET section_id = $2, name = $3, service_date = $4, quantity = 1, unit_cost = $5, cost_currency = $6, notes = $7, updated_at = NOW()
+			SET section_id = $2, name = $3, service_date = $4, location_label = $5, quantity = 1, unit_cost = $6, cost_currency = $7, notes = $8, updated_at = NOW()
 			WHERE id = $1
-		`, *cost.BudgetLineItemID, sectionID, cost.Name, serviceDate, cost.EstimatedAmount, cost.Currency, strings.TrimSpace(note+" "+cost.Notes))
+		`, *cost.BudgetLineItemID, sectionID, cost.Name, serviceDate, locationLabel, cost.EstimatedAmount, cost.Currency, strings.TrimSpace(note+" "+cost.Notes))
 		return err
 	}
 	var lineItemID int64
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO budget_line_items (budget_id, section_id, name, service_date, quantity, unit_cost, cost_currency, sort_order, notes)
-		VALUES ($1, $2, $3, $4, 1, $5, $6, 0, $7)
+		INSERT INTO budget_line_items (budget_id, section_id, name, service_date, location_label, quantity, unit_cost, cost_currency, sort_order, notes)
+		VALUES ($1, $2, $3, $4, $5, 1, $6, $7, 0, $8)
 		RETURNING id
-	`, budgetID, sectionID, cost.Name, serviceDate, cost.EstimatedAmount, cost.Currency, strings.TrimSpace(note+" "+cost.Notes)).Scan(&lineItemID); err != nil {
+	`, budgetID, sectionID, cost.Name, serviceDate, locationLabel, cost.EstimatedAmount, cost.Currency, strings.TrimSpace(note+" "+cost.Notes)).Scan(&lineItemID); err != nil {
 		return err
 	}
 	cost.BudgetLineItemID = &lineItemID
