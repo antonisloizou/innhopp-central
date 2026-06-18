@@ -379,6 +379,7 @@ type aircraftInput struct {
 	Notes               string
 	SortOrder           int
 	SlotPricingBands    []aircraftSlotPricingBandInput
+	PreserveSlotBands   bool
 }
 
 func decodeEventJSON(r *http.Request, dest any) error {
@@ -3911,6 +3912,10 @@ func normalizeAircraftPayloads(raw []aircraftPayload) ([]aircraftInput, error) {
 				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].price_per_slot is required for slot pricing")
 			}
 			if len(payload.SlotPricingBands) == 0 {
+				if item.ID != nil {
+					item.PreserveSlotBands = true
+					break
+				}
 				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].slot_pricing_bands is required for slot pricing")
 			}
 			lastMax := -1.0
@@ -4010,16 +4015,18 @@ func upsertAircraftTx(ctx context.Context, tx pgx.Tx, item aircraftInput) (int64
 		if tag.RowsAffected() == 0 {
 			return 0, pgx.ErrNoRows
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM aircraft_slot_pricing_bands WHERE aircraft_id = $1`, *item.ID); err != nil {
-			return 0, err
-		}
-		for _, band := range item.SlotPricingBands {
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
-                 VALUES ($1, $2, $3, $4)`,
-				*item.ID, band.MaxDistanceKm, band.SlotMultiplier, band.SortOrder,
-			); err != nil {
+		if !item.PreserveSlotBands {
+			if _, err := tx.Exec(ctx, `DELETE FROM aircraft_slot_pricing_bands WHERE aircraft_id = $1`, *item.ID); err != nil {
 				return 0, err
+			}
+			for _, band := range item.SlotPricingBands {
+				if _, err := tx.Exec(ctx,
+					`INSERT INTO aircraft_slot_pricing_bands (aircraft_id, max_distance_km, slot_multiplier, sort_order)
+                 VALUES ($1, $2, $3, $4)`,
+					*item.ID, band.MaxDistanceKm, band.SlotMultiplier, band.SortOrder,
+				); err != nil {
+					return 0, err
+				}
 			}
 		}
 		return *item.ID, nil

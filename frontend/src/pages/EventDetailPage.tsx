@@ -32,6 +32,7 @@ import {
 import { Airfield, CreateAirfieldPayload, createAirfield, listAirfields } from '../api/airfields';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
+import { normalizeAircraftFormBands } from '../utils/aircraftForm';
 import { roleOptions } from '../utils/roles';
 import { formatMetersWithFeet } from '../utils/units';
 import {
@@ -256,13 +257,7 @@ const toAircraftFormRow = (aircraft: EventAircraft, index: number): AircraftForm
   price_per_slot: aircraft.price_per_slot ?? 0,
   notes: aircraft.notes || '',
   sort_order: aircraft.sort_order ?? index,
-  slot_pricing_bands:
-    aircraft.slot_pricing_bands?.map((band, bandIndex) => ({
-      id: band.id,
-      max_distance_km: band.max_distance_km,
-      slot_multiplier: band.slot_multiplier,
-      sort_order: band.sort_order ?? bandIndex
-    })) || [{ max_distance_km: 40, slot_multiplier: 1, sort_order: 0 }]
+  slot_pricing_bands: normalizeAircraftFormBands(aircraft.pricing_model, aircraft.slot_pricing_bands)
 });
 
 const emptyAircraftFormRow = (sortOrder: number): AircraftFormRow => ({
