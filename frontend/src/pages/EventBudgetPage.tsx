@@ -38,6 +38,7 @@ import {
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import {
   CostSplitMode,
+  isApproveDisabled,
   buildCostSplit,
   buildMarginCurveModel,
   buildScenarioBars,
@@ -136,6 +137,7 @@ const EventBudgetPage = () => {
   const [editingLineItemID, setEditingLineItemID] = useState<number | null>(null);
   const [openLineItemActionsFor, setOpenLineItemActionsFor] = useState<number | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [approvingBudget, setApprovingBudget] = useState(false);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -430,8 +432,10 @@ const EventBudgetPage = () => {
         setLiveRates({});
         return;
       }
-      const [summaryResp, sectionResp, lineItemResp, assumptionsResp, currenciesResp] = await Promise.all([
-        getBudgetSummary(evtBudget.id),
+      // The summary and line-items endpoints both trigger backend auto-sync of aircraft rows.
+      // Loading them in parallel can race and produce a transient sync failure on initial navigation.
+      const summaryResp = await getBudgetSummary(evtBudget.id);
+      const [sectionResp, lineItemResp, assumptionsResp, currenciesResp] = await Promise.all([
         listBudgetSections(evtBudget.id),
         listBudgetLineItems(evtBudget.id),
         getBudgetAssumptions(evtBudget.id),
@@ -665,10 +669,8 @@ const EventBudgetPage = () => {
       if (!nextCurrencies.includes(displayCurrency)) {
         setDisplayCurrency(currenciesResp.base_currency || updatedBudget.base_currency || resolvedBaseCurrency);
       }
-      const [latestSummary, latestLineItems] = await Promise.all([
-        getBudgetSummary(budget.id),
-        listBudgetLineItems(budget.id)
-      ]);
+      const latestSummary = await getBudgetSummary(budget.id);
+      const latestLineItems = await listBudgetLineItems(budget.id);
       setLiveRates(mergeCurrencyRates(latestSummary.live_fx_rates, currenciesResp.live_rates));
       setSummary(latestSummary);
       setLineItems(Array.isArray(latestLineItems) ? latestLineItems : []);
@@ -786,6 +788,21 @@ const EventBudgetPage = () => {
       setMessage(err instanceof Error ? err.message : 'Failed to submit budget for review');
     } finally {
       setSubmittingReview(false);
+    }
+  };
+
+  const onApproveBudget = async () => {
+    if (!budget) return;
+    setApprovingBudget(true);
+    setMessage(null);
+    try {
+      await updateBudget(budget.id, { status: 'approved' });
+      await loadBudgetData(activeEventID);
+      setMessage('Budget approved.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to approve budget');
+    } finally {
+      setApprovingBudget(false);
     }
   };
 
@@ -1704,6 +1721,14 @@ const EventBudgetPage = () => {
                 onClick={() => void onSubmitForReview()}
               >
                 {submittingReview ? 'Submitting…' : 'Submit for review'}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={isApproveDisabled(budget.status, summary, approvingBudget)}
+                onClick={() => void onApproveBudget()}
+              >
+                {approvingBudget ? 'Approving…' : 'Approve'}
               </button>
             </div>
               </>

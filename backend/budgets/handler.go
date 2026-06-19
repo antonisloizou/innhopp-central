@@ -804,7 +804,7 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		notes = strings.TrimSpace(*payload.Notes)
 	}
 
-	if status == "review" || status == "approved" {
+	if current.Status == "draft" && status == "review" {
 		summary, err := h.buildSummary(r.Context(), budgetID, nil)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to validate budget status")

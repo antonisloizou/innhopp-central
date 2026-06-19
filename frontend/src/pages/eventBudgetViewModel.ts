@@ -363,3 +363,13 @@ export const isSubmitForReviewDisabled = (
   if ((status || '').trim() !== 'draft') return true;
   return !isWorstCaseGreen(summary);
 };
+
+export const isApproveDisabled = (
+  status: string | undefined,
+  _summary: BudgetSummary | null,
+  approving: boolean
+): boolean => {
+  if (approving) return true;
+  if ((status || '').trim() !== 'review') return true;
+  return false;
+};

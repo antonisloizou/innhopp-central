@@ -168,6 +168,55 @@ func TestUpdateBudgetBlocksReviewWhenWorstCaseNegative(t *testing.T) {
 	}
 }
 
+func TestUpdateBudgetAllowsApproveWhenWorstCaseNegative(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO budget_line_items (budget_id, section_id, name, quantity, unit_cost, cost_currency)
+         SELECT $1, id, 'Aircraft Reserve', 1, 1000, 'EUR'
+         FROM budget_sections
+         WHERE budget_id = $1 AND code = 'food_accommodation'
+         LIMIT 1`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("insert line item failed: %v", err)
+	}
+
+	if _, err := db.Exec(ctx, `UPDATE event_budgets SET status = 'review' WHERE id = $1`, budgetID); err != nil {
+		t.Fatalf("seed budget status failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Put("/api/budgets/{budgetID}", h.updateBudget)
+	req := httptest.NewRequest(http.MethodPut, "/api/budgets/"+strconv.FormatInt(budgetID, 10), bytes.NewBufferString(`{"status":"approved"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload Budget
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response failed: %v", err)
+	}
+	if payload.Status != "approved" {
+		t.Fatalf("status mismatch: got %q want approved", payload.Status)
+	}
+}
+
 func TestCreateBudgetDoesNotPersistLegacyAircraftAssumptions(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
