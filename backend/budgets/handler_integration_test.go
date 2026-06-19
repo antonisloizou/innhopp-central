@@ -454,7 +454,7 @@ func TestSyncAutoAircraftLineItemsSameAirfieldZeroDistanceUsesMinimumWithoutWarn
 	}
 }
 
-func TestSyncAutoAircraftLineItemsUsesParticipantsForSlotPricedAircraft(t *testing.T) {
+func TestSyncAutoAircraftLineItemsUsesSlotBandMultiplierInUnitCost(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
 
@@ -537,11 +537,11 @@ func TestSyncAutoAircraftLineItemsUsesParticipantsForSlotPricedAircraft(t *testi
 	}
 
 	// full participants = (14 - 2) * 2 = 24; matching slot band multiplier = 1.5
-	if qty != 36 {
-		t.Fatalf("quantity mismatch: got %.2f want 36.00", qty)
+	if qty != 24 {
+		t.Fatalf("quantity mismatch: got %.2f want 24.00", qty)
 	}
-	if unitCost != 100 {
-		t.Fatalf("unit cost mismatch: got %.2f want 100.00", unitCost)
+	if unitCost != 150 {
+		t.Fatalf("unit cost mismatch: got %.2f want 150.00", unitCost)
 	}
 }
 

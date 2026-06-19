@@ -557,11 +557,11 @@ func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, participantCount 
 		}
 	}
 	slotOverflow := !found
-	quantity := roundMoney(float64(participantCount) * selected.SlotMultiplier)
+	quantity := roundMoney(float64(participantCount))
 	if quantity <= 0 {
 		return aircraftComputedMetric{}
 	}
-	unitCost := roundMoney(*item.PricePerSlot)
+	unitCost := roundMoney(*item.PricePerSlot * selected.SlotMultiplier)
 	rateToBase := pickRateToBase(item.RateCurrency, liveRates, fallbackRates)
 	return aircraftComputedMetric{
 		Quantity:      quantity,
