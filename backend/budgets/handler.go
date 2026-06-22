@@ -149,6 +149,10 @@ var defaultAssumptions = map[string]float64{
 	"estimate_staff_salary_per_person_day":    0,
 }
 
+var liveCurrencyRatesClient = &http.Client{
+	Timeout: 3 * time.Second,
+}
+
 var estimateAssumptionKeys = map[string]struct{}{
 	"estimate_accommodation_per_person_night": {},
 	"estimate_transport_per_day":              {},
@@ -1869,9 +1873,6 @@ func (h *Handler) isBudgetCurrencyEnabled(ctx context.Context, budgetID int64, c
 }
 
 func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides map[string]float64) (BudgetSummary, error) {
-	if err := h.syncAutoAircraftLineItems(ctx, budgetID); err != nil {
-		return BudgetSummary{}, err
-	}
 	budget, err := h.fetchBudget(ctx, budgetID)
 	if err != nil {
 		return BudgetSummary{}, err
@@ -2448,11 +2449,14 @@ func (h *Handler) fetchLiveCurrencyRates(ctx context.Context, baseCurrency strin
 	if !isValidCurrencyCode(base) {
 		base = "EUR"
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://open.er-api.com/v6/latest/%s", base), nil)
+	ratesCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ratesCtx, http.MethodGet, fmt.Sprintf("https://open.er-api.com/v6/latest/%s", base), nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := liveCurrencyRatesClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
