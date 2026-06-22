@@ -363,6 +363,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             name TEXT NOT NULL,
             pricing_model TEXT NOT NULL DEFAULT 'time',
             rate_currency TEXT NOT NULL DEFAULT 'EUR',
+            capacity INTEGER NOT NULL DEFAULT 14,
+            crew_on_load_count INTEGER NOT NULL DEFAULT 2,
             rate_per_minute NUMERIC,
             cruising_speed_kmh NUMERIC,
             minimum_load_duration NUMERIC,
@@ -373,6 +375,8 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
         )`,
 		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS pricing_model TEXT NOT NULL DEFAULT 'time'`,
 		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS rate_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 14`,
+		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS crew_on_load_count INTEGER NOT NULL DEFAULT 2`,
 		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS rate_per_minute NUMERIC`,
 		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS cruising_speed_kmh NUMERIC`,
 		`ALTER TABLE aircraft ADD COLUMN IF NOT EXISTS minimum_load_duration NUMERIC`,
@@ -700,7 +704,44 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS value_num NUMERIC(16,4)`,
 		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS value_text TEXT`,
 		`ALTER TABLE budget_assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`INSERT INTO budget_assumptions (budget_id, key, value_num)
+         SELECT loads.budget_id, 'confirm_participant_count',
+                GREATEST((GREATEST(COALESCE(loads.full_load_size, 14), 0) - GREATEST(COALESCE(loads.crew_on_load_count, 2), 0)) * GREATEST(COALESCE(loads.confirm_load_count, 1), 0), 0)
+         FROM (
+           SELECT budget_id,
+                  MAX(CASE WHEN key = 'full_load_size' THEN value_num END) AS full_load_size,
+                  MAX(CASE WHEN key = 'crew_on_load_count' THEN value_num END) AS crew_on_load_count,
+                  MAX(CASE WHEN key = 'confirm_load_count' THEN value_num END) AS confirm_load_count
+           FROM budget_assumptions
+           GROUP BY budget_id
+         ) loads
+         ON CONFLICT (budget_id, key) DO NOTHING`,
+		`INSERT INTO budget_assumptions (budget_id, key, value_num)
+         SELECT loads.budget_id, 'worst_participant_count',
+                GREATEST(GREATEST(COALESCE(loads.full_load_size, 14), 0) - GREATEST(COALESCE(loads.crew_on_load_count, 2), 0) + 1, 0)
+         FROM (
+           SELECT budget_id,
+                  MAX(CASE WHEN key = 'full_load_size' THEN value_num END) AS full_load_size,
+                  MAX(CASE WHEN key = 'crew_on_load_count' THEN value_num END) AS crew_on_load_count
+           FROM budget_assumptions
+           GROUP BY budget_id
+         ) loads
+         ON CONFLICT (budget_id, key) DO NOTHING`,
+		`INSERT INTO budget_assumptions (budget_id, key, value_num)
+         SELECT loads.budget_id, 'full_participant_count',
+                GREATEST((GREATEST(COALESCE(loads.full_load_size, 14), 0) - GREATEST(COALESCE(loads.crew_on_load_count, 2), 0)) * GREATEST(COALESCE(loads.full_load_count, 2), 0), 0)
+         FROM (
+           SELECT budget_id,
+                  MAX(CASE WHEN key = 'full_load_size' THEN value_num END) AS full_load_size,
+                  MAX(CASE WHEN key = 'crew_on_load_count' THEN value_num END) AS crew_on_load_count,
+                  MAX(CASE WHEN key = 'full_load_count' THEN value_num END) AS full_load_count
+           FROM budget_assumptions
+           GROUP BY budget_id
+         ) loads
+         ON CONFLICT (budget_id, key) DO NOTHING`,
 		`DELETE FROM budget_assumptions WHERE key = 'aircraft_load_count'`,
+		`DELETE FROM budget_assumptions
+         WHERE key IN ('full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count')`,
 		`DELETE FROM budget_assumptions
          WHERE key IN ('aircraft_price_per_minute', 'aircraft_cruising_speed_kmh', 'minimum_load_duration', 'planned_load_count')`,
 		`CREATE TABLE IF NOT EXISTS budget_scenarios (

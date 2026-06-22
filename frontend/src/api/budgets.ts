@@ -85,6 +85,15 @@ export type BudgetSummary = {
   revenue_with_tip: number;
   live_fx_rates?: Record<string, number>;
   scenarios: Record<string, ScenarioSummary>;
+  scenario_metrics?: Record<
+    string,
+    {
+      aircraft_cost: number;
+      aircraft_minutes: number;
+      aircraft_distance_km: number;
+      payable_crew_count: number;
+    }
+  >;
   margin_curve: MarginPoint[];
 };
 

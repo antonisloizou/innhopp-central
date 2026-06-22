@@ -99,6 +99,7 @@ type BudgetSummary struct {
 	Budget                Budget                     `json:"budget"`
 	Parameters            map[string]float64         `json:"parameters"`
 	Assumptions           map[string]float64         `json:"assumptions,omitempty"`
+	ScenarioMetrics       map[string]ScenarioMetrics `json:"scenario_metrics,omitempty"`
 	SectionTotals         []map[string]any           `json:"section_totals"`
 	DepositAmount         float64                    `json:"deposit_amount"`
 	MainInvoiceAmount     float64                    `json:"main_invoice_amount"`
@@ -115,6 +116,13 @@ type BudgetSummary struct {
 	MarginCurve           []MarginPoint              `json:"margin_curve"`
 }
 
+type ScenarioMetrics struct {
+	AircraftCost       float64 `json:"aircraft_cost"`
+	AircraftMinutes    float64 `json:"aircraft_minutes"`
+	AircraftDistanceKm float64 `json:"aircraft_distance_km"`
+	PayableCrewCount   int     `json:"payable_crew_count"`
+}
+
 var defaultSections = []struct {
 	Code string
 	Name string
@@ -128,10 +136,9 @@ var defaultSections = []struct {
 }
 
 var defaultAssumptions = map[string]float64{
-	"full_load_size":                          14,
-	"crew_on_load_count":                      2,
-	"confirm_load_count":                      1,
-	"full_load_count":                         2,
+	"confirm_participant_count":               12,
+	"worst_participant_count":                 13,
+	"full_participant_count":                  24,
 	"target_markup_percent":                   20,
 	"optional_tip_percent":                    8,
 	"cost_drift_percent":                      10,
@@ -260,6 +267,8 @@ type eventAircraftInnhopp struct {
 	AircraftName           string
 	PricingModel           string
 	RateCurrency           string
+	Capacity               int
+	CrewOnLoadCount        int
 	RatePerMinute          *float64
 	CruisingSpeedKmh       *float64
 	MinimumLoadDuration    *float64
@@ -309,6 +318,25 @@ func displayInnhoppLabel(sequence int64, name string) string {
 	return displayName
 }
 
+func seatsPerAircraftLoad(capacity int, crewOnLoadCount int) int {
+	seats := capacity - crewOnLoadCount
+	if seats < 0 {
+		return 0
+	}
+	return seats
+}
+
+func aircraftLoadCount(item eventAircraftInnhopp, participantCount int) int {
+	if participantCount <= 0 {
+		return 0
+	}
+	seats := seatsPerAircraftLoad(item.Capacity, item.CrewOnLoadCount)
+	if seats <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(participantCount) / float64(seats)))
+}
+
 func (h *Handler) collectBudgetSummaryCurrencyCodes(ctx context.Context, budgetID int64, eventID int64, estimateCurrencies map[string]string, initial []string) ([]string, error) {
 	codes := slices.Clone(initial)
 	for _, currency := range estimateCurrencies {
@@ -355,7 +383,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 		`SELECT i.id, COALESCE(i.sequence, 0), COALESCE(i.name, ''), i.scheduled_at,
                 i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air,
                 i.aircraft_id, COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
-                a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
+                COALESCE(a.capacity, 14), COALESCE(a.crew_on_load_count, 2), a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
          FROM event_innhopps i
          LEFT JOIN event_aircraft ea ON ea.event_id = i.event_id AND ea.aircraft_id = i.aircraft_id
          LEFT JOIN aircraft a ON a.id = ea.aircraft_id
@@ -394,6 +422,8 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 			&item.AircraftName,
 			&item.PricingModel,
 			&item.RateCurrency,
+			&item.Capacity,
+			&item.CrewOnLoadCount,
 			&ratePerMinute,
 			&cruisingSpeedKmh,
 			&minimumLoadDuration,
@@ -478,7 +508,8 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 	return items, nil
 }
 
-func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, loadCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+	loadCount := aircraftLoadCount(item, participantCount)
 	if loadCount <= 0 {
 		return aircraftComputedMetric{}
 	}
@@ -574,7 +605,7 @@ func computeSlotBasedAircraftMetric(item eventAircraftInnhopp, participantCount 
 	}
 }
 
-func computeAircraftMetric(item eventAircraftInnhopp, loadCount int, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
+func computeAircraftMetric(item eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
 	if item.AircraftID == nil || strings.TrimSpace(item.AircraftName) == "" {
 		return aircraftComputedMetric{MissingAircraft: true}
 	}
@@ -582,24 +613,25 @@ func computeAircraftMetric(item eventAircraftInnhopp, loadCount int, participant
 	case "slot":
 		return computeSlotBasedAircraftMetric(item, participantCount, liveRates, fallbackRates)
 	default:
-		return computeTimeBasedAircraftMetric(item, loadCount, liveRates, fallbackRates)
+		return computeTimeBasedAircraftMetric(item, participantCount, liveRates, fallbackRates)
 	}
 }
 
-func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int64, loadCount int, participantCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, currencies []string, err error) {
+func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int64, participantCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, crewCount int, currencies []string, err error) {
 	items, err := h.fetchAircraftInnhopps(ctx, eventID)
 	if err != nil {
-		return 0, 0, 0, nil, err
+		return 0, 0, 0, 0, nil, err
 	}
 	currencySet := map[string]struct{}{}
 	for _, item := range items {
-		metric := computeAircraftMetric(item, loadCount, participantCount, liveRates, fallbackRates)
+		metric := computeAircraftMetric(item, participantCount, liveRates, fallbackRates)
 		if !metric.Valid {
 			continue
 		}
 		cost += metric.BaseCost
 		minutes += metric.AirMinutes
 		distance += metric.AirDistanceKm
+		crewCount += aircraftLoadCount(item, participantCount) * max(item.CrewOnLoadCount, 0)
 		if metric.CostCurrency != "" {
 			currencySet[metric.CostCurrency] = struct{}{}
 		}
@@ -611,7 +643,7 @@ func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int
 		currencies = append(currencies, currency)
 	}
 	sort.Strings(currencies)
-	return cost, minutes, distance, currencies, nil
+	return cost, minutes, distance, crewCount, currencies, nil
 }
 
 func (h *Handler) getBudgetByEvent(w http.ResponseWriter, r *http.Request) {
@@ -1937,26 +1969,19 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	assumptions["deposit_amount"] = depositAmountBase
 	assumptions["main_invoice_amount"] = mainInvoiceAmountBase
 
-	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
-	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
-	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
-	fullLoads := int(clampNonNegative(assumptions["full_load_count"]))
+	confirmParticipantsInput := int(clampNonNegative(assumptions["confirm_participant_count"]))
+	worstParticipantsInput := int(clampNonNegative(assumptions["worst_participant_count"]))
+	fullParticipantsInput := int(clampNonNegative(assumptions["full_participant_count"]))
 
 	confirmParticipants, worstParticipants, fullParticipants := scenarioParticipantCounts(
-		fullLoadSize,
-		crewOnLoad,
-		confirmLoads,
-		fullLoads,
+		confirmParticipantsInput,
+		worstParticipantsInput,
+		fullParticipantsInput,
 	)
 
-	confirmAircraftLoads := confirmLoads
-	worstAircraftLoads := confirmLoads + 1
-	fullAircraftLoads := fullLoads
-
-	confirmAircraftDerivedCost, _, _, _, aircraftErr := h.computeAircraftScenarioTotals(
+	confirmAircraftDerivedCost, confirmAircraftMinutes, confirmAircraftDistance, confirmCrewCount, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		confirmAircraftLoads,
 		confirmParticipants,
 		liveRates,
 		fallbackRates,
@@ -1964,10 +1989,9 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	worstAircraftDerivedCost, _, _, _, aircraftErr := h.computeAircraftScenarioTotals(
+	worstAircraftDerivedCost, worstAircraftMinutes, worstAircraftDistance, worstCrewCount, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		worstAircraftLoads,
 		worstParticipants,
 		liveRates,
 		fallbackRates,
@@ -1975,10 +1999,9 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, _, aircraftErr := h.computeAircraftScenarioTotals(
+	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullCrewCount, _, aircraftErr := h.computeAircraftScenarioTotals(
 		ctx,
 		budget.EventID,
-		fullAircraftLoads,
 		fullParticipants,
 		liveRates,
 		fallbackRates,
@@ -2074,8 +2097,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		assumptions["estimate_staff_salary_per_person_day"],
 		estimateCurrencies["estimate_staff_salary_per_person_day"],
 	))
-	buildEstimatedDailyNonAircraftCost := func(participants int, loads int) float64 {
-		crewCount := crewOnLoad * loads
+	buildEstimatedDailyNonAircraftCost := func(participants int, crewCount int) float64 {
 		return roundMoney(
 			estimateAccommodationPerPersonNight*float64(participants) +
 				estimateFoodPerDay*float64(participants) +
@@ -2089,12 +2111,11 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 	datedManualTotal = roundMoney(datedManualTotal)
 	manualNonAircraftTotal := roundMoney(manualNonAircraftWithoutDate + datedManualTotal)
-	buildEstimatedNonAircraftTotal := func(participants int, loads int, dayCount int) float64 {
-		daily := buildEstimatedDailyNonAircraftCost(participants, loads)
+	buildEstimatedNonAircraftTotal := func(participants int, crewCount int, dayCount int) float64 {
+		daily := buildEstimatedDailyNonAircraftCost(participants, crewCount)
 		return roundMoney(daily * float64(dayCount))
 	}
-	buildHybridFallbackEstimateTotal := func(participants int, loads int, dayCount int) float64 {
-		crewCount := crewOnLoad * loads
+	buildHybridFallbackEstimateTotal := func(participants int, crewCount int, dayCount int) float64 {
 		total := 0.0
 		foodAccommodationMissingDays := dayCount - len(nonAircraftDaysByCode["food_accommodation"])
 		transportMissingDays := dayCount - len(nonAircraftDaysByCode["transport_activities"])
@@ -2121,24 +2142,23 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		}
 		return roundMoney(total)
 	}
-	buildHybridNonAircraftTotal := func(participants int, loads int) float64 {
-		fallbackEstimateTotal := buildHybridFallbackEstimateTotal(participants, loads, eventDurationDays)
+	buildHybridNonAircraftTotal := func(participants int, crewCount int) float64 {
+		fallbackEstimateTotal := buildHybridFallbackEstimateTotal(participants, crewCount, eventDurationDays)
 		return roundMoney(manualNonAircraftTotal + fallbackEstimateTotal)
 	}
-	buildSectionEstimateTotal := func(sectionCode string, participants int, loads int, dayCount int) float64 {
+	buildSectionEstimateTotal := func(sectionCode string, participants int, crewCount int, dayCount int) float64 {
 		switch sectionCode {
 		case "food_accommodation":
 			return roundMoney((estimateAccommodationPerPersonNight + estimateFoodPerDay) * float64(participants) * float64(dayCount))
 		case "transport_activities":
 			return roundMoney(estimateTransportPerDay * float64(dayCount))
 		case "payable_crew":
-			crewCount := crewOnLoad * loads
 			return roundMoney(estimateStaffSalaryPerPersonDay * float64(crewCount) * float64(dayCount))
 		default:
 			return 0
 		}
 	}
-	buildHybridSectionTotal := func(sectionCode string, manualTotal float64, participants int, loads int) float64 {
+	buildHybridSectionTotal := func(sectionCode string, manualTotal float64, participants int, crewCount int) float64 {
 		if sectionCode == "aircraft" {
 			return manualTotal
 		}
@@ -2146,7 +2166,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		if missingDays < 0 {
 			missingDays = 0
 		}
-		return roundMoney(manualTotal + buildSectionEstimateTotal(sectionCode, participants, loads, missingDays))
+		return roundMoney(manualTotal + buildSectionEstimateTotal(sectionCode, participants, crewCount, missingDays))
 	}
 
 	sectionTotals := make([]map[string]any, 0)
@@ -2177,9 +2197,9 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		} else {
 			switch budgetMethod {
 			case 0: // estimates
-				total = buildSectionEstimateTotal(code, fullParticipants, fullLoads, eventDurationDays)
+				total = buildSectionEstimateTotal(code, fullParticipants, fullCrewCount, eventDurationDays)
 			case 2: // hybrid
-				total = buildHybridSectionTotal(code, manualTotal, fullParticipants, fullLoads)
+				total = buildHybridSectionTotal(code, manualTotal, fullParticipants, fullCrewCount)
 			default: // line items
 				total = manualTotal
 			}
@@ -2204,11 +2224,11 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 	switch budgetMethod {
 	case 0: // estimates
-		nonAircraftExpectedCost = buildEstimatedNonAircraftTotal(fullParticipants, fullLoads, eventDurationDays)
+		nonAircraftExpectedCost = buildEstimatedNonAircraftTotal(fullParticipants, fullCrewCount, eventDurationDays)
 	case 1: // line items
 		nonAircraftExpectedCost = roundMoney(nonAircraftExpectedCost)
 	default: // hybrid
-		nonAircraftExpectedCost = buildHybridNonAircraftTotal(fullParticipants, fullLoads)
+		nonAircraftExpectedCost = buildHybridNonAircraftTotal(fullParticipants, fullCrewCount)
 	}
 	expectedCost = roundMoney(nonAircraftExpectedCost + fullAircraftDerivedCost)
 
@@ -2223,24 +2243,24 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	optionalTipPercent := clampNonNegative(assumptions["optional_tip_percent"])
 	optionalTipAmount := roundMoney(targetRevenue * optionalTipPercent / 100)
 	revenueWithTip := roundMoney(targetRevenue + optionalTipAmount)
-	buildScenarioNonAircraftCost := func(participants int, loads int) float64 {
+	buildScenarioNonAircraftCost := func(participants int, crewCount int) float64 {
 		switch budgetMethod {
 		case 0: // estimates
-			return buildEstimatedNonAircraftTotal(participants, loads, eventDurationDays)
+			return buildEstimatedNonAircraftTotal(participants, crewCount, eventDurationDays)
 		case 1: // line items
 			return nonAircraftExpectedCost
 		default: // hybrid
-			return buildHybridNonAircraftTotal(participants, loads)
+			return buildHybridNonAircraftTotal(participants, crewCount)
 		}
 	}
-	buildCostWithDrift := func(participants int, loads int, aircraftDerivedCost float64) (float64, float64) {
-		scenarioExpectedCost := roundMoney(buildScenarioNonAircraftCost(participants, loads) + aircraftDerivedCost)
+	buildCostWithDrift := func(participants int, crewCount int, aircraftDerivedCost float64) (float64, float64) {
+		scenarioExpectedCost := roundMoney(buildScenarioNonAircraftCost(participants, crewCount) + aircraftDerivedCost)
 		scenarioDrift := roundMoney(scenarioExpectedCost * costDriftPercent / 100)
 		return scenarioExpectedCost, roundMoney(scenarioExpectedCost + scenarioDrift)
 	}
-	confirmExpectedCost, confirmCostWithDrift := buildCostWithDrift(confirmParticipants, confirmLoads, confirmAircraftDerivedCost)
-	worstExpectedCost, worstCostWithDrift := buildCostWithDrift(worstParticipants, worstAircraftLoads, worstAircraftDerivedCost)
-	fullExpectedCost, fullCostWithDrift := buildCostWithDrift(fullParticipants, fullLoads, fullAircraftDerivedCost)
+	confirmExpectedCost, confirmCostWithDrift := buildCostWithDrift(confirmParticipants, confirmCrewCount, confirmAircraftDerivedCost)
+	worstExpectedCost, worstCostWithDrift := buildCostWithDrift(worstParticipants, worstCrewCount, worstAircraftDerivedCost)
+	fullExpectedCost, fullCostWithDrift := buildCostWithDrift(fullParticipants, fullCrewCount, fullAircraftDerivedCost)
 
 	scenarios := map[string]ScenarioSummary{
 		"confirm_case": buildScenarioSummary(
@@ -2331,9 +2351,29 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 
 	return BudgetSummary{
-		Budget:                budget,
-		Parameters:            assumptions,
-		Assumptions:           assumptions,
+		Budget:      budget,
+		Parameters:  assumptions,
+		Assumptions: assumptions,
+		ScenarioMetrics: map[string]ScenarioMetrics{
+			"confirm_case": {
+				AircraftCost:       confirmAircraftDerivedCost,
+				AircraftMinutes:    confirmAircraftMinutes,
+				AircraftDistanceKm: confirmAircraftDistance,
+				PayableCrewCount:   confirmCrewCount,
+			},
+			"worst_case_gate": {
+				AircraftCost:       worstAircraftDerivedCost,
+				AircraftMinutes:    worstAircraftMinutes,
+				AircraftDistanceKm: worstAircraftDistance,
+				PayableCrewCount:   worstCrewCount,
+			},
+			"full_capacity_case": {
+				AircraftCost:       fullAircraftDerivedCost,
+				AircraftMinutes:    fullAircraftMinutes,
+				AircraftDistanceKm: fullAircraftDistance,
+				PayableCrewCount:   fullCrewCount,
+			},
+		},
 		SectionTotals:         sectionTotals,
 		DepositAmount:         depositAmountBase,
 		MainInvoiceAmount:     mainInvoiceAmountBase,
@@ -2479,11 +2519,11 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 		return err
 	}
 
-	fullLoadCount := int(clampNonNegative(assumptions["full_load_count"]))
-	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
-	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
-	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
-	_, _, fullParticipants := scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoadCount)
+	_, _, fullParticipants := scenarioParticipantCounts(
+		int(clampNonNegative(assumptions["confirm_participant_count"])),
+		int(clampNonNegative(assumptions["worst_participant_count"])),
+		int(clampNonNegative(assumptions["full_participant_count"])),
+	)
 	liveRates, _ := h.fetchLiveCurrencyRates(ctx, budget.BaseCurrency, nil)
 	if liveRates == nil {
 		liveRates = map[string]float64{}
@@ -2538,13 +2578,13 @@ func (h *Handler) syncAutoAircraftLineItems(ctx context.Context, budgetID int64)
 
 	items := make([]generatedLineItem, 0)
 	for _, row := range rows {
-		if fullLoadCount <= 0 {
+		if fullParticipants <= 0 {
 			continue
 		}
 		if _, overridden := overrideInnhoppIDs[row.InnhoppID]; overridden {
 			continue
 		}
-		metric := computeAircraftMetric(row, fullLoadCount, fullParticipants, liveRates, fallbackRates)
+		metric := computeAircraftMetric(row, fullParticipants, liveRates, fallbackRates)
 		if !metric.Valid {
 			continue
 		}
@@ -2790,12 +2830,21 @@ func (h *Handler) syncAutoEstimateLineItems(ctx context.Context, budgetID int64)
 		}
 	}
 
-	fullLoadSize := int(clampNonNegative(assumptions["full_load_size"]))
-	crewOnLoad := int(clampNonNegative(assumptions["crew_on_load_count"]))
-	confirmLoads := int(clampNonNegative(assumptions["confirm_load_count"]))
-	fullLoads := int(clampNonNegative(assumptions["full_load_count"]))
-	_, _, fullParticipants := scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoads)
-	crewCount := crewOnLoad * fullLoads
+	_, _, fullParticipants := scenarioParticipantCounts(
+		int(clampNonNegative(assumptions["confirm_participant_count"])),
+		int(clampNonNegative(assumptions["worst_participant_count"])),
+		int(clampNonNegative(assumptions["full_participant_count"])),
+	)
+	_, _, _, crewCount, _, err := h.computeAircraftScenarioTotals(
+		ctx,
+		budget.EventID,
+		fullParticipants,
+		map[string]float64{budget.BaseCurrency: 1},
+		map[string]float64{budget.BaseCurrency: 1},
+	)
+	if err != nil {
+		return err
+	}
 
 	estimateAccommodationPerPersonNight := clampNonNegative(assumptions["estimate_accommodation_per_person_night"])
 	estimateFoodPerDay := clampNonNegative(assumptions["estimate_food_per_day"])

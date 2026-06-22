@@ -321,7 +321,7 @@ func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *te
 	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
 	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
 
-	if _, err := db.Exec(ctx, `UPDATE budget_assumptions SET value_num = 2 WHERE budget_id = $1 AND key = 'full_load_count'`, budgetID); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE budget_assumptions SET value_num = 24 WHERE budget_id = $1 AND key = 'full_participant_count'`, budgetID); err != nil {
 		t.Fatalf("update assumptions failed: %v", err)
 	}
 
@@ -370,7 +370,8 @@ func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *te
 		t.Fatalf("load generated line item failed: %v", err)
 	}
 
-	// full_load_count=2:
+	// full participants=24 and seats per load=(14-2)=12:
+	// loads = ceil(24 / 12) = 2
 	// - outbound: 10*2 = 20
 	// - return to takeoff between loads: 10*(2-1) = 10
 	// - final innhopp->landing: 15
@@ -395,7 +396,7 @@ func TestSyncAutoAircraftLineItemsSameAirfieldZeroDistanceUsesMinimumWithoutWarn
 	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
 	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
 
-	if _, err := db.Exec(ctx, `UPDATE budget_assumptions SET value_num = 2 WHERE budget_id = $1 AND key = 'full_load_count'`, budgetID); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE budget_assumptions SET value_num = 24 WHERE budget_id = $1 AND key = 'full_participant_count'`, budgetID); err != nil {
 		t.Fatalf("update assumptions failed: %v", err)
 	}
 
@@ -445,7 +446,7 @@ func TestSyncAutoAircraftLineItemsSameAirfieldZeroDistanceUsesMinimumWithoutWarn
 	}
 
 	// Same-airfield jump with zero distance should apply minimum duration:
-	// minimum_load_duration=20, full_load_count=2 => 40 minutes.
+	// minimum_load_duration=20, derived loads=2 => 40 minutes.
 	if qty != 40 {
 		t.Fatalf("quantity mismatch: got %.2f want 40.00", qty)
 	}
@@ -470,14 +471,13 @@ func TestSyncAutoAircraftLineItemsUsesSlotBandMultiplierInUnitCost(t *testing.T)
 		ctx,
 		`UPDATE budget_assumptions
          SET value_num = CASE key
-           WHEN 'full_load_size' THEN 14
-           WHEN 'crew_on_load_count' THEN 2
-           WHEN 'confirm_load_count' THEN 1
-           WHEN 'full_load_count' THEN 2
+           WHEN 'confirm_participant_count' THEN 12
+           WHEN 'worst_participant_count' THEN 13
+           WHEN 'full_participant_count' THEN 24
            ELSE value_num
          END
          WHERE budget_id = $1
-           AND key IN ('full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count')`,
+           AND key IN ('confirm_participant_count', 'worst_participant_count', 'full_participant_count')`,
 		budgetID,
 	); err != nil {
 		t.Fatalf("update assumptions failed: %v", err)
@@ -561,15 +561,14 @@ func TestGetSummaryUsesParticipantsForSlotPricedAircraft(t *testing.T) {
 		ctx,
 		`UPDATE budget_assumptions
          SET value_num = CASE key
-           WHEN 'full_load_size' THEN 14
-           WHEN 'crew_on_load_count' THEN 2
-           WHEN 'confirm_load_count' THEN 1
-           WHEN 'full_load_count' THEN 2
+           WHEN 'confirm_participant_count' THEN 12
+           WHEN 'worst_participant_count' THEN 13
+           WHEN 'full_participant_count' THEN 24
            WHEN 'cost_drift_percent' THEN 10
            ELSE value_num
          END
          WHERE budget_id = $1
-           AND key IN ('full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count', 'cost_drift_percent')`,
+           AND key IN ('confirm_participant_count', 'worst_participant_count', 'full_participant_count', 'cost_drift_percent')`,
 		budgetID,
 	); err != nil {
 		t.Fatalf("update assumptions failed: %v", err)
@@ -776,6 +775,8 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             name TEXT NOT NULL,
             pricing_model TEXT NOT NULL DEFAULT 'time',
             rate_currency TEXT NOT NULL DEFAULT 'EUR',
+            capacity INTEGER NOT NULL DEFAULT 14,
+            crew_on_load_count INTEGER NOT NULL DEFAULT 2,
             rate_per_minute NUMERIC,
             cruising_speed_kmh NUMERIC,
             minimum_load_duration NUMERIC,

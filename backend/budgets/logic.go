@@ -6,22 +6,15 @@ func roundMoney(v float64) float64 {
 	return math.Round(v*100) / 100
 }
 
-func scenarioParticipantCounts(fullLoadSize, crewOnLoad, confirmLoads, fullLoads int) (confirm, worst, full int) {
-	seatsPerLoad := fullLoadSize - crewOnLoad
-	if seatsPerLoad < 0 {
-		seatsPerLoad = 0
+func scenarioParticipantCounts(confirmParticipants, worstParticipants, fullParticipants int) (confirm, worst, full int) {
+	confirm = max(confirmParticipants, 0)
+	worst = max(worstParticipants, 0)
+	full = max(fullParticipants, 0)
+	if worst < confirm {
+		worst = confirm
 	}
-	if confirmLoads < 0 {
-		confirmLoads = 0
-	}
-	if fullLoads < 0 {
-		fullLoads = 0
-	}
-	confirm = seatsPerLoad * confirmLoads
-	worst = seatsPerLoad + 1
-	full = seatsPerLoad * fullLoads
-	if full < confirm {
-		full = confirm
+	if full < worst {
+		full = worst
 	}
 	return confirm, worst, full
 }

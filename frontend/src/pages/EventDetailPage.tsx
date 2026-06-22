@@ -251,6 +251,8 @@ const toAircraftFormRow = (aircraft: EventAircraft, index: number): AircraftForm
   name: aircraft.name,
   pricing_model: aircraft.pricing_model,
   rate_currency: aircraft.rate_currency || 'EUR',
+  capacity: aircraft.capacity ?? 14,
+  crew_on_load_count: aircraft.crew_on_load_count ?? 2,
   rate_per_minute: aircraft.rate_per_minute ?? 0,
   cruising_speed_kmh: aircraft.cruising_speed_kmh ?? 180,
   minimum_load_duration: aircraft.minimum_load_duration ?? 0,
@@ -264,6 +266,8 @@ const emptyAircraftFormRow = (sortOrder: number): AircraftFormRow => ({
   name: '',
   pricing_model: 'time',
   rate_currency: 'EUR',
+  capacity: 14,
+  crew_on_load_count: 2,
   rate_per_minute: 0,
   cruising_speed_kmh: 180,
   minimum_load_duration: 0,
@@ -1210,6 +1214,8 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           name: row.name.trim(),
           pricing_model: row.pricing_model,
           rate_currency: row.rate_currency.trim().toUpperCase() || 'EUR',
+          capacity: row.capacity,
+          crew_on_load_count: row.crew_on_load_count,
           rate_per_minute: row.rate_per_minute,
           cruising_speed_kmh: row.cruising_speed_kmh,
           minimum_load_duration: row.minimum_load_duration,
@@ -2274,6 +2280,26 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                             </option>
                           ))}
                         </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Capacity</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={row.capacity ?? 14}
+                          onChange={(e) => updateAircraftRow(index, { capacity: Number(e.target.value) })}
+                        />
+                      </label>
+                      <label className="form-field">
+                        <span>Crew on load</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={row.crew_on_load_count ?? 2}
+                          onChange={(e) => updateAircraftRow(index, { crew_on_load_count: Number(e.target.value) })}
+                        />
                       </label>
                       {isSlotModel ? (
                         <label className="form-field">

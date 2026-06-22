@@ -22,6 +22,8 @@ const emptyForm = (): AircraftInput => ({
   name: '',
   pricing_model: 'time',
   rate_currency: 'EUR',
+  capacity: 14,
+  crew_on_load_count: 2,
   rate_per_minute: 0,
   cruising_speed_kmh: 180,
   minimum_load_duration: 0,
@@ -57,6 +59,8 @@ const AircraftDetailPage = () => {
           name: data.name,
           pricing_model: data.pricing_model,
           rate_currency: data.rate_currency,
+          capacity: data.capacity ?? 14,
+          crew_on_load_count: data.crew_on_load_count ?? 2,
           rate_per_minute: data.rate_per_minute ?? 0,
           cruising_speed_kmh: data.cruising_speed_kmh ?? 180,
           minimum_load_duration: data.minimum_load_duration ?? 0,
@@ -234,6 +238,26 @@ const AircraftDetailPage = () => {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="form-field">
+            <span>Capacity</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.capacity ?? 14}
+              onChange={(e) => setForm((prev) => ({ ...prev, capacity: Number(e.target.value) }))}
+            />
+          </label>
+          <label className="form-field">
+            <span>Crew on load</span>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={form.crew_on_load_count ?? 2}
+              onChange={(e) => setForm((prev) => ({ ...prev, crew_on_load_count: Number(e.target.value) }))}
+            />
           </label>
 
           {isSlotModel ? (

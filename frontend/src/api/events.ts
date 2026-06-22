@@ -52,6 +52,8 @@ export interface EventAircraft {
   name: string;
   pricing_model: AircraftPricingModel;
   rate_currency: string;
+  capacity: number;
+  crew_on_load_count: number;
   rate_per_minute?: number | null;
   cruising_speed_kmh?: number | null;
   minimum_load_duration?: number | null;
@@ -257,6 +259,8 @@ export interface AircraftInput {
   name: string;
   pricing_model: AircraftPricingModel;
   rate_currency: string;
+  capacity?: number;
+  crew_on_load_count?: number;
   rate_per_minute?: number;
   cruising_speed_kmh?: number;
   minimum_load_duration?: number;

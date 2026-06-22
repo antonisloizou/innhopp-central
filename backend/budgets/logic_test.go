@@ -3,7 +3,7 @@ package budgets
 import "testing"
 
 func TestScenarioParticipantCounts(t *testing.T) {
-	confirm, worst, full := scenarioParticipantCounts(14, 2, 1, 2)
+	confirm, worst, full := scenarioParticipantCounts(12, 13, 24)
 	if confirm != 12 {
 		t.Fatalf("confirm participants mismatch: got %d want 12", confirm)
 	}
@@ -16,15 +16,15 @@ func TestScenarioParticipantCounts(t *testing.T) {
 }
 
 func TestScenarioParticipantCountsClampsToZero(t *testing.T) {
-	confirm, worst, full := scenarioParticipantCounts(1, 3, 1, 2)
+	confirm, worst, full := scenarioParticipantCounts(-2, 1, -5)
 	if confirm != 0 {
 		t.Fatalf("confirm participants mismatch: got %d want 0", confirm)
 	}
 	if worst != 1 {
 		t.Fatalf("worst participants mismatch: got %d want 1", worst)
 	}
-	if full != 0 {
-		t.Fatalf("full participants mismatch: got %d want 0", full)
+	if full != 1 {
+		t.Fatalf("full participants mismatch: got %d want 1", full)
 	}
 }
 

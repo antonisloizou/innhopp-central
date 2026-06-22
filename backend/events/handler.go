@@ -154,6 +154,8 @@ type Aircraft struct {
 	Name                string                    `json:"name"`
 	PricingModel        AircraftPricingModel      `json:"pricing_model"`
 	RateCurrency        string                    `json:"rate_currency"`
+	Capacity            int                       `json:"capacity"`
+	CrewOnLoadCount     int                       `json:"crew_on_load_count"`
 	RatePerMinute       *float64                  `json:"rate_per_minute,omitempty"`
 	CruisingSpeedKmh    *float64                  `json:"cruising_speed_kmh,omitempty"`
 	MinimumLoadDuration *float64                  `json:"minimum_load_duration,omitempty"`
@@ -276,6 +278,8 @@ type aircraftPayload struct {
 	Name                string                           `json:"name"`
 	PricingModel        string                           `json:"pricing_model"`
 	RateCurrency        string                           `json:"rate_currency"`
+	Capacity            *int                             `json:"capacity"`
+	CrewOnLoadCount     *int                             `json:"crew_on_load_count"`
 	RatePerMinute       *float64                         `json:"rate_per_minute"`
 	CruisingSpeedKmh    *float64                         `json:"cruising_speed_kmh"`
 	MinimumLoadDuration *float64                         `json:"minimum_load_duration"`
@@ -372,6 +376,8 @@ type aircraftInput struct {
 	Name                string
 	PricingModel        AircraftPricingModel
 	RateCurrency        string
+	Capacity            int
+	CrewOnLoadCount     int
 	RatePerMinute       *float64
 	CruisingSpeedKmh    *float64
 	MinimumLoadDuration *float64
@@ -2436,7 +2442,7 @@ func (h *Handler) fetchAirfieldsForEvents(ctx context.Context, eventIDs []int64)
 
 func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(),
-		`SELECT id, name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+		`SELECT id, name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
          FROM aircraft
          ORDER BY created_at DESC, id DESC`,
 	)
@@ -2449,7 +2455,7 @@ func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
 	var ids []int64
 	for rows.Next() {
 		var item Aircraft
-		if err := rows.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.Capacity, &item.CrewOnLoadCount, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse aircraft")
 			return
 		}
@@ -2473,12 +2479,12 @@ func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getAircraftByID(ctx context.Context, aircraftID int64) (Aircraft, error) {
 	row := h.db.QueryRow(ctx,
-		`SELECT id, name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+		`SELECT id, name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
          FROM aircraft WHERE id = $1`,
 		aircraftID,
 	)
 	var item Aircraft
-	if err := row.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.Capacity, &item.CrewOnLoadCount, &item.RatePerMinute, &item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return Aircraft{}, err
 	}
 	bandsByAircraft, err := h.fetchAircraftSlotBands(ctx, []int64{aircraftID})
@@ -2614,7 +2620,7 @@ func (h *Handler) deleteAircraft(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) fetchAircraftForEvents(ctx context.Context, eventIDs []int64) (map[int64][]Aircraft, error) {
 	result := make(map[int64][]Aircraft, len(eventIDs))
 	rows, err := h.db.Query(ctx,
-		`SELECT ea.event_id, a.id, a.name, a.pricing_model, a.rate_currency, a.rate_per_minute,
+		`SELECT ea.event_id, a.id, a.name, a.pricing_model, a.rate_currency, a.capacity, a.crew_on_load_count, a.rate_per_minute,
                 a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot, a.notes,
                 ea.sort_order, a.created_at, a.updated_at
          FROM event_aircraft ea
@@ -2634,7 +2640,7 @@ func (h *Handler) fetchAircraftForEvents(ctx context.Context, eventIDs []int64) 
 		var eventID int64
 		var item Aircraft
 		if err := rows.Scan(
-			&eventID, &item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.RatePerMinute,
+			&eventID, &item.ID, &item.Name, &item.PricingModel, &item.RateCurrency, &item.Capacity, &item.CrewOnLoadCount, &item.RatePerMinute,
 			&item.CruisingSpeedKmh, &item.MinimumLoadDuration, &item.PricePerSlot, &item.Notes,
 			&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
@@ -3855,15 +3861,32 @@ func normalizeAircraftPayloads(raw []aircraftPayload) ([]aircraftInput, error) {
 			sortOrder = *payload.SortOrder
 		}
 		item := aircraftInput{
-			ID:           payload.ID,
-			Name:         name,
-			PricingModel: model,
-			RateCurrency: currency,
-			Notes:        strings.TrimSpace(payload.Notes),
-			SortOrder:    sortOrder,
+			ID:              payload.ID,
+			Name:            name,
+			PricingModel:    model,
+			RateCurrency:    currency,
+			Capacity:        14,
+			CrewOnLoadCount: 2,
+			Notes:           strings.TrimSpace(payload.Notes),
+			SortOrder:       sortOrder,
 		}
 		if payload.ID != nil && *payload.ID <= 0 {
 			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].id must be positive")
+		}
+		if payload.Capacity != nil {
+			if *payload.Capacity < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].capacity must be zero or positive")
+			}
+			item.Capacity = *payload.Capacity
+		}
+		if payload.CrewOnLoadCount != nil {
+			if *payload.CrewOnLoadCount < 0 {
+				return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].crew_on_load_count must be zero or positive")
+			}
+			item.CrewOnLoadCount = *payload.CrewOnLoadCount
+		}
+		if item.Capacity < item.CrewOnLoadCount {
+			return nil, errors.New("aircraft[" + strconv.Itoa(i) + "].capacity must be greater than or equal to crew_on_load_count")
 		}
 		if payload.RatePerMinute != nil {
 			if *payload.RatePerMinute < 0 {
@@ -4003,10 +4026,10 @@ func upsertAircraftTx(ctx context.Context, tx pgx.Tx, item aircraftInput) (int64
 	if item.ID != nil {
 		tag, err := tx.Exec(ctx,
 			`UPDATE aircraft
-             SET name = $1, pricing_model = $2, rate_currency = $3, rate_per_minute = $4,
-                 cruising_speed_kmh = $5, minimum_load_duration = $6, price_per_slot = $7, notes = $8, updated_at = NOW()
-             WHERE id = $9`,
-			item.Name, item.PricingModel, item.RateCurrency, item.RatePerMinute,
+             SET name = $1, pricing_model = $2, rate_currency = $3, capacity = $4, crew_on_load_count = $5, rate_per_minute = $6,
+                 cruising_speed_kmh = $7, minimum_load_duration = $8, price_per_slot = $9, notes = $10, updated_at = NOW()
+             WHERE id = $11`,
+			item.Name, item.PricingModel, item.RateCurrency, item.Capacity, item.CrewOnLoadCount, item.RatePerMinute,
 			item.CruisingSpeedKmh, item.MinimumLoadDuration, item.PricePerSlot, item.Notes, *item.ID,
 		)
 		if err != nil {
@@ -4035,11 +4058,11 @@ func upsertAircraftTx(ctx context.Context, tx pgx.Tx, item aircraftInput) (int64
 	var aircraftID int64
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO aircraft
-            (name, pricing_model, rate_currency, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes)
+            (name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes)
          VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8)
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id`,
-		item.Name, item.PricingModel, item.RateCurrency, item.RatePerMinute,
+		item.Name, item.PricingModel, item.RateCurrency, item.Capacity, item.CrewOnLoadCount, item.RatePerMinute,
 		item.CruisingSpeedKmh, item.MinimumLoadDuration, item.PricePerSlot, item.Notes,
 	).Scan(&aircraftID); err != nil {
 		return 0, err

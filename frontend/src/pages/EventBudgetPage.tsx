@@ -47,10 +47,9 @@ import {
 } from './eventBudgetViewModel';
 
 const parameterLabels: Record<string, string> = {
-  full_load_size: 'Full load size',
-  crew_on_load_count: 'Crew on load',
-  confirm_load_count: 'Confirm load count',
-  full_load_count: 'Full load count',
+  confirm_participant_count: 'Confirm',
+  worst_participant_count: 'Worst',
+  full_participant_count: 'Full',
   target_markup_percent: 'Target markup %',
   optional_tip_percent: 'Optional tip %',
   cost_drift_percent: 'Cost drift %',
@@ -78,7 +77,7 @@ type BudgetSectionKey =
   | 'costSplit'
   | 'lineItems';
 
-type ParametersTabKey = 'load' | 'pricing' | 'estimates' | 'currencies';
+type ParametersTabKey = 'participants' | 'pricing' | 'estimates' | 'currencies';
 type CostSplitTabKey = 'section' | 'innhopp' | 'day';
 type LabelScenarioKey = 'confirm' | 'worst' | 'full';
 type ScenarioSummaryKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
@@ -164,7 +163,7 @@ const EventBudgetPage = () => {
   const [costSplitScenario, setCostSplitScenario] = useState<LabelScenarioKey>('full');
   const [lineItemsScenario, setLineItemsScenario] = useState<LabelScenarioKey>('full');
   const [lineItemsSectionFilter, setLineItemsSectionFilter] = useState<string>('all');
-  const [parametersTab, setParametersTab] = useState<ParametersTabKey>('load');
+  const [parametersTab, setParametersTab] = useState<ParametersTabKey>('participants');
   const [estimateCurrencies, setEstimateCurrencies] = useState<Record<string, string>>({
     estimate_accommodation_per_person_night: 'EUR',
     estimate_transport_per_day: 'EUR',
@@ -837,30 +836,20 @@ const EventBudgetPage = () => {
   };
 
   const scenarioBars = useMemo(() => buildScenarioBars(summary), [summary]);
-  const confirmLoads = Math.max(
-    0,
-    Math.round(
-      parameters.confirm_load_count ??
-        summary?.parameters?.confirm_load_count ??
-        summary?.assumptions?.confirm_load_count ??
-        0
-    )
-  );
-  const fullLoads = Math.max(
-    0,
-    Math.round(
-      parameters.full_load_count ??
-        summary?.parameters?.full_load_count ??
-        summary?.assumptions?.full_load_count ??
-        0
-    )
-  );
   const fullScenarioParticipants = summary?.scenarios?.full_capacity_case?.participants || 0;
   const getScenarioScales = (scenario: LabelScenarioKey) => {
-    const scenarioAircraftLoads = scenario === 'confirm' ? confirmLoads : scenario === 'worst' ? confirmLoads + 1 : fullLoads;
     const selectedScenario = summary?.scenarios?.[scenarioSummaryKeyByLabel[scenario]] || null;
     const selectedScenarioParticipants = selectedScenario?.participants || 0;
-    const aircraftScale = fullLoads <= 0 || scenarioAircraftLoads <= 0 ? 1 : scenarioAircraftLoads / fullLoads;
+    const fullMetrics = summary?.scenario_metrics?.full_capacity_case;
+    const selectedMetrics = summary?.scenario_metrics?.[scenarioSummaryKeyByLabel[scenario]];
+    const aircraftCostScale =
+      !fullMetrics?.aircraft_cost || !selectedMetrics?.aircraft_cost
+        ? 1
+        : selectedMetrics.aircraft_cost / fullMetrics.aircraft_cost;
+    const payableCrewScale =
+      !fullMetrics?.payable_crew_count || !selectedMetrics?.payable_crew_count
+        ? 1
+        : selectedMetrics.payable_crew_count / fullMetrics.payable_crew_count;
     const participantScaleValue =
       fullScenarioParticipants <= 0 || selectedScenarioParticipants <= 0
         ? 1
@@ -870,14 +859,16 @@ const EventBudgetPage = () => {
     const driftScale = expected <= 0 || withDrift <= 0 ? 1 : withDrift / expected;
     return {
       selectedScenario,
-      aircraftScale,
+      aircraftCostScale,
+      payableCrewScale,
       participantScale: participantScaleValue,
       driftScale
     };
   };
   const costSplitScales = getScenarioScales(costSplitScenario);
   const selectedCostSplitScenario = costSplitScales.selectedScenario;
-  const aircraftLoadScale = costSplitScales.aircraftScale;
+  const aircraftCostScale = costSplitScales.aircraftCostScale;
+  const payableCrewScale = costSplitScales.payableCrewScale;
   const participantScale = costSplitScales.participantScale;
   const scenarioDriftScale = costSplitScales.driftScale;
   const isLoadBasedCrewMode = budgetMethod === BUDGET_METHOD_ESTIMATES || budgetMethod === BUDGET_METHOD_HYBRID;
@@ -889,10 +880,11 @@ const EventBudgetPage = () => {
       const isAircraft = sectionCode === 'aircraft';
       const isPayableCrew = sectionCode === 'payable_crew';
       const isFoodAccommodation = sectionCode === 'food_accommodation';
-      const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode);
+      const aircraftScale = isAircraft ? aircraftCostScale : 1;
+      const crewScale = isPayableCrew && isLoadBasedCrewMode ? payableCrewScale : 1;
       const paxScale = isFoodAccommodation && isEstimateOrHybridMode;
       const scaledTotal =
-        section.total * (loadScale ? aircraftLoadScale : 1) * (paxScale ? participantScale : 1) * scenarioDriftScale;
+        section.total * aircraftScale * crewScale * (paxScale ? participantScale : 1) * scenarioDriftScale;
       return {
         ...section,
         total: scaledTotal,
@@ -913,7 +905,8 @@ const EventBudgetPage = () => {
   }, [
     summary,
     costSplitMode,
-    aircraftLoadScale,
+    aircraftCostScale,
+    payableCrewScale,
     participantScale,
     isLoadBasedCrewMode,
     isEstimateOrHybridMode,
@@ -1029,12 +1022,12 @@ const EventBudgetPage = () => {
   const aircraftPerInnhoppSplit = useMemo(() => {
     const scaledRows = aircraftPerInnhoppRows.map((row) => ({
       ...row,
-      displayTotalCost: row.displayTotalCost * aircraftLoadScale
+      displayTotalCost: row.displayTotalCost * aircraftCostScale
     }));
     const aircraftSectionBaseTotal =
       summary?.section_totals?.find((section) => (section.code || '').trim().toLowerCase() === 'aircraft')?.total || 0;
     const aircraftSectionScenarioTotal = convertBaseAmountToDisplayCurrency(
-      aircraftSectionBaseTotal * aircraftLoadScale * scenarioDriftScale
+      aircraftSectionBaseTotal * aircraftCostScale * scenarioDriftScale
     );
     const rawTotal = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
     const normalizeRatio = rawTotal > 0 ? aircraftSectionScenarioTotal / rawTotal : 1;
@@ -1055,7 +1048,7 @@ const EventBudgetPage = () => {
         barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0
       };
     });
-  }, [aircraftPerInnhoppRows, aircraftLoadScale, costSplitMode, summary?.section_totals, scenarioDriftScale]);
+  }, [aircraftPerInnhoppRows, aircraftCostScale, costSplitMode, summary?.section_totals, scenarioDriftScale]);
   const costSplitByDay = useMemo(() => {
     const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
@@ -1162,8 +1155,8 @@ const EventBudgetPage = () => {
       ...row,
       displayTotalCost:
         row.nonLoadBasedDisplayTotalCost +
-        row.aircraftDisplayTotalCost * aircraftLoadScale +
-        row.payableCrewDisplayTotalCost * (isLoadBasedCrewMode ? aircraftLoadScale : 1) +
+        row.aircraftDisplayTotalCost * aircraftCostScale +
+        row.payableCrewDisplayTotalCost * (isLoadBasedCrewMode ? payableCrewScale : 1) +
         row.foodAccommodationDisplayTotalCost * (isEstimateOrHybridMode ? participantScale : 1)
     }));
     const dayRowsAmountAdjusted = (() => {
@@ -1202,7 +1195,8 @@ const EventBudgetPage = () => {
     lineItems,
     costSplitMode,
     costSplit,
-    aircraftLoadScale,
+    aircraftCostScale,
+    payableCrewScale,
     participantScale,
     isLoadBasedCrewMode,
     isEstimateOrHybridMode,
@@ -1253,7 +1247,11 @@ const EventBudgetPage = () => {
           const isAircraft = sectionCode === 'aircraft';
           const isPayableCrew = sectionCode === 'payable_crew';
           const isFoodAccommodation = sectionCode === 'food_accommodation';
-          const loadScale = isAircraft || (isPayableCrew && isLoadBasedCrewMode) ? lineItemsScales.aircraftScale : 1;
+          const loadScale = isAircraft
+            ? lineItemsScales.aircraftCostScale
+            : isPayableCrew && isLoadBasedCrewMode
+              ? lineItemsScales.payableCrewScale
+              : 1;
           const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
           const scaledQuantity = Number(item.quantity || 0) * loadScale;
           const scenarioQuantity = isAircraft ? Math.ceil(scaledQuantity) : scaledQuantity;
@@ -1270,7 +1268,8 @@ const EventBudgetPage = () => {
     [
       lineItems,
       lineItemsSectionFilter,
-      lineItemsScales.aircraftScale,
+      lineItemsScales.aircraftCostScale,
+      lineItemsScales.payableCrewScale,
       lineItemsScales.participantScale,
       lineItemsScales.driftScale,
       isLoadBasedCrewMode,
@@ -2432,11 +2431,11 @@ const EventBudgetPage = () => {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={parametersTab === 'load'}
-                  className={parametersTab === 'load' ? 'primary' : 'ghost'}
-                  onClick={() => setParametersTab('load')}
+                  aria-selected={parametersTab === 'participants'}
+                  className={parametersTab === 'participants' ? 'primary' : 'ghost'}
+                  onClick={() => setParametersTab('participants')}
                 >
-                  Load
+                  Participants
                 </button>
                 <button
                   type="button"
@@ -2466,9 +2465,9 @@ const EventBudgetPage = () => {
                   Currencies
                 </button>
               </div>
-              {parametersTab === 'load' && (
+              {parametersTab === 'participants' && (
                 <div className="budget-assumptions-row budget-assumptions-row--load">
-                  {['full_load_size', 'crew_on_load_count', 'confirm_load_count', 'full_load_count'].map(
+                  {['confirm_participant_count', 'worst_participant_count', 'full_participant_count'].map(
                     renderNumericParameterField
                   )}
                 </div>
