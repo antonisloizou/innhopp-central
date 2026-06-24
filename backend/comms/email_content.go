@@ -16,7 +16,7 @@ type EmailAttachment struct {
 	Filename    string
 }
 
-var inlineDataImageRegex = regexp.MustCompile(`(?is)<img\b([^>]*?)\bsrc=(["'])(data:image/([a-zA-Z0-9.+-]+);base64,([^"'<>]+))\2([^>]*)>`)
+var inlineDataImageRegex = regexp.MustCompile(`(?is)<img\b[^>]*\bsrc=(?:"(data:image/([a-zA-Z0-9.+-]+);base64,([^"<>]+))"|'(data:image/([a-zA-Z0-9.+-]+);base64,([^'<>]+))')[^>]*>`)
 
 func prepareEmailContent(body string) (string, string, []EmailAttachment) {
 	htmlBody := normalizeEmailHTML(body)
@@ -29,8 +29,20 @@ func prepareEmailContent(body string) (string, string, []EmailAttachment) {
 			return match
 		}
 
-		contentType := "image/" + strings.ToLower(strings.TrimSpace(parts[4]))
-		data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(parts[5]))
+		dataURL := strings.TrimSpace(parts[1])
+		contentSubtype := strings.TrimSpace(parts[2])
+		dataBase64 := strings.TrimSpace(parts[3])
+		if dataURL == "" {
+			dataURL = strings.TrimSpace(parts[4])
+			contentSubtype = strings.TrimSpace(parts[5])
+			dataBase64 = strings.TrimSpace(parts[6])
+		}
+		if dataURL == "" || contentSubtype == "" || dataBase64 == "" {
+			return match
+		}
+
+		contentType := "image/" + strings.ToLower(contentSubtype)
+		data, err := base64.StdEncoding.DecodeString(dataBase64)
 		if err != nil || len(data) == 0 {
 			return match
 		}
@@ -45,7 +57,7 @@ func prepareEmailContent(body string) (string, string, []EmailAttachment) {
 			Filename:    filename,
 		})
 
-		return strings.Replace(match, parts[3], "cid:"+contentID, 1)
+		return strings.Replace(match, dataURL, "cid:"+contentID, 1)
 	})
 
 	return htmlBody, htmlToPlainText(htmlBody), attachments
