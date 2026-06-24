@@ -908,8 +908,28 @@ const badgeClassForCommsRegistrationStatus = (status: string) => {
   return 'badge neutral';
 };
 
-const getRecipientKey = (recipient: AudienceRecipientWithEvent) =>
-  `${recipient.event_id || 'event'}-${recipient.registration_id}`;
+const getRecipientKey = (recipient: AudienceRecipientWithEvent) => {
+  if (Number.isFinite(recipient.participant_id) && recipient.participant_id > 0) {
+    return `participant-${recipient.participant_id}`;
+  }
+  const email = (recipient.participant_email || '').trim().toLowerCase();
+  if (email) {
+    return `email-${email}`;
+  }
+  return `registration-${recipient.registration_id}`;
+};
+
+const dedupeRecipients = (recipients: AudienceRecipientWithEvent[]) => {
+  const seen = new Set<string>();
+  return recipients.filter((recipient) => {
+    const recipientKey = getRecipientKey(recipient);
+    if (seen.has(recipientKey)) {
+      return false;
+    }
+    seen.add(recipientKey);
+    return true;
+  });
+};
 
 const sortAudienceRecipients = (recipients: AudienceRecipientWithEvent[]) =>
   [...recipients].sort((a, b) => {
@@ -1377,7 +1397,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
           })
         );
         if (cancelled) return;
-        setManualAddOptions(sortAddableRecipients(previewGroups.flat()));
+        setManualAddOptions(sortAddableRecipients(dedupeRecipients(previewGroups.flat())));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load add-recipient options');
@@ -1413,17 +1433,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
           })
         );
         if (cancelled) return;
-        const seenRecipientKeys = new Set<string>();
-        const recipients = previews.flatMap((preview) =>
-          preview.recipients.filter((recipient) => {
-            const recipientKey = getRecipientKey(recipient);
-            if (seenRecipientKeys.has(recipientKey)) {
-              return false;
-            }
-            seenRecipientKeys.add(recipientKey);
-            return true;
-          })
-        ) as AudienceRecipientWithEvent[];
+        const recipients = dedupeRecipients(previews.flatMap((preview) => preview.recipients)) as AudienceRecipientWithEvent[];
         const sortedRecipients = sortAudienceRecipients(recipients);
         setAudiencePreview({
           count: sortedRecipients.length,
@@ -1800,13 +1810,31 @@ const insertIntoActiveTemplateField = (snippet: string) => {
     setError(null);
     setMessage(null);
     try {
+      const recipients = (audiencePreview?.recipients || []) as AudienceRecipientWithEvent[];
+      const registrationIDsByEvent = new Map<number, number[]>();
+      recipients.forEach((recipient) => {
+        if (!recipient.event_id || !Number.isFinite(recipient.registration_id) || recipient.registration_id <= 0) {
+          return;
+        }
+        const existing = registrationIDsByEvent.get(recipient.event_id) || [];
+        existing.push(recipient.registration_id);
+        registrationIDsByEvent.set(recipient.event_id, existing);
+      });
+
+      const sendEventIds = effectiveEventIds.filter((eventId) => (registrationIDsByEvent.get(eventId)?.length || 0) > 0);
+      if (sendEventIds.length === 0) {
+        setError('Campaign audience is empty.');
+        return;
+      }
+
       const results = await Promise.allSettled(
-        effectiveEventIds.map((eventId) =>
+        sendEventIds.map((eventId) =>
           createCampaign({
             event_id: eventId,
             template_id: Number(selectedTemplateId),
             mode: 'manual',
-            filter
+            filter,
+            registration_ids: registrationIDsByEvent.get(eventId)
           })
         )
       );

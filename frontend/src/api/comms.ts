@@ -84,6 +84,7 @@ export interface CreateCampaignPayload {
   template_id: number;
   mode?: string;
   filter?: AudienceFilter;
+  registration_ids?: number[];
 }
 
 export const listEmailTemplates = () => apiRequest<EmailTemplate[]>('/comms/templates');

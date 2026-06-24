@@ -125,10 +125,11 @@ type templatePayload struct {
 }
 
 type campaignPayload struct {
-	EventID    int64          `json:"event_id"`
-	TemplateID int64          `json:"template_id"`
-	Mode       string         `json:"mode"`
-	Filter     AudienceFilter `json:"filter"`
+	EventID         int64          `json:"event_id"`
+	TemplateID      int64          `json:"template_id"`
+	Mode            string         `json:"mode"`
+	Filter          AudienceFilter `json:"filter"`
+	RegistrationIDs []int64        `json:"registration_ids"`
 }
 
 type preparedDelivery struct {
@@ -924,9 +925,15 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	payload.RegistrationIDs = normalizeAudienceRegistrationIDs(payload.RegistrationIDs)
 	payload.Filter.IncludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.IncludedRegistrationIDs)
 	payload.Filter.ExcludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.ExcludedRegistrationIDs)
-	recipients, err := resolveAudienceRecipients(ctx, tx, payload.EventID, payload.Filter)
+	var recipients []AudienceRecipient
+	if len(payload.RegistrationIDs) > 0 {
+		recipients, err = loadAudienceRecipientsByRegistrationIDs(ctx, tx, payload.EventID, payload.RegistrationIDs)
+	} else {
+		recipients, err = resolveAudienceRecipients(ctx, tx, payload.EventID, payload.Filter)
+	}
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load campaign audience")
 		return
