@@ -97,6 +97,24 @@ func main() {
 		log.Fatalf("failed to configure auth handler: %v", err)
 	}
 
+	var emailSender comms.EmailSender
+	smtpSender, err := comms.NewSMTPSender(comms.SMTPConfig{
+		Host:      os.Getenv("SMTP_HOST"),
+		Port:      os.Getenv("SMTP_PORT"),
+		Username:  os.Getenv("SMTP_USERNAME"),
+		Password:  os.Getenv("SMTP_PASSWORD"),
+		FromEmail: os.Getenv("SMTP_FROM_EMAIL"),
+		FromName:  os.Getenv("SMTP_FROM_NAME"),
+		Security:  os.Getenv("SMTP_SECURITY"),
+	})
+	if err != nil {
+		log.Printf("email transport disabled: %v", err)
+	} else {
+		emailSender = smtpSender
+		cfg := smtpSender.Config()
+		log.Printf("email transport configured for %s:%s as %s", cfg.Host, cfg.Port, cfg.FromEmail)
+	}
+
 	router := chi.NewRouter()
 	router.Use(
 		middleware.RequestID,
@@ -137,7 +155,7 @@ func main() {
 	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
-	router.Mount("/api/comms", comms.NewHandler(pool, authConfig.FrontendURL).Routes(enforcer))
+	router.Mount("/api/comms", comms.NewHandler(pool, authConfig.FrontendURL, emailSender).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))

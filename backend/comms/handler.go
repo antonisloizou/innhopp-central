@@ -24,12 +24,14 @@ import (
 type Handler struct {
 	db          *pgxpool.Pool
 	frontendURL string
+	sender      EmailSender
 }
 
-func NewHandler(db *pgxpool.Pool, frontendURL string) *Handler {
+func NewHandler(db *pgxpool.Pool, frontendURL string, sender EmailSender) *Handler {
 	return &Handler{
 		db:          db,
 		frontendURL: strings.TrimSpace(frontendURL),
+		sender:      sender,
 	}
 }
 
@@ -127,6 +129,14 @@ type campaignPayload struct {
 	TemplateID int64          `json:"template_id"`
 	Mode       string         `json:"mode"`
 	Filter     AudienceFilter `json:"filter"`
+}
+
+type preparedDelivery struct {
+	ID             int64
+	RegistrationID int64
+	Email          string
+	Subject        string
+	Body           string
 }
 
 func parseAudienceRegistrationIDs(values []string) []int64 {
@@ -873,6 +883,11 @@ func (h *Handler) listEventCampaigns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
+	if h.sender == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "email transport is not configured")
+		return
+	}
+
 	var payload campaignPayload
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -926,10 +941,11 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create campaign")
 		return
 	}
+
 	var campaignID int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO email_campaigns (event_id, template_id, mode, filter_json, status, created_by_account_id)
-		VALUES ($1, $2, $3, $4::jsonb, 'sent', $5)
+		VALUES ($1, $2, $3, $4::jsonb, 'pending', $5)
 		RETURNING id
 	`, payload.EventID, payload.TemplateID, mode, string(filterJSON), currentAccountID(ctx)).Scan(&campaignID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create campaign")
@@ -944,6 +960,7 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 	eventName := eventMeta["event_name"]
 	eventScheduleLink := buildEventScheduleLink(h.frontendURL, payload.EventID)
 	eventNameLink := renderEventNameLink(eventName, eventScheduleLink)
+	deliveries := make([]preparedDelivery, 0, len(recipients))
 
 	for _, recipient := range recipients {
 		replacements := map[string]string{
@@ -967,20 +984,91 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 		bodyReplacements["event_name"] = eventNameLink
 		body := renderTemplate(template.BodyTemplate, bodyReplacements)
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO email_deliveries (campaign_id, registration_id, email, subject, body, status, sent_at)
-			VALUES ($1, $2, $3, $4, $5, 'sent', NOW())
-		`, campaignID, recipient.RegistrationID, recipient.ParticipantEmail, subject, body); err != nil {
+		var deliveryID int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO email_deliveries (campaign_id, registration_id, email, subject, body, status)
+			VALUES ($1, $2, $3, $4, $5, 'pending')
+			RETURNING id
+		`, campaignID, recipient.RegistrationID, recipient.ParticipantEmail, subject, body).Scan(&deliveryID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to create deliveries")
 			return
 		}
+		deliveries = append(deliveries, preparedDelivery{
+			ID:             deliveryID,
+			RegistrationID: recipient.RegistrationID,
+			Email:          recipient.ParticipantEmail,
+			Subject:        subject,
+			Body:           body,
+		})
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create campaign")
 		return
 	}
+
+	sentCount := 0
+	failedCount := 0
+	for _, delivery := range deliveries {
+		messageID, err := h.sender.Send(r.Context(), EmailMessage{
+			To:      delivery.Email,
+			Subject: delivery.Subject,
+			HTML:    delivery.Body,
+		})
+		if err != nil {
+			failedCount++
+			if _, updateErr := h.db.Exec(r.Context(), `
+				UPDATE email_deliveries
+				SET status = 'failed',
+				    failed_at = NOW(),
+				    error_message = $2
+				WHERE id = $1
+			`, delivery.ID, truncateError(err.Error())); updateErr != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to update delivery status")
+				return
+			}
+			continue
+		}
+		sentCount++
+		if _, err := h.db.Exec(r.Context(), `
+			UPDATE email_deliveries
+			SET status = 'sent',
+			    sent_at = NOW(),
+			    provider_message_id = $2,
+			    failed_at = NULL,
+			    error_message = ''
+			WHERE id = $1
+		`, delivery.ID, messageID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to update delivery status")
+			return
+		}
+	}
+
+	campaignStatus := "sent"
+	switch {
+	case sentCount == 0:
+		campaignStatus = "failed"
+	case failedCount > 0:
+		campaignStatus = "partial_failure"
+	}
+	if _, err := h.db.Exec(r.Context(), `
+		UPDATE email_campaigns
+		SET status = $2
+		WHERE id = $1
+	`, campaignID, campaignStatus); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update campaign status")
+		return
+	}
+
 	h.getCampaignByID(w, r, campaignID)
+}
+
+func truncateError(message string) string {
+	message = strings.TrimSpace(message)
+	if len(message) <= 1000 {
+		return message
+	}
+	return message[:1000]
 }
 
 func (h *Handler) getCampaignByID(w http.ResponseWriter, r *http.Request, campaignID int64) {

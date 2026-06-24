@@ -14,6 +14,7 @@ Create a single source of truth for operational data that keeps the team synchro
 - Public event registration pages by slug that create participant-linked registrations and default payment placeholders.
 - Staff registration operations pages for event-level registration lists, status changes, payment updates, and internal notes.
 - Event comms pages with reusable email templates, audience preview by registration/payment filters, manual campaign send, and delivery history.
+- Campaign sends use SMTP when backend mail transport variables are configured, which allows Amazon WorkMail-backed real delivery.
 - Event budget workspace with line items, parameters, scenario summaries, profitability gates, and live FX-backed multi-currency cost inputs.
 - Safety and compliance fields on events/innhopps (NOTAM, risk assessment, safety precautions).
 - RBAC-backed login sessions (OIDC) with seeded roles for core operational duties.

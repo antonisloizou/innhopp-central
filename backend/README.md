@@ -24,6 +24,13 @@ The service uses the following environment variables:
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://postgres:postgres@localhost:5432/innhopp?sslmode=disable` |
 | `PORT` | HTTP listen port | `8080` |
 | `BUDGETS_V1` | Enable budget endpoints (`false` disables mount) | `true` |
+| `SMTP_HOST` | SMTP server hostname | none |
+| `SMTP_PORT` | SMTP server port | `465` |
+| `SMTP_USERNAME` | SMTP login username | none |
+| `SMTP_PASSWORD` | SMTP login password | none |
+| `SMTP_FROM_EMAIL` | Envelope/header sender address | none |
+| `SMTP_FROM_NAME` | Optional display name for sender | empty |
+| `SMTP_SECURITY` | SMTP transport mode: `starttls`, `tls`, or `none` | `tls` |
 
 For Railway deployments set `DATABASE_URL` to the connection string provided by the managed PostgreSQL add-on and map the service port to `$PORT`.
 
@@ -149,7 +156,8 @@ On startup the server creates these tables if they do not already exist:
 - The registration backbone enforces one active registration per participant per event; cancelled or expired registrations can be recreated.
 - Public registration links only work for events with `public_registration_enabled=true`; the backend also respects `registration_open_at` and rejects registrations after the event start time.
 - Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/main invoice payment rows from the event commercial settings.
-- The first comms slice renders templates and logs per-recipient deliveries inside the database; it does not yet integrate an SMTP/provider transport or background scheduler.
+- Comms campaigns now send through SMTP when the transport variables above are configured. Each delivery is stored as `pending`, then updated to `sent` or `failed` based on the real SMTP result.
+- For Amazon WorkMail, use the mailbox SMTP submission settings for your organization, set `SMTP_SECURITY=tls`, use port `465`, and set `SMTP_FROM_EMAIL` to the actual WorkMail mailbox you are authenticating with.
 - Budget workflow gate: moving budget status to `review` or `approved` is blocked when `worst_case_gate.margin_without_tip` is negative.
 - Budget formula notes:
   - `target_markup_percent` and `optional_tip_percent` are independent.
