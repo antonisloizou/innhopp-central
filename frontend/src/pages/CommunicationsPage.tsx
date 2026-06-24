@@ -124,7 +124,7 @@ const initialTemplateForm: TemplateForm = {
 };
 
 const createTemplateEditorOption = '__new__';
-const defaultAudienceRoles = ['Participant'];
+const defaultAudienceRoles: string[] = [];
 
 const templateTokenGroups = [
   {
@@ -967,7 +967,9 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
   const [selectedEventIds, setSelectedEventIds] = useState<number[]>(() =>
     fixedEventId ? [fixedEventId] : []
   );
-  const [filter, setFilter] = useState<AudienceFilter>({ roles: defaultAudienceRoles });
+  const [filter, setFilter] = useState<AudienceFilter>(
+    defaultAudienceRoles.length > 0 ? { roles: defaultAudienceRoles } : {}
+  );
   const [templateForm, setTemplateForm] = useState<TemplateForm>(initialTemplateForm);
   const [bodyLinkEditor, setBodyLinkEditor] = useState<BodyLinkEditorState>({
     open: false,
@@ -1009,7 +1011,8 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
 
   const effectiveEventIds = useMemo(() => {
     if (eventScoped && fixedEventId) return [fixedEventId];
-    return selectedEventIds;
+    if (selectedEventIds.length > 0) return selectedEventIds;
+    return availableEvents.map((event) => event.id);
   }, [availableEvents, eventScoped, fixedEventId, selectedEventIds]);
 
   const eventMap = useMemo(
