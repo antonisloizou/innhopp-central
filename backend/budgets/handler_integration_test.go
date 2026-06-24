@@ -641,6 +641,224 @@ func TestGetSummaryUsesParticipantsForSlotPricedAircraft(t *testing.T) {
 	}
 }
 
+func TestGetSummaryReusesPayableCrewWithinEachDay(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO budget_sections (budget_id, code, name, sort_order)
+         VALUES ($1, 'payable_crew', 'Payable Crew', 2)`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("insert payable crew section failed: %v", err)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'confirm_participant_count' THEN 12
+           WHEN 'worst_participant_count' THEN 12
+           WHEN 'full_participant_count' THEN 12
+           WHEN 'estimate_staff_salary_per_person_day' THEN 400
+           WHEN 'budget_method' THEN 0
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('confirm_participant_count', 'worst_participant_count', 'full_participant_count', 'estimate_staff_salary_per_person_day', 'budget_method')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var aircraftID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO aircraft (name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Crew Reuse Aircraft', 'time', 'EUR', 5, 1, 1, 60, 10)
+         RETURNING id`,
+	).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, scheduled_at, takeoff_airfield_id, landing_airfield_id, distance_by_air, landing_distance_by_air)
+         VALUES
+           ($1, 1, 'Day 1 A', $2, NOW(), 100, 100, 0, 0),
+           ($1, 2, 'Day 1 B', $2, NOW(), 100, 100, 0, 0),
+           ($1, 3, 'Day 2 A', $2, NOW() + INTERVAL '1 day', 100, 100, 0, 0)`,
+		eventID,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert innhopps failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Get("/api/budgets/{budgetID}/summary", h.getSummary)
+	req := httptest.NewRequest(http.MethodGet, "/api/budgets/"+strconv.FormatInt(budgetID, 10)+"/summary", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("summary status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var payload BudgetSummary
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode summary failed: %v", err)
+	}
+
+	if payload.ScenarioMetrics["full_capacity_case"].PayableCrewCount != 6 {
+		t.Fatalf("payable crew count mismatch: got %d want 6", payload.ScenarioMetrics["full_capacity_case"].PayableCrewCount)
+	}
+
+	found := false
+	for _, section := range payload.SectionTotals {
+		if section["code"] == "payable_crew" {
+			found = true
+			if total, ok := section["total"].(float64); !ok || total != 2400 {
+				t.Fatalf("payable crew total mismatch: got %v want 2400", section["total"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("payable crew section missing")
+	}
+}
+
+func TestSyncAutoEstimateLineItemsReusesPayableCrewWithinEachDay(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 0, 0)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	for _, section := range []struct {
+		code  string
+		name  string
+		order int
+	}{
+		{code: "transport_activities", name: "Transport", order: 2},
+		{code: "payable_crew", name: "Payable Crew", order: 3},
+	} {
+		if _, err := db.Exec(
+			ctx,
+			`INSERT INTO budget_sections (budget_id, code, name, sort_order)
+             VALUES ($1, $2, $3, $4)`,
+			budgetID,
+			section.code,
+			section.name,
+			section.order,
+		); err != nil {
+			t.Fatalf("insert section %s failed: %v", section.code, err)
+		}
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`UPDATE budget_assumptions
+         SET value_num = CASE key
+           WHEN 'confirm_participant_count' THEN 12
+           WHEN 'worst_participant_count' THEN 12
+           WHEN 'full_participant_count' THEN 12
+           WHEN 'estimate_staff_salary_per_person_day' THEN 400
+           WHEN 'budget_method' THEN 0
+           ELSE value_num
+         END
+         WHERE budget_id = $1
+           AND key IN ('confirm_participant_count', 'worst_participant_count', 'full_participant_count', 'estimate_staff_salary_per_person_day', 'budget_method')`,
+		budgetID,
+	); err != nil {
+		t.Fatalf("update assumptions failed: %v", err)
+	}
+
+	var aircraftID int64
+	if err := db.QueryRow(
+		ctx,
+		`INSERT INTO aircraft (name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Crew Reuse Aircraft', 'time', 'EUR', 5, 1, 1, 60, 10)
+         RETURNING id`,
+	).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+
+	if _, err := db.Exec(
+		ctx,
+		`INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, scheduled_at, takeoff_airfield_id, landing_airfield_id, distance_by_air, landing_distance_by_air)
+         VALUES
+           ($1, 1, 'Day 1 A', $2, NOW(), 100, 100, 0, 0),
+           ($1, 2, 'Day 1 B', $2, NOW(), 100, 100, 0, 0),
+           ($1, 3, 'Day 2 A', $2, NOW() + INTERVAL '1 day', 100, 100, 0, 0)`,
+		eventID,
+		aircraftID,
+	); err != nil {
+		t.Fatalf("insert innhopps failed: %v", err)
+	}
+
+	h := NewHandler(db)
+	if err := h.syncAutoEstimateLineItems(ctx, budgetID); err != nil {
+		t.Fatalf("sync auto estimate line items failed: %v", err)
+	}
+
+	rows, err := db.Query(
+		ctx,
+		`SELECT service_date, quantity
+         FROM budget_line_items li
+         JOIN budget_sections s ON s.id = li.section_id
+         WHERE li.budget_id = $1
+           AND s.code = 'payable_crew'
+           AND COALESCE(li.notes, '') LIKE '[auto-estimate]:%'
+         ORDER BY service_date ASC`,
+		budgetID,
+	)
+	if err != nil {
+		t.Fatalf("query payable crew line items failed: %v", err)
+	}
+	defer rows.Close()
+
+	var quantities []float64
+	for rows.Next() {
+		var serviceDate time.Time
+		var quantity float64
+		if err := rows.Scan(&serviceDate, &quantity); err != nil {
+			t.Fatalf("scan payable crew line item failed: %v", err)
+		}
+		quantities = append(quantities, quantity)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate payable crew line items failed: %v", err)
+	}
+
+	if len(quantities) != 3 {
+		t.Fatalf("payable crew line item count mismatch: got %d want 3", len(quantities))
+	}
+	if quantities[0] != 3 || quantities[1] != 3 || quantities[2] != 0 {
+		t.Fatalf("payable crew quantities mismatch: got %v want [3 3 0]", quantities)
+	}
+}
+
 func TestCollectBudgetSummaryCurrencyCodesIncludesDerivedSourceCurrencies(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
@@ -764,6 +982,7 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
             sequence INTEGER NOT NULL DEFAULT 0,
             name TEXT NOT NULL DEFAULT '',
+            scheduled_at TIMESTAMPTZ,
             aircraft_id INTEGER,
             takeoff_airfield_id INTEGER,
             landing_airfield_id INTEGER,
