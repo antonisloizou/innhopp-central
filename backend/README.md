@@ -31,6 +31,11 @@ The service uses the following environment variables:
 | `SMTP_FROM_EMAIL` | Envelope/header sender address | none |
 | `SMTP_FROM_NAME` | Optional display name for sender | empty |
 | `SMTP_SECURITY` | SMTP transport mode: `starttls`, `tls`, or `none` | `tls` |
+| `IMAP_HOST` | IMAP server hostname for saving sent copies | derived from `SMTP_HOST` when possible |
+| `IMAP_PORT` | IMAP TLS port | `993` |
+| `IMAP_USERNAME` | IMAP login username | falls back to `SMTP_USERNAME` |
+| `IMAP_PASSWORD` | IMAP login password | falls back to `SMTP_PASSWORD` |
+| `IMAP_SENT_FOLDER` | Optional exact sent-mailbox name | auto-detected (`Sent Items`/`Sent`) |
 
 For Railway deployments set `DATABASE_URL` to the connection string provided by the managed PostgreSQL add-on and map the service port to `$PORT`.
 
@@ -158,6 +163,7 @@ On startup the server creates these tables if they do not already exist:
 - Public registrations match existing participants by normalized email or create a new participant profile, then create deposit/main invoice payment rows from the event commercial settings.
 - Comms campaigns now send through SMTP when the transport variables above are configured. Each delivery is stored as `pending`, then updated to `sent` or `failed` based on the real SMTP result.
 - For Amazon WorkMail, use the mailbox SMTP submission settings for your organization, set `SMTP_SECURITY=tls`, use port `465`, and set `SMTP_FROM_EMAIL` to the actual WorkMail mailbox you are authenticating with.
+- To make sent campaign copies appear in WorkMail's Sent folder, configure IMAP as well. The backend sends first, then appends the exact MIME message into the mailbox over IMAP as a best-effort step.
 - Budget workflow gate: moving budget status to `review` or `approved` is blocked when `worst_case_gate.margin_without_tip` is negative.
 - Budget formula notes:
   - `target_markup_percent` and `optional_tip_percent` are independent.

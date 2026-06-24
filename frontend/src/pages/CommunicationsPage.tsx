@@ -1009,8 +1009,7 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
 
   const effectiveEventIds = useMemo(() => {
     if (eventScoped && fixedEventId) return [fixedEventId];
-    if (selectedEventIds.length > 0) return selectedEventIds;
-    return availableEvents.map((event) => event.id);
+    return selectedEventIds;
   }, [availableEvents, eventScoped, fixedEventId, selectedEventIds]);
 
   const eventMap = useMemo(
@@ -1798,7 +1797,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
     setError(null);
     setMessage(null);
     try {
-      const nextCampaigns = await Promise.all(
+      const results = await Promise.allSettled(
         effectiveEventIds.map((eventId) =>
           createCampaign({
             event_id: eventId,
@@ -1808,11 +1807,35 @@ const insertIntoActiveTemplateField = (snippet: string) => {
           })
         )
       );
-      setCampaigns((prev) =>
-        [...nextCampaigns, ...prev].sort(
-          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        )
-      );
+
+      const successfulCampaigns = results
+        .filter((result): result is PromiseFulfilledResult<Campaign> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      const failedResults = results
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason);
+
+      if (successfulCampaigns.length > 0) {
+        setCampaigns((prev) =>
+          [...successfulCampaigns, ...prev].sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+        );
+      }
+
+      if (failedResults.length > 0) {
+        const firstError = failedResults[0];
+        const firstMessage =
+          firstError instanceof Error ? firstError.message : 'Failed to send one or more campaigns';
+        setError(
+          successfulCampaigns.length > 0
+            ? `${successfulCampaigns.length} campaign(s) sent, ${failedResults.length} failed. First error: ${firstMessage}`
+            : firstMessage
+        );
+        return;
+      }
+
+      setMessage(`Sent ${successfulCampaigns.length} campaign(s).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send campaign');
     } finally {

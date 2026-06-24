@@ -1010,10 +1010,13 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 	sentCount := 0
 	failedCount := 0
 	for _, delivery := range deliveries {
-		messageID, err := h.sender.Send(r.Context(), EmailMessage{
-			To:      delivery.Email,
-			Subject: delivery.Subject,
-			HTML:    delivery.Body,
+		htmlBody, plainTextBody, inlineAttachments := prepareEmailContent(delivery.Body)
+		sendResult, err := h.sender.Send(r.Context(), EmailMessage{
+			To:                delivery.Email,
+			Subject:           delivery.Subject,
+			HTML:              htmlBody,
+			PlainText:         plainTextBody,
+			InlineAttachments: inlineAttachments,
 		})
 		if err != nil {
 			failedCount++
@@ -1038,7 +1041,7 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 			    failed_at = NULL,
 			    error_message = ''
 			WHERE id = $1
-		`, delivery.ID, messageID); err != nil {
+		`, delivery.ID, sendResult.MessageID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to update delivery status")
 			return
 		}

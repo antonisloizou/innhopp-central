@@ -113,6 +113,32 @@ func main() {
 		emailSender = smtpSender
 		cfg := smtpSender.Config()
 		log.Printf("email transport configured for %s:%s as %s", cfg.Host, cfg.Port, cfg.FromEmail)
+
+		imapHost := strings.TrimSpace(os.Getenv("IMAP_HOST"))
+		if imapHost == "" && strings.HasPrefix(cfg.Host, "smtp.mail.") {
+			imapHost = "imap.mail." + strings.TrimPrefix(cfg.Host, "smtp.mail.")
+		}
+		imapUsername := strings.TrimSpace(os.Getenv("IMAP_USERNAME"))
+		if imapUsername == "" {
+			imapUsername = cfg.Username
+		}
+		imapPassword := strings.TrimSpace(os.Getenv("IMAP_PASSWORD"))
+		if imapPassword == "" {
+			imapPassword = cfg.Password
+		}
+		imapStore, imapErr := comms.NewIMAPSentStore(comms.IMAPConfig{
+			Host:       imapHost,
+			Port:       os.Getenv("IMAP_PORT"),
+			Username:   imapUsername,
+			Password:   imapPassword,
+			SentFolder: os.Getenv("IMAP_SENT_FOLDER"),
+		})
+		if imapErr != nil {
+			log.Printf("sent-folder copy disabled: %v", imapErr)
+		} else {
+			emailSender = comms.NewSentFolderCopyingSender(emailSender, imapStore, log.Printf)
+			log.Printf("sent-folder copy configured for %s", imapHost)
+		}
 	}
 
 	router := chi.NewRouter()

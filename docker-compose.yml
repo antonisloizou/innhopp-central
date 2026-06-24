@@ -14,6 +14,11 @@ services:
       SMTP_FROM_EMAIL: ""
       SMTP_FROM_NAME: ""
       SMTP_SECURITY: "tls"
+      IMAP_HOST: ""
+      IMAP_PORT: "993"
+      IMAP_USERNAME: ""
+      IMAP_PASSWORD: ""
+      IMAP_SENT_FOLDER: ""
     depends_on:
       - db
 

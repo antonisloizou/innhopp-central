@@ -13,13 +13,20 @@ import (
 )
 
 type EmailSender interface {
-	Send(ctx context.Context, message EmailMessage) (string, error)
+	Send(ctx context.Context, message EmailMessage) (EmailSendResult, error)
 }
 
 type EmailMessage struct {
-	To      string
-	Subject string
-	HTML    string
+	To                string
+	Subject           string
+	HTML              string
+	PlainText         string
+	InlineAttachments []EmailAttachment
+}
+
+type EmailSendResult struct {
+	MessageID string
+	Raw       []byte
 }
 
 type SMTPConfig struct {
@@ -86,53 +93,56 @@ func (s *SMTPSender) Config() SMTPConfig {
 	return s.config
 }
 
-func (s *SMTPSender) Send(ctx context.Context, message EmailMessage) (string, error) {
+func (s *SMTPSender) Send(ctx context.Context, message EmailMessage) (EmailSendResult, error) {
 	to := strings.TrimSpace(message.To)
 	if to == "" {
-		return "", fmt.Errorf("recipient email is required")
+		return EmailSendResult{}, fmt.Errorf("recipient email is required")
 	}
 
 	addr := net.JoinHostPort(s.config.Host, s.config.Port)
 	conn, err := s.dial(ctx, addr)
 	if err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	defer conn.Close()
 
 	client := newSMTPClient(conn)
 	if err := client.expect(220); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	if err := client.ehlo("localhost"); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	if s.config.Security == "starttls" {
 		if err := client.startTLS(s.config.Host); err != nil {
-			return "", err
+			return EmailSendResult{}, err
 		}
 		if err := client.ehlo("localhost"); err != nil {
-			return "", err
+			return EmailSendResult{}, err
 		}
 	}
 	if err := client.authPlain(s.config.Username, s.config.Password); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 
 	messageID := buildMessageID(s.config.Host)
 	raw := buildMIMEMessage(s.config, message, messageID)
 	if err := client.mail(s.config.FromEmail); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	if err := client.rcpt(to); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	if err := client.data(raw); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
 	if err := client.quit(); err != nil {
-		return "", err
+		return EmailSendResult{}, err
 	}
-	return messageID, nil
+	return EmailSendResult{
+		MessageID: messageID,
+		Raw:       raw,
+	}, nil
 }
 
 func (s *SMTPSender) dial(ctx context.Context, addr string) (net.Conn, error) {
@@ -234,24 +244,95 @@ func buildMIMEMessage(config SMTPConfig, message EmailMessage, messageID string)
 		from = mime.QEncoding.Encode("utf-8", config.FromName) + " <" + config.FromEmail + ">"
 	}
 
+	plainText := strings.TrimSpace(message.PlainText)
+	if plainText == "" {
+		plainText = strings.TrimSpace(message.Subject)
+	}
+	htmlBody := strings.TrimSpace(message.HTML)
+	alternativeBoundary := buildBoundary("alt")
+
 	headers := []string{
 		"From: " + from,
 		"To: " + sanitizeHeaderValue(message.To),
 		"Subject: " + mime.QEncoding.Encode("utf-8", strings.TrimSpace(message.Subject)),
 		"Message-ID: <" + messageID + ">",
 		"MIME-Version: 1.0",
-		"Content-Type: text/html; charset=UTF-8",
-		"Content-Transfer-Encoding: 8bit",
 	}
 
 	var builder strings.Builder
+	if len(message.InlineAttachments) > 0 {
+		relatedBoundary := buildBoundary("related")
+		headers = append(headers, `Content-Type: multipart/related; boundary="`+relatedBoundary+`"`)
+		for _, header := range headers {
+			builder.WriteString(header)
+			builder.WriteString("\r\n")
+		}
+		builder.WriteString("\r\n")
+
+		builder.WriteString("--")
+		builder.WriteString(relatedBoundary)
+		builder.WriteString("\r\n")
+		builder.WriteString(`Content-Type: multipart/alternative; boundary="`)
+		builder.WriteString(alternativeBoundary)
+		builder.WriteString(`"` + "\r\n\r\n")
+		writeAlternativeParts(&builder, alternativeBoundary, plainText, htmlBody)
+
+		for _, attachment := range message.InlineAttachments {
+			builder.WriteString("--")
+			builder.WriteString(relatedBoundary)
+			builder.WriteString("\r\n")
+			builder.WriteString("Content-Type: ")
+			builder.WriteString(attachment.ContentType)
+			builder.WriteString(`; name="`)
+			builder.WriteString(sanitizeHeaderValue(attachment.Filename))
+			builder.WriteString(`"` + "\r\n")
+			builder.WriteString("Content-Transfer-Encoding: base64\r\n")
+			builder.WriteString("Content-ID: <")
+			builder.WriteString(sanitizeHeaderValue(attachment.ContentID))
+			builder.WriteString(">\r\n")
+			builder.WriteString(`Content-Disposition: inline; filename="`)
+			builder.WriteString(sanitizeHeaderValue(attachment.Filename))
+			builder.WriteString(`"` + "\r\n\r\n")
+			builder.WriteString(wrapBase64(base64.StdEncoding.EncodeToString(attachment.Data)))
+			builder.WriteString("\r\n")
+		}
+
+		builder.WriteString("--")
+		builder.WriteString(relatedBoundary)
+		builder.WriteString("--\r\n")
+		return []byte(builder.String())
+	}
+
+	headers = append(headers, `Content-Type: multipart/alternative; boundary="`+alternativeBoundary+`"`)
 	for _, header := range headers {
 		builder.WriteString(header)
 		builder.WriteString("\r\n")
 	}
 	builder.WriteString("\r\n")
-	builder.WriteString(strings.ReplaceAll(message.HTML, "\n", "\r\n"))
+	writeAlternativeParts(&builder, alternativeBoundary, plainText, htmlBody)
 	return []byte(builder.String())
+}
+
+func writeAlternativeParts(builder *strings.Builder, boundary string, plainText string, htmlBody string) {
+	builder.WriteString("--")
+	builder.WriteString(boundary)
+	builder.WriteString("\r\n")
+	builder.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	builder.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+	builder.WriteString(strings.ReplaceAll(plainText, "\n", "\r\n"))
+	builder.WriteString("\r\n")
+
+	builder.WriteString("--")
+	builder.WriteString(boundary)
+	builder.WriteString("\r\n")
+	builder.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	builder.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+	builder.WriteString(strings.ReplaceAll(htmlBody, "\n", "\r\n"))
+	builder.WriteString("\r\n")
+
+	builder.WriteString("--")
+	builder.WriteString(boundary)
+	builder.WriteString("--\r\n")
 }
 
 func buildMessageID(host string) string {
@@ -272,4 +353,24 @@ func sanitizeSMTPValue(value string) string {
 
 func sanitizeHeaderValue(value string) string {
 	return sanitizeSMTPValue(value)
+}
+
+func buildBoundary(prefix string) string {
+	now := time.Now().UTC()
+	return fmt.Sprintf("%s_%d_%d", prefix, now.UnixNano(), now.Nanosecond())
+}
+
+func wrapBase64(value string) string {
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	for len(value) > 76 {
+		builder.WriteString(value[:76])
+		builder.WriteString("\r\n")
+		value = value[76:]
+	}
+	builder.WriteString(value)
+	builder.WriteString("\r\n")
+	return builder.String()
 }
