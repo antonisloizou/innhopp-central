@@ -583,14 +583,17 @@ button.ghost {
 }
 
 .comms-audience-actions {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
   display: flex;
   justify-content: center;
   gap: 0.35rem;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(2px);
+  transform: translateY(calc(-50% + 2px));
   transition: opacity 160ms ease, transform 160ms ease;
-  width: 0;
+  width: 12.25rem;
   overflow: hidden;
 }
 
@@ -598,8 +601,7 @@ button.ghost {
 .comms-audience-row:focus-within .comms-audience-actions {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
-  width: 12.25rem;
+  transform: translateY(-50%);
 }
 
 .comms-audience-action-link {
@@ -3856,30 +3858,31 @@ iframe {
 .comms-audience-table th:nth-child(4),
 .comms-audience-table td:nth-child(4),
 .comms-audience-table th:nth-child(5),
-.comms-audience-table td:nth-child(5),
-.comms-audience-table th:nth-child(6),
-.comms-audience-table td:nth-child(6) {
-  width: 21%;
+.comms-audience-table td:nth-child(5) {
+  width: 18%;
+  white-space: nowrap;
 }
 
-.comms-audience-table th:nth-child(3),
-.comms-audience-table td:nth-child(3) {
-  white-space: nowrap;
+.comms-audience-participant-cell {
+  position: relative;
+  min-width: 0;
 }
 
 .comms-audience-table .registration-table-primary {
   min-width: 0;
+  max-width: 100%;
 }
 
 .comms-audience-table .registration-table-primary strong,
 .comms-audience-table .registration-table-primary .muted {
   white-space: nowrap;
-}
-
-.comms-audience-row:not(:hover):not(:focus-within) .registration-table-primary strong,
-.comms-audience-row:not(:hover):not(:focus-within) .registration-table-primary .muted {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.comms-audience-row:hover .comms-audience-participant-cell .registration-table-primary,
+.comms-audience-row:focus-within .comms-audience-participant-cell .registration-table-primary {
+  max-width: calc(100% - 12.75rem);
 }
 
 .status-list {

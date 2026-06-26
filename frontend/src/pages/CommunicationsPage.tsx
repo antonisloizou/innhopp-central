@@ -2451,7 +2451,6 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                   <tr>
                     <th>#</th>
                     <th>Participant</th>
-                    <th aria-label="Actions" />
                     <th>Status</th>
                     <th>Deposit</th>
                     <th>Main Invoice</th>
@@ -2482,13 +2481,11 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                         onKeyDown={(event) => handleRecipientRowKeyDown(event, recipientKey)}
                       >
                         <td>{index + 1}</td>
-                        <td>
+                        <td className="comms-audience-participant-cell">
                           <div className="registration-table-primary">
                             <strong>{recipient.participant_name}</strong>
                             <span className="muted">{recipient.participant_email}</span>
                           </div>
-                        </td>
-                        <td>
                           <div
                             className="comms-audience-actions"
                             onClick={(event) => event.stopPropagation()}

@@ -187,6 +187,11 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.ensureParticipantProfileForAccount(r.Context(), account); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to ensure participant profile")
+		return
+	}
+
 	if err := h.linkParticipantProfileByEmail(r.Context(), account.ID, account.Email); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to link participant profile")
 		return
@@ -616,6 +621,45 @@ func (h *Handler) loadDesiredParticipantAccountRoles(ctx context.Context, accoun
 		return nil, err
 	}
 	return roles, nil
+}
+
+func (h *Handler) ensureParticipantProfileForAccount(ctx context.Context, account *Account) error {
+	if account == nil || account.ID <= 0 {
+		return nil
+	}
+
+	email := strings.ToLower(strings.TrimSpace(account.Email))
+	if email == "" {
+		return nil
+	}
+
+	fullName := strings.TrimSpace(account.FullName)
+	if fullName == "" {
+		fullName = email
+	}
+
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO participant_profiles (
+			full_name,
+			email,
+			account_id,
+			roles,
+			account_roles
+		)
+		SELECT
+			$1,
+			$2,
+			$3,
+			ARRAY['Participant']::TEXT[],
+			$4
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM participant_profiles
+			WHERE account_id = $3 OR lower(email) = $2
+		)
+		ON CONFLICT DO NOTHING
+	`, fullName, email, account.ID, account.Roles)
+	return err
 }
 
 func (h *Handler) linkParticipantProfileByEmail(ctx context.Context, accountID int64, email string) error {
