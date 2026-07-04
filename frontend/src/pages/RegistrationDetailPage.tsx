@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   createRegistrationActivity,
@@ -17,6 +17,7 @@ import {
   formatEventLocalDate,
   formatEventLocalDateInput
 } from '../utils/eventDate';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const registrationStatusOptions: RegistrationStatus[] = [
   'deposit_pending',
@@ -77,6 +78,17 @@ const formatTitleCase = (value: string) =>
     .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part))
     .join(' ');
 
+const paymentDraftEquals = (a: PaymentDraft, b: PaymentDraft) =>
+  a.kind === b.kind &&
+  a.amount === b.amount &&
+  a.currency === b.currency &&
+  a.status === b.status &&
+  a.due_at === b.due_at &&
+  a.paid_at === b.paid_at &&
+  a.provider === b.provider &&
+  a.provider_ref === b.provider_ref &&
+  a.notes === b.notes;
+
 const RegistrationDetailPage = () => {
   const { registrationId } = useParams();
   const navigate = useNavigate();
@@ -86,6 +98,7 @@ const RegistrationDetailPage = () => {
   const [creatingPayment, setCreatingPayment] = useState(false);
   const [savingPaymentId, setSavingPaymentId] = useState<number | null>(null);
   const [savingNote, setSavingNote] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<RegistrationStatus>('deposit_pending');
   const [source, setSource] = useState('');
@@ -99,31 +112,31 @@ const RegistrationDetailPage = () => {
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
+  const reload = useCallback(
+    async (options?: { preserveLoading?: boolean }) => {
       if (!registrationId) return;
-      setLoading(true);
+      const keepLoading = options?.preserveLoading;
+      if (!keepLoading) {
+        setLoading(true);
+      }
       setError(null);
       try {
         const data = await getRegistration(Number(registrationId));
-        if (cancelled) return;
         setRegistration(data);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load registration');
-        }
+        setError(err instanceof Error ? err.message : 'Failed to load registration');
       } finally {
-        if (!cancelled) {
+        if (!keepLoading) {
           setLoading(false);
         }
       }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [registrationId]);
+    },
+    [registrationId]
+  );
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   useEffect(() => {
     if (!registration) return;
@@ -166,6 +179,66 @@ const RegistrationDetailPage = () => {
     () => [...(registration?.payments || [])].sort((a, b) => a.id - b.id),
     [registration?.payments]
   );
+
+  const hasMetadataChanges = useMemo(() => {
+    if (!registration) return false;
+    return (
+      status !== registration.status ||
+      source !== (registration.source || '') ||
+      depositDueAt !== formatEventLocalDateInput(registration.deposit_due_at) ||
+      mainInvoiceDueAt !== formatEventLocalDateInput(registration.main_invoice_due_at) ||
+      internalNotes !== (registration.internal_notes || '') ||
+      tags !== (registration.tags || []).join(', ')
+    );
+  }, [depositDueAt, internalNotes, mainInvoiceDueAt, registration, source, status, tags]);
+
+  const hasPaymentDraftChanges = useMemo(() => {
+    if (!registration) return false;
+    return (registration.payments || []).some((payment) => {
+      const draft = paymentDrafts[payment.id];
+      if (!draft) return false;
+      return !paymentDraftEquals(draft, toPaymentDraft(payment));
+    });
+  }, [paymentDrafts, registration]);
+
+  const hasNewPaymentDraftChanges = useMemo(
+    () => !paymentDraftEquals(newPayment, toPaymentDraft()),
+    [newPayment]
+  );
+
+  const hasPendingLocalChanges =
+    savingMeta ||
+    creatingPayment ||
+    savingPaymentId !== null ||
+    savingNote ||
+    hasMetadataChanges ||
+    hasPaymentDraftChanges ||
+    hasNewPaymentDraftChanges ||
+    note.trim().length > 0;
+
+  useResourceStream({
+    path: registrationId ? `/registrations/${registrationId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void reload({ preserveLoading: true });
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void reload({ preserveLoading: true });
+  }, [hasPendingLocalChanges, pendingLiveRefresh, reload]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    setNote('');
+    setNewPayment(toPaymentDraft());
+    void reload({ preserveLoading: true });
+  };
 
   const handleSaveMeta = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -337,6 +410,17 @@ const RegistrationDetailPage = () => {
           )}
         </div>
       </header>
+
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <section className="registration-detail-header-grid">
         <article className="card registration-detail-summary-card">

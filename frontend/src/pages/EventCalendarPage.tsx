@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canManageEvents } from '../auth/access';
@@ -6,6 +6,7 @@ import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/eve
 import { ParticipantProfile, getMyParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 import { countVisibleParticipants } from '../utils/eventParticipants';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const normalizeEvents = (raw: Event[]) =>
   (Array.isArray(raw) ? raw : []).map((event) => ({
@@ -137,7 +138,8 @@ const EventCalendarPage = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showPast, setShowPast] = useState(false);
+  const [showPastMyEvents, setShowPastMyEvents] = useState(false);
+  const [showPastEventCalendar, setShowPastEventCalendar] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
   const [myParticipantProfile, setMyParticipantProfile] = useState<ParticipantProfile | null>(null);
@@ -156,6 +158,12 @@ const EventCalendarPage = () => {
     return map;
   }, [seasons]);
 
+  const refreshCalendarData = useCallback(async () => {
+    const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
+    setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
+    setEvents(normalizeEvents(eventResponse as Event[]));
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const isAuthError = (error: unknown) =>
@@ -163,10 +171,8 @@ const EventCalendarPage = () => {
       ((error as { status?: number }).status === 401 || (error as { status?: number }).status === 403);
 
     const loadCalendarData = async () => {
-      const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
+      await refreshCalendarData();
       if (cancelled) return;
-      setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
-      setEvents(normalizeEvents(eventResponse as Event[]));
     };
 
     const load = async () => {
@@ -228,7 +234,7 @@ const EventCalendarPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [refreshSession]);
+  }, [refreshCalendarData, refreshSession]);
 
   useEffect(() => {
     if (cardStateRestoredRef.current) return;
@@ -285,12 +291,6 @@ const EventCalendarPage = () => {
     return false;
   };
 
-  const visibleEvents = events.filter((event) => {
-    if (!showPast && isPastEvent(event)) return false;
-    if (selectedSeason && event.season_id !== Number(selectedSeason)) return false;
-    return true;
-  });
-
   const myEvents = useMemo(
     () =>
       events.filter((event) => {
@@ -300,9 +300,39 @@ const EventCalendarPage = () => {
     [events, myParticipantProfile]
   );
 
+  const visibleMyEvents = useMemo(
+    () => myEvents.filter((event) => showPastMyEvents || !isPastEvent(event)),
+    [myEvents, showPastMyEvents]
+  );
+
+  const pastMyEventsCount = useMemo(
+    () => myEvents.filter((event) => isPastEvent(event)).length,
+    [myEvents]
+  );
+
+  const eventCalendarEvents = useMemo(
+    () =>
+      events.filter((event) => {
+        if (!showPastEventCalendar && isPastEvent(event)) return false;
+        if (selectedSeason && event.season_id !== Number(selectedSeason)) return false;
+        return true;
+      }),
+    [events, selectedSeason, showPastEventCalendar]
+  );
+
+  const eventCalendarPastCount = useMemo(
+    () =>
+      events.filter((event) => {
+        if (!isPastEvent(event)) return false;
+        if (selectedSeason && event.season_id !== Number(selectedSeason)) return false;
+        return true;
+      }).length,
+    [events, selectedSeason]
+  );
+
   const groupedEvents = useMemo(() => {
     const map = new Map<number, Event[]>();
-    visibleEvents.forEach((event) => {
+    eventCalendarEvents.forEach((event) => {
       const list = map.get(event.season_id) || [];
       list.push(event);
       map.set(event.season_id, list);
@@ -323,11 +353,11 @@ const EventCalendarPage = () => {
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
         events: [...group].sort(compareEventsChronologically)
       }));
-  }, [visibleEvents, seasonLookup]);
+  }, [eventCalendarEvents, seasonLookup]);
 
   const groupedMyEvents = useMemo(() => {
     const map = new Map<number, Event[]>();
-    myEvents.forEach((event) => {
+    visibleMyEvents.forEach((event) => {
       const list = map.get(event.season_id) || [];
       list.push(event);
       map.set(event.season_id, list);
@@ -348,7 +378,7 @@ const EventCalendarPage = () => {
         label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
         events: [...group].sort(compareEventsChronologically)
       }));
-  }, [myEvents, seasonLookup]);
+  }, [seasonLookup, visibleMyEvents]);
 
   const participantLookup = useMemo(() => {
     const map = new Map<number, ParticipantProfile>();
@@ -361,22 +391,23 @@ const EventCalendarPage = () => {
     const seasonId = Number(selectedSeason);
     const seasonEvents = events.filter((event) => event.season_id === seasonId);
     if (seasonEvents.length === 0) {
-      setShowPast(false);
+      setShowPastEventCalendar(false);
       return;
     }
     const allPast = seasonEvents.every((event) => isPastEvent(event));
-    setShowPast(allPast);
+    setShowPastEventCalendar(allPast);
   }, [events, selectedSeason]);
 
   const selectedSeasonName = selectedSeason
     ? seasons.find((season) => season.id === Number(selectedSeason))?.name || 'Unknown season'
     : 'All seasons';
 
-  const refreshCalendarData = async () => {
-    const [seasonResponse, eventResponse] = await Promise.all([listSeasons(), listEvents()]);
-    setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
-    setEvents(normalizeEvents(eventResponse as Event[]));
-  };
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void refreshCalendarData();
+    }
+  });
 
   const handleDeleteSeason = async (season: Season) => {
     const seasonEvents = events.filter((event) => event.season_id === season.id);
@@ -409,13 +440,13 @@ const EventCalendarPage = () => {
   const monthEvents = useMemo(() => {
     const monthStart = buildMonthStart(currentMonth);
     const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
-    return visibleEvents.filter((event) => {
+    return events.filter((event) => {
       const starts = parseEventLocal(event.starts_at);
       const ends = parseEventLocal(event.ends_at) ?? starts;
       if (!starts || !ends) return false;
       return starts <= monthEnd && ends >= monthStart;
     });
-  }, [currentMonth, visibleEvents]);
+  }, [currentMonth, events]);
 
   const monthEventMap = useMemo(() => {
     const map = new Map<string, Event[]>();
@@ -729,11 +760,28 @@ const EventCalendarPage = () => {
             onToggle={() => toggleCard('myEvents')}
             badge={
               <span className="badge neutral">
-                {myEvents.length} {myEvents.length === 1 ? 'event' : 'events'}
+                {visibleMyEvents.length} {visibleMyEvents.length === 1 ? 'event' : 'events'}
               </span>
             }
+            toolbar={
+              <div onClick={(event) => event.stopPropagation()}>
+                <button
+                  className="ghost"
+                  type="button"
+                  onClick={() => setShowPastMyEvents((value) => !value)}
+                >
+                  {showPastMyEvents
+                    ? `Hide past events (${pastMyEventsCount})`
+                    : `Show past events (${pastMyEventsCount})`}
+                </button>
+              </div>
+            }
           >
-            {renderEventGroups(groupedMyEvents, { showFirstHeading: true })}
+            {visibleMyEvents.length === 0 ? (
+              <p className="muted">No current events in your schedule</p>
+            ) : (
+              renderEventGroups(groupedMyEvents, { showFirstHeading: true })
+            )}
           </CollapsibleCalendarCard>
         )}
 
@@ -743,11 +791,11 @@ const EventCalendarPage = () => {
           onToggle={() => toggleCard('eventCalendar')}
           badge={
             <span className="badge neutral">
-              {visibleEvents.length} {visibleEvents.length === 1 ? 'event' : 'events'}
+              {eventCalendarEvents.length} {eventCalendarEvents.length === 1 ? 'event' : 'events'}
             </span>
           }
           toolbar={
-            <div onClick={(event) => event.stopPropagation()}>
+            <div className="event-calendar-toolbar" onClick={(event) => event.stopPropagation()}>
               <div ref={seasonMenuRef} className="event-calendar-season-menu-wrap">
                 <button
                   type="button"
@@ -819,6 +867,15 @@ const EventCalendarPage = () => {
                   </div>
                 )}
               </div>
+              <button
+                className="ghost"
+                type="button"
+                onClick={() => setShowPastEventCalendar((value) => !value)}
+              >
+                {showPastEventCalendar
+                  ? `Hide past events (${eventCalendarPastCount})`
+                  : `Show past events (${eventCalendarPastCount})`}
+              </button>
             </div>
           }
           footer={
@@ -828,9 +885,6 @@ const EventCalendarPage = () => {
                   Create event
                 </Link>
               )}
-              <button className="ghost" type="button" onClick={() => setShowPast((v) => !v)}>
-                {showPast ? 'Hide past events' : 'Show past events'}
-              </button>
             </div>
           }
         >
@@ -838,8 +892,10 @@ const EventCalendarPage = () => {
             <p className="muted">Loading schedule…</p>
           ) : error ? (
             <p className="error-text">{error}</p>
-          ) : visibleEvents.length === 0 ? (
-            <p className="muted">No future events scheduled</p>
+          ) : eventCalendarEvents.length === 0 ? (
+            <p className="muted">
+              {showPastEventCalendar ? 'No events scheduled' : 'No future events scheduled'}
+            </p>
           ) : (
             renderEventGroups(groupedEvents, { showFirstHeading: !selectedSeason })
           )}

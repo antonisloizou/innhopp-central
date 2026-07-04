@@ -156,6 +156,7 @@ const ScheduleEntryPreviewOverlay = ({
               if (entry.innhoppAircraftWarning) {
                 fields.push(renderField('aircraft_warning', 'AIRCRAFT WARNING', entry.innhoppAircraftWarning));
               }
+              fields.push(renderField('aircraft', 'AIRCRAFT', entry.innhoppAircraftName || '—'));
               fields.push(renderField('takeoff', 'TAKEOFF AIRFIELD', entry.innhoppTakeoffName || '—'));
               fields.push(
                 renderField(
@@ -184,13 +185,6 @@ const ScheduleEntryPreviewOverlay = ({
               fields.push(renderField('risk', 'RISK ASSESSMENT', entry.innhoppRisk || '—'));
               fields.push(renderField('minimum', 'MINIMUM REQUIREMENTS', entry.innhoppMinimumRequirements || '—'));
               fields.push(renderField('notes', 'NOTES', entry.notes || '—'));
-              fields.push(
-                renderField(
-                  'landowners',
-                  'LANDOWNERS PERMISSION',
-                  entry.innhoppLandOwnerPermission == null ? '—' : entry.innhoppLandOwnerPermission ? 'Yes' : 'No'
-                )
-              );
               if ((entry.innhoppCoordinates && canOpenMapsActions) || (entry.to && onNavigateToEntry)) {
                 fields.push(
                   <div key="actions" className="event-schedule-preview-action-grid form-field-full-span">

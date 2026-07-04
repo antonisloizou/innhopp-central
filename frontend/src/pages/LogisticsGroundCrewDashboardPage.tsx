@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
@@ -6,6 +6,7 @@ import { listEvents, listSeasons, Event, Season } from '../api/events';
 import CheckboxMultiSelect from '../components/CheckboxMultiSelect';
 import { listGroundCrews, GroundCrew } from '../api/logistics';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const formatScheduledAt = (iso?: string) => {
   if (!iso) return 'Not scheduled';
@@ -71,36 +72,42 @@ const LogisticsGroundCrewDashboardPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [previewRoute, setPreviewRoute] = useState<GroundCrew | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [seasonResp, eventResp, groundCrewResp] = await Promise.all([
-          listSeasons(),
-          listEvents(),
-          listGroundCrews()
-        ]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
-        setGroundCrews(Array.isArray(groundCrewResp) ? groundCrewResp : []);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load logistics');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [seasonResp, eventResp, groundCrewResp] = await Promise.all([
+        listSeasons(),
+        listEvents(),
+        listGroundCrews()
+      ]);
+      setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
+      setEvents(Array.isArray(eventResp) ? eventResp : []);
+      setGroundCrews(Array.isArray(groundCrewResp) ? groundCrewResp : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load logistics');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
 
   useEffect(() => {
     if (typeof document === 'undefined') return;

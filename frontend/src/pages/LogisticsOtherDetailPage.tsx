@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
@@ -7,6 +7,7 @@ import { listEvents, Event } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import DetailCostCard from '../components/DetailCostCard';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -27,6 +28,8 @@ const LogisticsOtherDetailPage = () => {
   const [copying, setCopying] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const saveButtonClass = 'primary';
   const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
@@ -34,35 +37,57 @@ const LogisticsOtherDetailPage = () => {
   const complete = hasText(form.name) && hasText(form.coordinates) && hasText(form.scheduled_at);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!otherId) return;
-      setLoading(true);
-      setMessage(null);
-      try {
-        const [entry, evs] = await Promise.all([getOther(Number(otherId)), listEvents()]);
-        if (cancelled) return;
-        setEvents(Array.isArray(evs) ? evs : []);
-        setForm({
-          event_id: entry.event_id ? String(entry.event_id) : '',
-          name: entry.name,
-          coordinates: entry.coordinates || '',
-          scheduled_at: entry.scheduled_at || '',
-          description: entry.description || '',
-          notes: entry.notes || ''
-        });
-      } catch (err) {
-        if (!cancelled) setMessage(err instanceof Error ? err.message : 'Failed to load entry');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    if (!otherId) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const [entry, evs] = await Promise.all([getOther(Number(otherId)), listEvents()]);
+      setEvents(Array.isArray(evs) ? evs : []);
+      setForm({
+        event_id: entry.event_id ? String(entry.event_id) : '',
+        name: entry.name,
+        coordinates: entry.coordinates || '',
+        scheduled_at: entry.scheduled_at || '',
+        description: entry.description || '',
+        notes: entry.notes || ''
+      });
+      setSaved(false);
+      setIsDirty(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to load entry');
+    } finally {
+      setLoading(false);
+    }
   }, [otherId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const hasPendingLocalChanges = isDirty || submitting || copying;
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const buildPayload = () => ({
     name: form.name.trim(),
@@ -82,6 +107,7 @@ const LogisticsOtherDetailPage = () => {
     try {
       await updateOther(Number(otherId), buildPayload());
       setSaved(true);
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update entry');
       setSaved(false);
@@ -179,13 +205,27 @@ const LogisticsOtherDetailPage = () => {
         </div>
       </header>
 
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="form-field">
             <span>Event</span>
             <select
               value={form.event_id}
-              onChange={(e) => setForm((prev) => ({ ...prev, event_id: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, event_id: e.target.value }));
+              }}
               required
             >
               <option value="">Select event</option>
@@ -201,7 +241,10 @@ const LogisticsOtherDetailPage = () => {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+              }}
               required
             />
           </label>
@@ -211,7 +254,10 @@ const LogisticsOtherDetailPage = () => {
               <input
                 type="text"
                 value={form.coordinates}
-                onChange={(e) => setForm((prev) => ({ ...prev, coordinates: e.target.value }))}
+                onChange={(e) => {
+                  setIsDirty(true);
+                  setForm((prev) => ({ ...prev, coordinates: e.target.value }));
+                }}
               />
               <button
                 type="button"
@@ -237,6 +283,7 @@ const LogisticsOtherDetailPage = () => {
               options={{ enableTime: true, dateFormat: 'Y-m-d H:i', time_24hr: true }}
               onChange={(dates) => {
                 const d = dates[0];
+                setIsDirty(true);
                 setForm((prev) => ({
                   ...prev,
                   scheduled_at: d ? fromEventLocalPickerDate(d) : ''
@@ -248,7 +295,10 @@ const LogisticsOtherDetailPage = () => {
             <span>Description</span>
             <textarea
               value={form.description}
-              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, description: e.target.value }));
+              }}
             />
           </label>
           <label className="form-field form-field-full-span">
@@ -256,7 +306,10 @@ const LogisticsOtherDetailPage = () => {
             <input
               type="text"
               value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, notes: e.target.value }));
+              }}
             />
           </label>
           <div className="form-actions">

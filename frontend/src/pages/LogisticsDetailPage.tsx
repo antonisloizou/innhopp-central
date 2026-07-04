@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
@@ -18,6 +18,7 @@ import { OtherLogistic, listOthers, Meal, listMeals } from '../api/logistics';
 import { fromEventLocalPickerDate, parseEventLocal, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import DetailCostCard from '../components/DetailCostCard';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 type VehicleRow = {
   name: string;
@@ -60,6 +61,8 @@ const LogisticsDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [selectedVehicleIds, setSelectedVehicleIds] = useState<number[]>([]);
   const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [newVehicle, setNewVehicle] = useState<VehicleRow>({
@@ -75,87 +78,81 @@ const LogisticsDetailPage = () => {
   const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const markDirty = () => {
+    setIsDirty(true);
     if (saved) setSaved(false);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!transportId) return;
-      setLoading(true);
-      setMessage(null);
-      try {
-        initialEventSet.current = true;
-        const transport = await getTransport(Number(transportId));
-        const [eventList, eventVehicles, airfieldList, accommodationList, otherList, mealList] = await Promise.all([
-          listEvents(),
-          listEventVehicles(),
-          listAirfields(),
-          transport.event_id ? listAccommodations(transport.event_id) : Promise.resolve([]),
-          listOthers(),
-          listMeals()
-        ]);
-        if (cancelled) return;
-        setEvents(Array.isArray(eventList) ? eventList : []);
-        setExistingVehicles(Array.isArray(eventVehicles) ? eventVehicles : []);
-        setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
-        setAccommodations(Array.isArray(accommodationList) ? accommodationList : []);
-        setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === transport.event_id) : []);
-        setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === transport.event_id) : []);
-        setLoadedVehicles(Array.isArray(transport.vehicles) ? transport.vehicles : []);
-        const defaultScheduled = (() => {
-          if (transport.scheduled_at) return transport.scheduled_at;
-          const ev = eventList.find((e) => e.id === transport.event_id);
-          if (ev?.starts_at) {
-            const d = parseEventLocal(ev.starts_at);
-            if (d) {
-              d.setUTCHours(9, 0, 0, 0);
-              return d.toISOString();
-            }
+  const load = useCallback(async () => {
+    if (!transportId) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      initialEventSet.current = true;
+      const transport = await getTransport(Number(transportId));
+      const [eventList, eventVehicles, airfieldList, accommodationList, otherList, mealList] = await Promise.all([
+        listEvents(),
+        listEventVehicles(),
+        listAirfields(),
+        transport.event_id ? listAccommodations(transport.event_id) : Promise.resolve([]),
+        listOthers(),
+        listMeals()
+      ]);
+      setEvents(Array.isArray(eventList) ? eventList : []);
+      setExistingVehicles(Array.isArray(eventVehicles) ? eventVehicles : []);
+      setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
+      setAccommodations(Array.isArray(accommodationList) ? accommodationList : []);
+      setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === transport.event_id) : []);
+      setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === transport.event_id) : []);
+      setLoadedVehicles(Array.isArray(transport.vehicles) ? transport.vehicles : []);
+      const defaultScheduled = (() => {
+        if (transport.scheduled_at) return transport.scheduled_at;
+        const ev = eventList.find((e) => e.id === transport.event_id);
+        if (ev?.starts_at) {
+          const d = parseEventLocal(ev.starts_at);
+          if (d) {
+            d.setUTCHours(9, 0, 0, 0);
+            return d.toISOString();
           }
-          return '';
-        })();
-        setForm({
-          pickup_location: transport.pickup_location,
-          destination: transport.destination,
-          passenger_count: String(transport.passenger_count),
-          duration_minutes:
-            typeof transport.duration_minutes === 'number' && Number.isFinite(transport.duration_minutes)
-              ? String(transport.duration_minutes)
-              : '',
-          scheduled_at: defaultScheduled,
-          notes: transport.notes || ''
-        });
-        setLoadedNotes(transport.notes || '');
-        setNotesTouched(false);
-        setSelectedEventId(String(transport.event_id || ''));
-        const vehiclesFromEventIds =
-          Array.isArray(transport.vehicles) && transport.vehicles.length > 0
-            ? transport.vehicles
-                .map((v) => {
-                  if (typeof v.event_vehicle_id === 'number') return v.event_vehicle_id;
-                  if (typeof (v as any).id === 'number') return (v as any).id;
-                  return undefined;
-                })
-                .filter((id): id is number => typeof id === 'number')
-            : [];
-        setSelectedVehicleIds(vehiclesFromEventIds);
-        setSaved(false);
-      } catch (err) {
-        if (!cancelled) {
-          setMessage(err instanceof Error ? err.message : 'Failed to load transport');
         }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+        return '';
+      })();
+      setForm({
+        pickup_location: transport.pickup_location,
+        destination: transport.destination,
+        passenger_count: String(transport.passenger_count),
+        duration_minutes:
+          typeof transport.duration_minutes === 'number' && Number.isFinite(transport.duration_minutes)
+            ? String(transport.duration_minutes)
+            : '',
+        scheduled_at: defaultScheduled,
+        notes: transport.notes || ''
+      });
+      setLoadedNotes(transport.notes || '');
+      setNotesTouched(false);
+      setSelectedEventId(String(transport.event_id || ''));
+      const vehiclesFromEventIds =
+        Array.isArray(transport.vehicles) && transport.vehicles.length > 0
+          ? transport.vehicles
+              .map((v) => {
+                if (typeof v.event_vehicle_id === 'number') return v.event_vehicle_id;
+                if (typeof (v as any).id === 'number') return (v as any).id;
+                return undefined;
+              })
+              .filter((id): id is number => typeof id === 'number')
+          : [];
+      setSelectedVehicleIds(vehiclesFromEventIds);
+      setSaved(false);
+      setIsDirty(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to load transport');
+    } finally {
+      setLoading(false);
+    }
   }, [transportId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleAddVehicle = () => {
     markDirty();
@@ -230,6 +227,30 @@ const LogisticsDetailPage = () => {
       }
     }
   }, [selectedEventId]);
+
+  const hasPendingLocalChanges = isDirty || submitting;
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const buildOptionKey = (type: LocationOption['type'], id: number | string, label: string) =>
     `${type}#${id ?? label}`;
@@ -398,6 +419,7 @@ const LogisticsDetailPage = () => {
       setShowVehicleForm(false);
       setNewVehicle({ name: '', driver: '', passenger_capacity: '', notes: '' });
       setSaved(true);
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update transport');
     } finally {
@@ -607,6 +629,17 @@ const LogisticsDetailPage = () => {
           </button>
         </div>
       </header>
+
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <form onSubmit={handleSubmit}>
         <article className="card">

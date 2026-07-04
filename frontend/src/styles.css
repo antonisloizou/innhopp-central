@@ -219,6 +219,18 @@ button.ghost {
   gap: 0.35rem;
 }
 
+.event-live-refresh-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.event-live-refresh-banner p {
+  margin: 0;
+}
+
 .form-field span,
 .field-label {
   font-size: 0.85rem;

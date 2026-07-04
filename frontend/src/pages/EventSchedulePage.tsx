@@ -52,6 +52,7 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { countVisibleParticipants } from '../utils/eventParticipants';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const OVERLAY_EXIT_MS = 180;
 type DayBucket = {
@@ -169,6 +170,7 @@ const EventSchedulePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [dragging, setDragging] = useState<{ id: string; dayKey: string } | null>(null);
@@ -518,6 +520,30 @@ const EventSchedulePage = () => {
     [eventId, participantOnly]
   );
 
+  const hasPendingLocalChanges = copying || deleting || savingDrag || dragging !== null;
+
+  useResourceStream({
+    path: eventId ? `/events/${eventId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void reload({ preserveLoading: true });
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void reload({ preserveLoading: true });
+  }, [hasPendingLocalChanges, pendingLiveRefresh, reload]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void reload({ preserveLoading: true });
+  };
+
   const dayBuckets: DayBucket[] = useMemo(() => {
     if (!eventData) return [];
     const days = buildDays(eventData);
@@ -859,6 +885,7 @@ const EventSchedulePage = () => {
           innhoppCoordinates: i.coordinates || null,
           innhoppTakeoffName: takeoff?.name || null,
           innhoppLandingName: landingName,
+          innhoppAircraftName: aircraft?.name || null,
           innhoppDistanceByAir: i.distance_by_air ?? null,
           innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
           innhoppMinimumLoadDuration: aircraft?.minimum_load_duration ?? null,
@@ -871,7 +898,6 @@ const EventSchedulePage = () => {
           innhoppRisk: i.risk_assessment || null,
           innhoppMinimumRequirements: i.minimum_requirements || null,
           innhoppRescueBoat: i.rescue_boat ?? null,
-          innhoppLandOwnerPermission: i.land_owner_permission ?? null,
           routeDurationLabel: flightDurationLabel,
           scheduledAt: i.scheduled_at
         });
@@ -1729,6 +1755,16 @@ const EventSchedulePage = () => {
         )}
       </header>
       {message && <p className="error-text">{message}</p>}
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
       <article className="card event-schedule-summary-card">
         <dl className="card-details event-schedule-stats event-schedule-stats-grid">
           <div>

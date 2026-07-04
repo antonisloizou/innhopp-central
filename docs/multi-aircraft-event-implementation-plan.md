@@ -249,7 +249,7 @@ Expose reusable aircraft in event read/write APIs.
 
 **Acceptance Criteria**
 
-- `GET /events/events/:id` returns aircraft with stable ordering.
+- `GET /events/:id` returns aircraft with stable ordering.
 - Event create/update endpoints accept attached aircraft data.
 - Event create/update endpoints support both existing aircraft attachment and inline creation.
 - Event create/update endpoints accept `aircraft_id` on innhopps.

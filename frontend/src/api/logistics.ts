@@ -155,6 +155,8 @@ export type Meal = {
   id: number;
   name: string;
   location?: string | null;
+  location_type?: string | null;
+  location_id?: number | null;
   scheduled_at?: string | null;
   notes?: string | null;
   event_id?: number | null;

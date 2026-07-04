@@ -23,6 +23,7 @@ export type ScheduleEntry = {
   innhoppCoordinates?: string | null;
   innhoppTakeoffName?: string | null;
   innhoppLandingName?: string | null;
+  innhoppAircraftName?: string | null;
   innhoppDistanceByAir?: number | null;
   innhoppAircraftSpeedKmh?: number | null;
   innhoppMinimumLoadDuration?: number | null;
@@ -35,7 +36,6 @@ export type ScheduleEntry = {
   innhoppRisk?: string | null;
   innhoppMinimumRequirements?: string | null;
   innhoppRescueBoat?: boolean | null;
-  innhoppLandOwnerPermission?: boolean | null;
   transportRouteOrigin?: string | null;
   transportRouteDestination?: string | null;
   routeDurationLabel?: string;

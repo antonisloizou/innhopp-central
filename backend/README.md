@@ -96,7 +96,7 @@ On startup the server creates these tables if they do not already exist:
    ```bash
    http POST :8080/api/participants/profiles full_name="Aviator Ada" email="ada@example.com"
    http POST :8080/api/events/seasons name="Winter Ops" starts_on="2024-01-10" ends_on="2024-03-01"
-   http POST :8080/api/events/events season_id:=1 name="Ice Landing" location="Tromsø" starts_at="2024-02-05T09:00:00Z"
+   http POST :8080/api/events season_id:=1 name="Ice Landing" location="Tromsø" starts_at="2024-02-05T09:00:00Z"
    http POST :8080/api/events/manifests event_id:=1 load_number:=1 scheduled_at="2024-02-05T09:30:00Z"
    http POST :8080/api/rbac/crew-assignments manifest_id:=1 participant_id:=1 role="Jump Master"
    http POST :8080/api/logistics/gear-assets name="Main Rig" serial_number="RIG-001" status="available"
@@ -111,11 +111,11 @@ On startup the server creates these tables if they do not already exist:
 | GET | `/api/events/seasons` | List seasons |
 | POST | `/api/events/seasons` | Create a season |
 | GET | `/api/events/seasons/{id}` | Retrieve a season |
-| GET | `/api/events/events` | List events |
-| POST | `/api/events/events` | Create an event |
-| GET | `/api/events/events/{id}` | Retrieve an event |
-| PUT | `/api/events/events/{id}` | Update an event |
-| DELETE | `/api/events/events/{id}` | Remove an event |
+| GET | `/api/events` | List events |
+| POST | `/api/events` | Create an event |
+| GET | `/api/events/{id}` | Retrieve an event |
+| PUT | `/api/events/{id}` | Update an event |
+| DELETE | `/api/events/{id}` | Remove an event |
 | GET | `/api/events/manifests` | List manifests |
 | POST | `/api/events/manifests` | Create a manifest |
 | GET | `/api/events/manifests/{id}` | Retrieve a manifest |

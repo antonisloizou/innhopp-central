@@ -35,6 +35,7 @@ import DetailCostCard from '../components/DetailCostCard';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import { parseCoordinates } from '../utils/coordinates';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -187,35 +188,38 @@ const InnhoppDetailPage = () => {
   const [takeoffSelectValue, setTakeoffSelectValue] = useState<string>('');
   const [landingSelectValue, setLandingSelectValue] = useState<string>('');
   const [sameLandingAsTakeoff, setSameLandingAsTakeoff] = useState(true);
-  const initialFormState: InnhoppFormState = {
-    name: '',
-    sequence: 1,
-    aircraft_id: undefined,
-    coordinates: '',
-    scheduled_at: '',
-    notes: '',
-    takeoff_airfield_id: undefined,
-    landing_airfield_id: undefined,
-    elevation: undefined,
-    reason_for_choice: '',
-    adjust_altimeter_aad: '',
-    notam: '',
-    distance_by_air: undefined,
-    distance_by_road: undefined,
-    landing_distance_by_air: undefined,
-    landing_distance_by_road: undefined,
-    primary_landing_area: emptyLandingArea(),
-    secondary_landing_area: emptyLandingArea(),
-    risk_assessment: '',
-    safety_precautions: '',
-    jumprun: '',
-    hospital: '',
-    rescue_boat: undefined,
-    minimum_requirements: '',
-    land_owners: [],
-    land_owner_permission: undefined,
-    image_files: []
-  };
+  const initialFormState = useMemo<InnhoppFormState>(
+    () => ({
+      name: '',
+      sequence: 1,
+      aircraft_id: undefined,
+      coordinates: '',
+      scheduled_at: '',
+      notes: '',
+      takeoff_airfield_id: undefined,
+      landing_airfield_id: undefined,
+      elevation: undefined,
+      reason_for_choice: '',
+      adjust_altimeter_aad: '',
+      notam: '',
+      distance_by_air: undefined,
+      distance_by_road: undefined,
+      landing_distance_by_air: undefined,
+      landing_distance_by_road: undefined,
+      primary_landing_area: emptyLandingArea(),
+      secondary_landing_area: emptyLandingArea(),
+      risk_assessment: '',
+      safety_precautions: '',
+      jumprun: '',
+      hospital: '',
+      rescue_boat: undefined,
+      minimum_requirements: '',
+      land_owners: [],
+      land_owner_permission: undefined,
+      image_files: []
+    }),
+    []
+  );
   const [form, setForm] = useState<InnhoppFormState>(initialFormState);
   const [draftAirfield, setDraftAirfield] = useState<CreateAirfieldPayload>({
     name: '',
@@ -230,6 +234,7 @@ const InnhoppDetailPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [imagesDirty, setImagesDirty] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -306,11 +311,9 @@ const InnhoppDetailPage = () => {
   };
   const saveButtonClass = 'primary';
   const saveButtonLabel = saving ? 'Saving…' : 'Save';
-  const buildSignature = useCallback(
-    (formState: typeof form) => JSON.stringify(formState),
-    [form]
-  );
+  const buildSignature = useCallback((formState: InnhoppFormState) => JSON.stringify(formState), []);
   const currentSignature = useMemo(() => buildSignature(form), [buildSignature, form]);
+  const hasUnsavedChanges = currentSignature !== lastSavedSignature;
   const [deleting, setDeleting] = useState(false);
   const elevationDifference = useMemo(() => {
     if (form.elevation == null) return null;
@@ -406,207 +409,190 @@ const InnhoppDetailPage = () => {
     nodes.forEach((node) => resizeTextarea(node));
   }, [form]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
+  const toFormState = useCallback(
+    (target: Innhopp, defaultScheduledAt = ''): InnhoppFormState => ({
+      name: target.name,
+      sequence: target.sequence,
+      aircraft_id: target.aircraft_id ?? undefined,
+      coordinates: target.coordinates || '',
+      elevation: target.elevation ?? undefined,
+      scheduled_at: toInputDateTime(target.scheduled_at) || defaultScheduledAt,
+      notes: target.notes || '',
+      takeoff_airfield_id: target.takeoff_airfield_id || undefined,
+      landing_airfield_id: target.landing_airfield_id || undefined,
+      reason_for_choice: target.reason_for_choice || '',
+      adjust_altimeter_aad: target.adjust_altimeter_aad || '',
+      notam: target.notam || '',
+      distance_by_air: target.distance_by_air ?? undefined,
+      distance_by_road: target.distance_by_road ?? undefined,
+      landing_distance_by_air: target.landing_distance_by_air ?? undefined,
+      landing_distance_by_road: target.landing_distance_by_road ?? undefined,
+      primary_landing_area: toLandingAreaForm(target.primary_landing_area),
+      secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
+      risk_assessment: target.risk_assessment || '',
+      safety_precautions: target.safety_precautions || '',
+      jumprun: target.jumprun || '',
+      hospital: target.hospital || '',
+      rescue_boat: target.rescue_boat ?? undefined,
+      minimum_requirements: target.minimum_requirements || '',
+      land_owners: toLandOwnerForms(target.land_owners),
+      land_owner_permission: target.land_owner_permission ?? undefined,
+      image_files: target.image_files || []
+    }),
+    []
+  );
+
+  const loadAirfieldContext = useCallback(async () => {
+    try {
+      const [airfieldData, eventData] = await Promise.all([listAirfields(), listEvents()]);
+      setAirfields(Array.isArray(airfieldData) ? airfieldData : []);
+      setAllEvents(Array.isArray(eventData) ? eventData : []);
+    } catch {
+      // ignore load errors
+    }
+  }, []);
+
+  const loadInnhoppDetailData = useCallback(
+    async (options?: { showLoading?: boolean }) => {
       if (!eventId) return;
-      if (isCreateMode) {
-        setInnhopp(null);
-        setForm(initialFormState);
-        setTakeoffSelectValue('');
-        setLandingSelectValue('');
-        setSameLandingAsTakeoff(true);
-        setImagesDirty(false);
+
+      const showLoading = options?.showLoading ?? true;
+      if (showLoading) {
+        setLoading(true);
       }
-      setLoading(true);
       setError(null);
+
       try {
+        let nextEventData: Event | null = null;
+        let nextInnhopp: Innhopp | null = null;
+        let nextForm = initialFormState;
+        let nextTakeoffSelectValue = '';
+        let nextLandingSelectValue = '';
+        let nextSameLandingAsTakeoff = true;
+
         if (!isCreateMode && innhoppId) {
           const target = await getInnhopp(Number(innhoppId));
-          if (cancelled) return;
-          setInnhopp(target);
-          const defaultStart = target.scheduled_at
-            ? ''
-            : (() => {
-                if (target.event_id && evtCache.current?.[target.event_id]) {
-                  const e = evtCache.current[target.event_id];
-                  if (e.starts_at) {
-                    const d = parseEventLocal(e.starts_at);
-                    if (!d) return '';
-                    d.setUTCHours(9, 0, 0, 0);
-                    return d.toISOString();
-                  }
-                }
-                return '';
-              })();
-          setForm({
-            name: target.name,
-            sequence: target.sequence,
-            aircraft_id: target.aircraft_id ?? undefined,
-            coordinates: target.coordinates || '',
-            elevation: target.elevation ?? undefined,
-            scheduled_at: toInputDateTime(target.scheduled_at) || defaultStart,
-            notes: target.notes || '',
-            takeoff_airfield_id: target.takeoff_airfield_id || undefined,
-            landing_airfield_id: target.landing_airfield_id || undefined,
-            reason_for_choice: target.reason_for_choice || '',
-            adjust_altimeter_aad: target.adjust_altimeter_aad || '',
-            notam: target.notam || '',
-            distance_by_air: target.distance_by_air ?? undefined,
-            distance_by_road: target.distance_by_road ?? undefined,
-            landing_distance_by_air: target.landing_distance_by_air ?? undefined,
-            landing_distance_by_road: target.landing_distance_by_road ?? undefined,
-            primary_landing_area: toLandingAreaForm(target.primary_landing_area),
-            secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
-            risk_assessment: target.risk_assessment || '',
-            safety_precautions: target.safety_precautions || '',
-            jumprun: target.jumprun || '',
-            hospital: target.hospital || '',
-            rescue_boat: target.rescue_boat ?? undefined,
-            minimum_requirements: target.minimum_requirements || '',
-            land_owners: toLandOwnerForms(target.land_owners),
-            land_owner_permission: target.land_owner_permission ?? undefined,
-            image_files: target.image_files || []
-          });
-          setImagesDirty(false);
-          setTakeoffSelectValue(target.takeoff_airfield_id ? String(target.takeoff_airfield_id) : '');
-          setLandingSelectValue(target.landing_airfield_id ? String(target.landing_airfield_id) : '');
-          setSameLandingAsTakeoff(
-            !target.landing_airfield_id ||
-              target.landing_airfield_id === target.takeoff_airfield_id
-          );
-          // fetch event for context
+          nextInnhopp = target;
+
           if (target.event_id) {
             try {
-              const evt = await getEvent(target.event_id);
-              if (!cancelled) {
-                setEventData(evt);
-                evtCache.current = { ...evtCache.current, [target.event_id]: evt };
-                if (!target.scheduled_at && evt.starts_at) {
-                  const d = parseEventLocal(evt.starts_at);
-                  if (d) {
-                    d.setUTCHours(9, 0, 0, 0);
-                    setForm((prev) => ({
-                      ...prev,
-                      aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
-                      scheduled_at: d.toISOString()
-                    }));
-                  }
-                }
-              }
+              nextEventData = await getEvent(target.event_id);
+              evtCache.current = { ...evtCache.current, [target.event_id]: nextEventData };
             } catch {
-              // ignore
+              // ignore missing event context and keep current eventData
             }
-        }
+          }
+
+          const defaultStart =
+            !target.scheduled_at && nextEventData?.starts_at
+              ? (() => {
+                  const date = parseEventLocal(nextEventData.starts_at);
+                  if (!date) return '';
+                  date.setUTCHours(9, 0, 0, 0);
+                  return date.toISOString();
+                })()
+              : '';
+
+          nextForm = toFormState(target, defaultStart);
+          if (!target.scheduled_at && nextEventData?.aircraft?.[0]?.id && !hasNumber(nextForm.aircraft_id)) {
+            nextForm = { ...nextForm, aircraft_id: nextEventData.aircraft[0].id };
+          }
+          nextTakeoffSelectValue = target.takeoff_airfield_id ? String(target.takeoff_airfield_id) : '';
+          nextLandingSelectValue = target.landing_airfield_id ? String(target.landing_airfield_id) : '';
+          nextSameLandingAsTakeoff =
+            !target.landing_airfield_id || target.landing_airfield_id === target.takeoff_airfield_id;
         } else {
-          // create mode: fetch event for defaults and optionally copy data
           const copy = (location.state as any)?.copyInnhopp as Innhopp | undefined;
           const initialScheduledAt = (location.state as any)?.initialScheduledAt as string | undefined;
+
           if (eventId) {
             try {
-              const evt = await getEvent(Number(eventId));
-              if (!cancelled) {
-                setEventData(evt);
-                evtCache.current = { ...evtCache.current, [evt.id]: evt };
-                if (initialScheduledAt) {
-                  setForm((prev) => ({
-                    ...prev,
-                    aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
-                    scheduled_at: initialScheduledAt
-                  }));
-                } else if (!copy?.scheduled_at && evt.starts_at) {
-                  const d = parseEventLocal(evt.starts_at);
-                  if (d) {
-                    d.setUTCHours(9, 0, 0, 0);
-                    setForm((prev) => ({
-                      ...prev,
-                      aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id,
-                      scheduled_at: d.toISOString()
-                    }));
-                  }
-                } else {
-                  setForm((prev) => ({
-                    ...prev,
-                    aircraft_id: prev.aircraft_id ?? evt.aircraft?.[0]?.id
-                  }));
-                }
-              }
+              nextEventData = await getEvent(Number(eventId));
+              evtCache.current = { ...evtCache.current, [nextEventData.id]: nextEventData };
             } catch {
               // ignore event load errors in create mode
             }
           }
-          if (copy && !cancelled) {
-            setForm({
-              name: copy.name,
-              sequence: copy.sequence,
-              aircraft_id: copy.aircraft_id ?? undefined,
-              coordinates: copy.coordinates || '',
-              elevation: copy.elevation ?? undefined,
-              scheduled_at: toInputDateTime(copy.scheduled_at),
-              notes: copy.notes || '',
-              takeoff_airfield_id: copy.takeoff_airfield_id || undefined,
-              landing_airfield_id: copy.landing_airfield_id || undefined,
-              reason_for_choice: copy.reason_for_choice || '',
-              adjust_altimeter_aad: copy.adjust_altimeter_aad || '',
-              notam: copy.notam || '',
-              distance_by_air: copy.distance_by_air ?? undefined,
-              distance_by_road: copy.distance_by_road ?? undefined,
-              landing_distance_by_air: copy.landing_distance_by_air ?? undefined,
-              landing_distance_by_road: copy.landing_distance_by_road ?? undefined,
-              primary_landing_area: toLandingAreaForm(copy.primary_landing_area),
-              secondary_landing_area: toLandingAreaForm(copy.secondary_landing_area),
-              risk_assessment: copy.risk_assessment || '',
-              safety_precautions: copy.safety_precautions || '',
-              jumprun: copy.jumprun || '',
-              hospital: copy.hospital || '',
-              rescue_boat: copy.rescue_boat ?? undefined,
-              minimum_requirements: copy.minimum_requirements || '',
-              land_owners: toLandOwnerForms(copy.land_owners),
-              land_owner_permission: copy.land_owner_permission ?? undefined,
-              image_files: copy.image_files || []
-            });
-            setImagesDirty(false);
-            setTakeoffSelectValue(copy.takeoff_airfield_id ? String(copy.takeoff_airfield_id) : '');
-            setLandingSelectValue(copy.landing_airfield_id ? String(copy.landing_airfield_id) : '');
-            setSameLandingAsTakeoff(
-              !copy.landing_airfield_id || copy.landing_airfield_id === copy.takeoff_airfield_id
-            );
+
+          if (copy) {
+            nextForm = toFormState(copy);
+            nextTakeoffSelectValue = copy.takeoff_airfield_id ? String(copy.takeoff_airfield_id) : '';
+            nextLandingSelectValue = copy.landing_airfield_id ? String(copy.landing_airfield_id) : '';
+            nextSameLandingAsTakeoff =
+              !copy.landing_airfield_id || copy.landing_airfield_id === copy.takeoff_airfield_id;
+          } else {
+            nextForm = initialFormState;
+          }
+
+          if (nextEventData?.aircraft?.[0]?.id && !hasNumber(nextForm.aircraft_id)) {
+            nextForm = { ...nextForm, aircraft_id: nextEventData.aircraft[0].id };
+          }
+          if (initialScheduledAt) {
+            nextForm = { ...nextForm, scheduled_at: initialScheduledAt };
+          } else if (!copy?.scheduled_at && nextEventData?.starts_at) {
+            const date = parseEventLocal(nextEventData.starts_at);
+            if (date) {
+              date.setUTCHours(9, 0, 0, 0);
+              nextForm = { ...nextForm, scheduled_at: date.toISOString() };
+            }
           }
         }
+
+        setInnhopp(nextInnhopp);
+        setEventData(nextEventData);
+        setForm(nextForm);
+        setTakeoffSelectValue(nextTakeoffSelectValue);
+        setLandingSelectValue(nextLandingSelectValue);
+        setSameLandingAsTakeoff(nextSameLandingAsTakeoff);
+        setImagesDirty(false);
+        setSaved(false);
+        setLastSavedSignature(buildSignature(nextForm));
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load innhopp');
-        }
+        setError(err instanceof Error ? err.message : 'Failed to load innhopp');
       } finally {
-        if (!cancelled) {
+        if (showLoading) {
           setLoading(false);
         }
       }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId, innhoppId, isCreateMode]);
+    },
+    [buildSignature, eventId, innhoppId, initialFormState, isCreateMode, location.state, toFormState]
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    const loadAirfieldContext = async () => {
-      try {
-        const [airfieldData, eventData] = await Promise.all([listAirfields(), listEvents()]);
-        if (!cancelled) {
-          setAirfields(Array.isArray(airfieldData) ? airfieldData : []);
-          setAllEvents(Array.isArray(eventData) ? eventData : []);
-        }
-      } catch {
-        // ignore load errors
+    void loadInnhoppDetailData();
+  }, [loadInnhoppDetailData]);
+
+  useEffect(() => {
+    void loadAirfieldContext();
+  }, [loadAirfieldContext]);
+
+  const reloadLiveData = useCallback(async () => {
+    await Promise.all([loadInnhoppDetailData({ showLoading: false }), loadAirfieldContext()]);
+  }, [loadAirfieldContext, loadInnhoppDetailData]);
+
+  const hasPendingLocalChanges = saving || deleting || imagesDirty || hasUnsavedChanges;
+
+  useResourceStream({
+    path: eventId ? `/events/${eventId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
       }
-    };
-    loadAirfieldContext();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+      void reloadLiveData();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void reloadLiveData();
+  }, [hasPendingLocalChanges, pendingLiveRefresh, reloadLiveData]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void reloadLiveData();
+  };
 
   const buildPayload = (override?: Partial<InnhoppFormState>): UpdateInnhoppPayload => {
     const state = { ...form, ...override };
@@ -1352,6 +1338,18 @@ const InnhoppDetailPage = () => {
         </div>
       </header>
 
+      {message ? <p className="error-text">{message}</p> : null}
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <form className="stack" onSubmit={handleSave}>
         <article className="card">
           <div className="form-grid">
@@ -1397,7 +1395,7 @@ const InnhoppDetailPage = () => {
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
-                    aircraft_id: e.target.value ? Number(e.target.value) : undefined
+                    aircraft_id: e.target.value ? Number(e.target.value) : null
                   }))
                 }
               >

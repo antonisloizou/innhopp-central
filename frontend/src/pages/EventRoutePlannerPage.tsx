@@ -14,6 +14,7 @@ import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 type DayBucket = {
   date: Date;
@@ -246,6 +247,7 @@ const EventRoutePlannerPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
@@ -292,42 +294,73 @@ const EventRoutePlannerPage = () => {
   }, [markerFontReady]);
 
   const resolveLocationStop = useCallback(
-    (name: string | null | undefined) => {
-      if (!name) return null;
+    (name: string | null | undefined, locationType?: string | null, locationID?: number | null) => {
+      const trimmedName = name?.trim();
       const innLabel = (i: Event['innhopps'][number]) =>
         `${i.sequence ? `#${i.sequence} ` : ''}${i.name || 'Untitled innhopp'}`.trim();
-      const inn = eventData?.innhopps?.find((i) => innLabel(i) === name);
-      if (inn?.coordinates) {
-        return {
-          coordinates: inn.coordinates,
-          label: name,
-          visualType: 'innhopp' as const
-        };
+      const buildCoordinateStop = (coordinates: string, label: string, visualType: StopVisualType) => ({
+        coordinates: coordinates.trim(),
+        label,
+        visualType
+      });
+
+      if (locationType && locationID) {
+        switch (locationType) {
+          case 'Innhopp': {
+            const inn = eventData?.innhopps?.find((item) => item.id === locationID);
+            if (inn?.coordinates) {
+              return buildCoordinateStop(inn.coordinates, trimmedName || innLabel(inn), 'innhopp');
+            }
+            break;
+          }
+          case 'Accommodation': {
+            const acc = accommodations.find((item) => item.id === locationID);
+            if (acc?.coordinates) {
+              return buildCoordinateStop(acc.coordinates, trimmedName || acc.name, 'accommodation');
+            }
+            break;
+          }
+          case 'Other': {
+            const other = others.find((item) => item.id === locationID);
+            if (other?.coordinates) {
+              return buildCoordinateStop(other.coordinates, trimmedName || other.name, 'other');
+            }
+            break;
+          }
+          case 'Airfield': {
+            const airfield = airfields.find((item) => item.id === locationID);
+            if (airfield?.coordinates) {
+              return buildCoordinateStop(airfield.coordinates, trimmedName || airfield.name, 'generic');
+            }
+            break;
+          }
+        }
       }
-      const acc = accommodations.find((a) => a.name === name);
-      if (acc?.coordinates) {
-        return {
-          coordinates: acc.coordinates,
-          label: name,
-          visualType: 'accommodation' as const
-        };
+
+      if (trimmedName) {
+        const inn = eventData?.innhopps?.find((i) => innLabel(i) === trimmedName);
+        if (inn?.coordinates) {
+          return buildCoordinateStop(inn.coordinates, trimmedName, 'innhopp');
+        }
+        const acc = accommodations.find((a) => a.name === trimmedName);
+        if (acc?.coordinates) {
+          return buildCoordinateStop(acc.coordinates, trimmedName, 'accommodation');
+        }
+        const other = others.find((o) => o.name === trimmedName);
+        if (other?.coordinates) {
+          return buildCoordinateStop(other.coordinates, trimmedName, 'other');
+        }
+        const airfield = airfields.find((a) => a.name === trimmedName);
+        if (airfield?.coordinates) {
+          return buildCoordinateStop(airfield.coordinates, trimmedName, 'generic');
+        }
+
+        const parsed = parseCoordinates(trimmedName);
+        if (parsed) {
+          return buildCoordinateStop(`${parsed.lat},${parsed.lng}`, trimmedName, 'generic');
+        }
       }
-      const other = others.find((o) => o.name === name);
-      if (other?.coordinates) {
-        return {
-          coordinates: other.coordinates,
-          label: name,
-          visualType: 'other' as const
-        };
-      }
-      const airfield = airfields.find((a) => a.name === name);
-      if (airfield?.coordinates) {
-        return {
-          coordinates: airfield.coordinates,
-          label: name,
-          visualType: 'generic' as const
-        };
-      }
+
       return null;
     },
     [accommodations, airfields, eventData?.innhopps, others]
@@ -377,6 +410,55 @@ const EventRoutePlannerPage = () => {
       cancelled = true;
     };
   }, [eventId]);
+
+  const reload = useCallback(async () => {
+    if (!eventId) return;
+    setError(null);
+    try {
+      const [evt, transportList, groundCrewList, accommodationList, otherList, mealList, airfieldList] = await Promise.all([
+        getEvent(Number(eventId)),
+        listTransports(),
+        listGroundCrews(),
+        listAccommodations(Number(eventId)),
+        listOthers(),
+        listMeals(),
+        listAirfields()
+      ]);
+      setEventData(evt);
+      setTransports(Array.isArray(transportList) ? transportList.filter((item) => item.event_id === Number(eventId)) : []);
+      setGroundCrews(Array.isArray(groundCrewList) ? groundCrewList.filter((item) => item.event_id === Number(eventId)) : []);
+      setAccommodations(Array.isArray(accommodationList) ? accommodationList : []);
+      setOthers(Array.isArray(otherList) ? otherList.filter((item) => item.event_id === Number(eventId)) : []);
+      setMeals(Array.isArray(mealList) ? mealList.filter((item) => item.event_id === Number(eventId)) : []);
+      setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load route planner');
+    }
+  }, [eventId]);
+
+  const hasPendingLocalChanges = copying || deleting;
+
+  useResourceStream({
+    path: eventId ? `/events/${eventId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void reload();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void reload();
+  }, [hasPendingLocalChanges, pendingLiveRefresh, reload]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void reload();
+  };
 
   const visibleGroundCrews = participantOnly ? [] : groundCrews;
 
@@ -536,6 +618,7 @@ const EventRoutePlannerPage = () => {
           innhoppCoordinates: item.coordinates || null,
           innhoppTakeoffName: takeoff?.name || null,
           innhoppLandingName: landingName,
+          innhoppAircraftName: aircraft?.name || null,
           innhoppDistanceByAir: item.distance_by_air ?? null,
           innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
           innhoppAircraftWarning: aircraftWarning,
@@ -547,7 +630,6 @@ const EventRoutePlannerPage = () => {
           innhoppRisk: item.risk_assessment || null,
           innhoppMinimumRequirements: item.minimum_requirements || null,
           innhoppRescueBoat: item.rescue_boat ?? null,
-          innhoppLandOwnerPermission: item.land_owner_permission ?? null,
           routePoints,
           disabled: routePoints.length === 0
         });
@@ -620,7 +702,7 @@ const EventRoutePlannerPage = () => {
       });
 
       day.meals.forEach((item) => {
-        const mealStop = resolveLocationStop(item.location);
+        const mealStop = resolveLocationStop(item.location, item.location_type, item.location_id);
         entries.push({
           id: `meal-${item.id}`,
           title: item.name,
@@ -1157,6 +1239,16 @@ const EventRoutePlannerPage = () => {
       </header>
 
       {message ? <p className="error-text">{message}</p> : null}
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current action finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <article className="card event-route-preview-card">
           <div className="event-route-preview-header">

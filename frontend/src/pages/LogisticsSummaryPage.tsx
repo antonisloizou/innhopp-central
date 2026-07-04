@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listEvents, listSeasons, Event, Season, Accommodation, listAllAccommodations } from '../api/events';
 import { listTransports, Transport, listOthers, OtherLogistic, listMeals, Meal, listGroundCrews, GroundCrew } from '../api/logistics';
 import { listEventVehicles, EventVehicle } from '../api/logistics';
 import { listAirfields, Airfield } from '../api/airfields';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const LogisticsSummaryPage = () => {
   const navigate = useNavigate();
@@ -21,44 +22,54 @@ const LogisticsSummaryPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [seasonResp, eventResp, transportResp, groundCrewResp, accResp, vehResp, otherResp, mealsResp, airfieldResp] = await Promise.all([
-          listSeasons(),
-          listEvents(),
-          listTransports(),
-          listGroundCrews(),
-          listAllAccommodations(),
-          listEventVehicles(),
-          listOthers(),
-          listMeals(),
-          listAirfields()
-        ]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
-        setTransports(Array.isArray(transportResp) ? transportResp : []);
-        setGroundCrews(Array.isArray(groundCrewResp) ? groundCrewResp : []);
-        setAccommodations(Array.isArray(accResp) ? accResp : []);
-        setVehicles(Array.isArray(vehResp) ? vehResp : []);
-        setOthers(Array.isArray(otherResp) ? otherResp : []);
-        setMeals(Array.isArray(mealsResp) ? mealsResp : []);
-        setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load logistics');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [seasonResp, eventResp, transportResp, groundCrewResp, accResp, vehResp, otherResp, mealsResp, airfieldResp] = await Promise.all([
+        listSeasons(),
+        listEvents(),
+        listTransports(),
+        listGroundCrews(),
+        listAllAccommodations(),
+        listEventVehicles(),
+        listOthers(),
+        listMeals(),
+        listAirfields()
+      ]);
+      setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
+      setEvents(Array.isArray(eventResp) ? eventResp : []);
+      setTransports(Array.isArray(transportResp) ? transportResp : []);
+      setGroundCrews(Array.isArray(groundCrewResp) ? groundCrewResp : []);
+      setAccommodations(Array.isArray(accResp) ? accResp : []);
+      setVehicles(Array.isArray(vehResp) ? vehResp : []);
+      setOthers(Array.isArray(otherResp) ? otherResp : []);
+      setMeals(Array.isArray(mealsResp) ? mealsResp : []);
+      setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load logistics');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
 
   const filteredEvents = useMemo(() => {
     if (!selectedSeason) return events;

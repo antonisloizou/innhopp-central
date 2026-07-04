@@ -41,7 +41,7 @@ function bindCreateForm() {
     event.preventDefault();
     try {
       const payload = buildEventPayload(createForm);
-      const created = await requestJSON("/api/events/events", { method: "POST", body: payload });
+      const created = await requestJSON("/api/events", { method: "POST", body: payload });
       upsertEvent(created);
       createForm.reset();
       renderParticipants(createForm, []);
@@ -76,7 +76,7 @@ function bindEditForm() {
 
     try {
       const payload = buildEventPayload(editForm);
-      const updated = await requestJSON(`/api/events/events/${eventId}`, { method: "PUT", body: payload });
+      const updated = await requestJSON(`/api/events/${eventId}`, { method: "PUT", body: payload });
       upsertEvent(updated);
       selectEvent(updated.id);
     } catch (error) {
@@ -100,7 +100,7 @@ function bindEditForm() {
       }
 
       try {
-        await requestJSON(`/api/events/events/${eventId}`, { method: "DELETE" });
+        await requestJSON(`/api/events/${eventId}`, { method: "DELETE" });
         state.events = state.events.filter((entry) => entry.id !== eventId);
         state.selectedEventId = null;
         editForm.reset();
@@ -157,7 +157,7 @@ async function loadParticipants() {
 }
 
 async function loadEvents() {
-  const events = await requestJSON("/api/events/events");
+  const events = await requestJSON("/api/events");
   state.events = Array.isArray(events) ? events : [];
   sortEvents();
   renderEventsList();

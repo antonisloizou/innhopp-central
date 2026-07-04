@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
@@ -7,6 +7,7 @@ import { Event, listEvents } from '../api/events';
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import DetailCostCard from '../components/DetailCostCard';
+import { useResourceStream } from '../hooks/useResourceStream';
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
 const LogisticsMealDetailPage = () => {
@@ -26,6 +27,8 @@ const LogisticsMealDetailPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const complete = hasText(form.name) && hasText(form.location) && hasText(form.scheduled_at);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
@@ -48,37 +51,56 @@ const LogisticsMealDetailPage = () => {
     return undefined;
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!mealId) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const [mealResp, eventsResp] = await Promise.all([getMeal(Number(mealId)), listEvents()]);
-        if (cancelled) return;
-        setMeal(mealResp);
-        setEvents(Array.isArray(eventsResp) ? eventsResp : []);
-        setForm({
-          event_id: mealResp.event_id ? String(mealResp.event_id) : '',
-          name: mealResp.name,
-          location: mealResp.location || '',
-          scheduled_at: mealResp.scheduled_at || '',
-          notes: mealResp.notes || ''
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load meal');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    if (!mealId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [mealResp, eventsResp] = await Promise.all([getMeal(Number(mealId)), listEvents()]);
+      setMeal(mealResp);
+      setEvents(Array.isArray(eventsResp) ? eventsResp : []);
+      setForm({
+        event_id: mealResp.event_id ? String(mealResp.event_id) : '',
+        name: mealResp.name,
+        location: mealResp.location || '',
+        scheduled_at: mealResp.scheduled_at || '',
+        notes: mealResp.notes || ''
+      });
+      setIsDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load meal');
+    } finally {
+      setLoading(false);
+    }
   }, [mealId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const hasPendingLocalChanges = isDirty || saving || deleting;
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const handleSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -94,6 +116,7 @@ const LogisticsMealDetailPage = () => {
         notes: form.notes.trim() || undefined
       });
       setMeal(updated);
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to save meal');
     } finally {
@@ -173,13 +196,27 @@ const LogisticsMealDetailPage = () => {
         </div>
       </header>
 
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <article className="card">
         <form className="form-grid" onSubmit={handleSave}>
           <label className="form-field">
             <span>Event</span>
             <select
               value={form.event_id}
-              onChange={(e) => setForm((prev) => ({ ...prev, event_id: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, event_id: e.target.value }));
+              }}
               required
             >
               <option value="">Select event</option>
@@ -195,7 +232,10 @@ const LogisticsMealDetailPage = () => {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+              }}
               required
             />
           </label>
@@ -204,7 +244,10 @@ const LogisticsMealDetailPage = () => {
             <input
               type="text"
               value={form.location}
-              onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, location: e.target.value }));
+              }}
             />
           </label>
           <label className="form-field">
@@ -219,6 +262,7 @@ const LogisticsMealDetailPage = () => {
               }}
               onChange={(dates) => {
                 const d = dates[0];
+                setIsDirty(true);
                 setForm((prev) => ({
                   ...prev,
                   scheduled_at: d ? fromEventLocalPickerDate(d) : ''
@@ -228,7 +272,13 @@ const LogisticsMealDetailPage = () => {
           </label>
           <label className="form-field form-field-full-span">
             <span>Notes</span>
-            <textarea value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+            <textarea
+              value={form.notes}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, notes: e.target.value }));
+              }}
+            />
           </label>
           <div className="form-actions">
             <button type="submit" className="primary" disabled={saving}>

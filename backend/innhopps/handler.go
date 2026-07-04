@@ -18,14 +18,20 @@ import (
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	streams *realtime.Hub
 }
 
-func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
+	var streamHub *realtime.Hub
+	if len(streams) > 0 {
+		streamHub = streams[0]
+	}
+	return &Handler{db: db, streams: streamHub}
 }
 
 type LandingArea struct {
@@ -93,10 +99,29 @@ type landOwnerPayload struct {
 	Email     string `json:"email"`
 }
 
+type optionalInt64Field struct {
+	Set   bool
+	Value *int64
+}
+
+func (f *optionalInt64Field) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if string(data) == "null" {
+		f.Value = nil
+		return nil
+	}
+	var value int64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	f.Value = &value
+	return nil
+}
+
 type payload struct {
 	Sequence              *int               `json:"sequence"`
 	Name                  string             `json:"name"`
-	AircraftID            *int64             `json:"aircraft_id"`
+	AircraftID            optionalInt64Field `json:"aircraft_id"`
 	Coordinates           string             `json:"coordinates"`
 	ScheduledAt           string             `json:"scheduled_at"`
 	Elevation             *int               `json:"elevation"`
@@ -223,6 +248,18 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{innhoppID}", h.updateInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{innhoppID}", h.deleteInnhopp)
 	return r
+}
+
+func (h *Handler) publishEventUpdate(eventID int64, reason string) {
+	if h.streams == nil || eventID <= 0 {
+		return
+	}
+	h.streams.Publish("events:index", "resource.updated", realtime.UpdatePayload("events", 0, reason))
+	h.streams.Publish(
+		realtime.Topic("events", eventID),
+		"resource.updated",
+		realtime.UpdatePayload("events", eventID, reason),
+	)
 }
 
 func scanInnhopp(row pgx.Row) (Innhopp, error) {
@@ -487,7 +524,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "takeoff_airfield_id must be positive")
 		return
 	}
-	if p.AircraftID != nil && *p.AircraftID <= 0 {
+	if p.AircraftID.Set && p.AircraftID.Value != nil && *p.AircraftID.Value <= 0 {
 		httpx.Error(w, http.StatusBadRequest, "aircraft_id must be positive")
 		return
 	}
@@ -496,7 +533,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p.AircraftID != nil {
+	if p.AircraftID.Set && p.AircraftID.Value != nil {
 		var exists bool
 		if err := h.db.QueryRow(r.Context(), `
 			SELECT EXISTS(
@@ -506,7 +543,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 				WHERE i.id = $1
 				  AND ea.aircraft_id = $2
 			)
-		`, innhoppID, *p.AircraftID).Scan(&exists); err != nil {
+		`, innhoppID, *p.AircraftID.Value).Scan(&exists); err != nil {
 			logUpdateFailure(innhoppID, p, err, "validate_aircraft")
 			httpx.Error(w, http.StatusInternalServerError, "failed to validate aircraft assignment")
 			return
@@ -551,24 +588,26 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 	jumprun := strings.TrimSpace(p.Jumprun)
 	hospital := strings.TrimSpace(p.Hospital)
 	minimum := strings.TrimSpace(p.MinimumRequirements)
+	aircraftIDSet := p.AircraftID.Set
+	aircraftID := p.AircraftID.Value
 
 	row := h.db.QueryRow(r.Context(),
 		`UPDATE event_innhopps
-         SET sequence = $1, name = $2, aircraft_id = $3, coordinates = $4, takeoff_airfield_id = $5, elevation = $6, scheduled_at = $7, notes = $8,
-             reason_for_choice = $9, adjust_altimeter_aad = $10, notam = $11, distance_by_air = $12, distance_by_road = $13,
-             landing_airfield_id = $14, landing_distance_by_air = $15, landing_distance_by_road = $16,
-             primary_landing_area_name = $17, primary_landing_area_description = $18, primary_landing_area_size = $19, primary_landing_area_obstacles = $20,
-             secondary_landing_area_name = $21, secondary_landing_area_description = $22, secondary_landing_area_size = $23, secondary_landing_area_obstacles = $24,
-             risk_assessment = $25, safety_precautions = $26, jumprun = $27, hospital = $28, rescue_boat = $29, minimum_requirements = $30,
-             image_files = COALESCE($31::jsonb, image_files), land_owners = $32::jsonb, land_owner_permission = $33
-         WHERE id = $34
+         SET sequence = $1, name = $2, aircraft_id = CASE WHEN $3 THEN $4 ELSE aircraft_id END, coordinates = $5, takeoff_airfield_id = $6, elevation = $7, scheduled_at = $8, notes = $9,
+             reason_for_choice = $10, adjust_altimeter_aad = $11, notam = $12, distance_by_air = $13, distance_by_road = $14,
+             landing_airfield_id = $15, landing_distance_by_air = $16, landing_distance_by_road = $17,
+             primary_landing_area_name = $18, primary_landing_area_description = $19, primary_landing_area_size = $20, primary_landing_area_obstacles = $21,
+             secondary_landing_area_name = $22, secondary_landing_area_description = $23, secondary_landing_area_size = $24, secondary_landing_area_obstacles = $25,
+             risk_assessment = $26, safety_precautions = $27, jumprun = $28, hospital = $29, rescue_boat = $30, minimum_requirements = $31,
+             image_files = COALESCE($32::jsonb, image_files), land_owners = $33::jsonb, land_owner_permission = $34
+         WHERE id = $35
          RETURNING id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                    reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
                    primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                    secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                    risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                    created_at`,
-		seq, name, p.AircraftID, coords, p.TakeoffAirfieldID, elevation, scheduled, strings.TrimSpace(p.Notes),
+		seq, name, aircraftIDSet, aircraftID, coords, p.TakeoffAirfieldID, elevation, scheduled, strings.TrimSpace(p.Notes),
 		reason, adjust, notam, distanceByAir, distanceByRoad, p.LandingAirfieldID, landingDistanceByAir, landingDistanceByRoad,
 		primaryLanding.Name, primaryLanding.Description, primaryLanding.Size, primaryLanding.Obstacles,
 		secondaryLanding.Name, secondaryLanding.Description, secondaryLanding.Size, secondaryLanding.Obstacles,
@@ -616,6 +655,7 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		logUpdateFailure(innhoppID, p, err, "recalculate_route_durations")
 	}
 
+	h.publishEventUpdate(innhopp.EventID, "innhopp.updated")
 	httpx.WriteJSON(w, http.StatusOK, innhopp)
 }
 
@@ -626,15 +666,16 @@ func (h *Handler) deleteInnhopp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.db.Exec(r.Context(), `DELETE FROM event_innhopps WHERE id = $1`, innhoppID)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to delete innhopp")
-		return
-	}
-	if res.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusNotFound, "innhopp not found")
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `DELETE FROM event_innhopps WHERE id = $1 RETURNING event_id`, innhoppID).Scan(&eventID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "innhopp not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to delete innhopp")
+		}
 		return
 	}
 
+	h.publishEventUpdate(eventID, "innhopp.deleted")
 	w.WriteHeader(http.StatusNoContent)
 }

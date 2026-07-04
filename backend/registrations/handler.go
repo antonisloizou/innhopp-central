@@ -19,6 +19,7 @@ import (
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 )
 
 var validRegistrationStatuses = map[string]struct{}{
@@ -56,11 +57,16 @@ var validActivityTypes = map[string]struct{}{
 var errActiveRegistrationExists = errors.New("active registration already exists")
 
 type Handler struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	streams *realtime.Hub
 }
 
-func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
+	var streamHub *realtime.Hub
+	if len(streams) > 0 {
+		streamHub = streams[0]
+	}
+	return &Handler{db: db, streams: streamHub}
 }
 
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
@@ -71,6 +77,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.Get("/me", h.listOwnRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/events/{eventID}", h.listEventRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/events/{eventID}", h.createRegistration)
+	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}/stream", h.streamRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}", h.getRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Put("/{registrationID}", h.updateRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/{registrationID}/status", h.updateRegistrationStatus)
@@ -130,6 +137,33 @@ type RegistrationActivity struct {
 	Payload            map[string]any `json:"payload,omitempty"`
 	CreatedByAccountID *int64         `json:"created_by_account_id,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
+}
+
+func (h *Handler) streamRegistration(w http.ResponseWriter, r *http.Request) {
+	registrationID, err := strconv.ParseInt(chi.URLParam(r, "registrationID"), 10, 64)
+	if err != nil || registrationID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid registration id")
+		return
+	}
+	h.streams.ServeHTTP(w, r, realtime.Topic("registrations", registrationID))
+}
+
+func (h *Handler) publishRegistrationUpdate(registration *Registration, reason string) {
+	if h.streams == nil || registration == nil {
+		return
+	}
+	h.streams.Publish(
+		realtime.Topic("registrations", registration.ID),
+		"resource.updated",
+		realtime.UpdatePayload("registrations", registration.ID, reason),
+	)
+	if registration.EventID > 0 {
+		h.streams.Publish(
+			realtime.Topic("events", registration.EventID),
+			"resource.updated",
+			realtime.RelatedUpdatePayload("events", registration.EventID, reason, "registration", registration.ID),
+		)
+	}
 }
 
 type registrationPayload struct {
@@ -1582,6 +1616,7 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to load registration: %v", err))
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.public_created")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
@@ -1660,6 +1695,7 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to load registration: %v", err))
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.public_claimed")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
@@ -1914,6 +1950,7 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.created")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
@@ -1986,6 +2023,7 @@ func (h *Handler) updateRegistration(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.updated")
 	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 
@@ -2049,6 +2087,7 @@ func (h *Handler) updateRegistrationStatus(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.status_updated")
 	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 
@@ -2150,6 +2189,7 @@ func (h *Handler) createPayment(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.payment_created")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }
 
@@ -2258,6 +2298,7 @@ func (h *Handler) updatePayment(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.payment_updated")
 	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 
@@ -2311,5 +2352,6 @@ func (h *Handler) createActivity(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
 		return
 	}
+	h.publishRegistrationUpdate(registration, "registration.activity_created")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
 }

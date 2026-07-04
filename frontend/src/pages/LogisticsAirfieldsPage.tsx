@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAirfields, Airfield } from '../api/airfields';
 import { listEvents, listSeasons, Event, Season } from '../api/events';
 import { formatMetersWithFeet } from '../utils/units';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const LogisticsAirfieldsPage = () => {
   const [seasons, setSeasons] = useState<Season[]>([]);
@@ -14,32 +15,35 @@ const LogisticsAirfieldsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [seasonResp, eventResp, airfieldResp] = await Promise.all([
-          listSeasons(),
-          listEvents(),
-          listAirfields()
-        ]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
-        setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load airfields');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [seasonResp, eventResp, airfieldResp] = await Promise.all([
+        listSeasons(),
+        listEvents(),
+        listAirfields()
+      ]);
+      setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
+      setEvents(Array.isArray(eventResp) ? eventResp : []);
+      setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load airfields');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
 
   const filteredEvents = useMemo(() => {
     if (!selectedSeason) return events;

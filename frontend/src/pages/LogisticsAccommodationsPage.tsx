@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listSeasons, listEvents, Season, Event, Accommodation, listAllAccommodations } from '../api/events';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const formatDateTime = (iso?: string, force24h = false) => {
   if (!iso) return 'Not scheduled';
@@ -28,32 +29,42 @@ const LogisticsAccommodationsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [seasonResp, eventResp, accResp] = await Promise.all([
-          listSeasons(),
-          listEvents(),
-          listAllAccommodations()
-        ]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
-        setAccommodations(Array.isArray(accResp) ? accResp : []);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load accommodations');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [seasonResp, eventResp, accResp] = await Promise.all([
+        listSeasons(),
+        listEvents(),
+        listAllAccommodations()
+      ]);
+      setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
+      setEvents(Array.isArray(eventResp) ? eventResp : []);
+      setAccommodations(Array.isArray(accResp) ? accResp : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load accommodations');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
 
   const filteredEvents = useMemo(() => {
     if (!selectedSeason) return events;

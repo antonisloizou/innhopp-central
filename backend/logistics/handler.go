@@ -23,6 +23,7 @@ import (
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 )
 
 // Handler provides logistics operations such as gear tracking.
@@ -30,6 +31,7 @@ type Handler struct {
 	db         *pgxpool.Pool
 	httpClient *http.Client
 	mapsAPIKey string
+	streams    *realtime.Hub
 }
 
 var validLocationReferenceTypes = map[string]struct{}{
@@ -720,6 +722,8 @@ func (h *Handler) createOther(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create other logistics entry")
 		return
 	}
+	h.publishEventUpdate(payload.EventID, "other.created")
+	h.publishLogisticsUpdate("other.created", "other", o.ID)
 	httpx.WriteJSON(w, http.StatusCreated, o)
 }
 
@@ -834,6 +838,10 @@ func (h *Handler) updateOther(w http.ResponseWriter, r *http.Request) {
 	if err := RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Other", o.ID); err != nil {
 		log.Printf("route duration recalculation failed (type=Other id=%d): %v", o.ID, err)
 	}
+	if o.EventID != nil {
+		h.publishEventUpdate(*o.EventID, "other.updated")
+	}
+	h.publishLogisticsUpdate("other.updated", "other", o.ID)
 	httpx.WriteJSON(w, http.StatusOK, o)
 }
 
@@ -844,15 +852,17 @@ func (h *Handler) deleteOther(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tag, err := h.db.Exec(r.Context(), `DELETE FROM logistics_other WHERE id = $1`, id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to delete other logistics entry")
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `DELETE FROM logistics_other WHERE id = $1 RETURNING event_id`, id).Scan(&eventID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to delete other logistics entry")
+		}
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusNotFound, "not found")
-		return
-	}
+	h.publishEventUpdate(eventID, "other.deleted")
+	h.publishLogisticsUpdate("other.deleted", "other", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1043,6 +1053,8 @@ func (h *Handler) createMeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(payload.EventID, "meal.created")
+	h.publishLogisticsUpdate("meal.created", "meal", m.ID)
 	httpx.WriteJSON(w, http.StatusCreated, m)
 }
 
@@ -1152,6 +1164,10 @@ func (h *Handler) updateMeal(w http.ResponseWriter, r *http.Request) {
 		log.Printf("route duration recalculation failed (type=Meal id=%d): %v", m.ID, err)
 	}
 
+	if m.EventID != nil {
+		h.publishEventUpdate(*m.EventID, "meal.updated")
+	}
+	h.publishLogisticsUpdate("meal.updated", "meal", m.ID)
 	httpx.WriteJSON(w, http.StatusOK, m)
 }
 
@@ -1162,15 +1178,17 @@ func (h *Handler) deleteMeal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tag, err := h.db.Exec(r.Context(), `DELETE FROM logistics_meals WHERE id = $1`, id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to delete meal")
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `DELETE FROM logistics_meals WHERE id = $1 RETURNING event_id`, id).Scan(&eventID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "meal not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to delete meal")
+		}
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusNotFound, "meal not found")
-		return
-	}
+	h.publishEventUpdate(eventID, "meal.deleted")
+	h.publishLogisticsUpdate("meal.deleted", "meal", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1439,6 +1457,8 @@ func (h *Handler) updateTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(payload.EventID, "transport.updated")
+	h.publishLogisticsUpdate("transport.updated", "transport", id)
 	h.getTransport(w, r)
 }
 
@@ -1448,15 +1468,17 @@ func (h *Handler) deleteTransport(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid transport id")
 		return
 	}
-	tag, err := h.db.Exec(r.Context(), `DELETE FROM logistics_transports WHERE id = $1`, id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to delete transport")
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `DELETE FROM logistics_transports WHERE id = $1 RETURNING event_id`, id).Scan(&eventID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "transport not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to delete transport")
+		}
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusNotFound, "transport not found")
-		return
-	}
+	h.publishEventUpdate(eventID, "transport.deleted")
+	h.publishLogisticsUpdate("transport.deleted", "transport", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1735,6 +1757,8 @@ func (h *Handler) createGroundCrew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(payload.EventID, "ground_crew.created")
+	h.publishLogisticsUpdate("ground_crew.created", "ground_crew", groundCrew.ID)
 	httpx.WriteJSON(w, http.StatusCreated, groundCrew)
 }
 
@@ -2001,6 +2025,8 @@ func (h *Handler) updateGroundCrew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(payload.EventID, "ground_crew.updated")
+	h.publishLogisticsUpdate("ground_crew.updated", "ground_crew", id)
 	h.getGroundCrew(w, r)
 }
 
@@ -2010,25 +2036,54 @@ func (h *Handler) deleteGroundCrew(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid ground crew id")
 		return
 	}
-	tag, err := h.db.Exec(r.Context(), `DELETE FROM logistics_ground_crews WHERE id = $1`, id)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to delete ground crew")
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `DELETE FROM logistics_ground_crews WHERE id = $1 RETURNING event_id`, id).Scan(&eventID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "ground crew not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to delete ground crew")
+		}
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, http.StatusNotFound, "ground crew not found")
-		return
-	}
+	h.publishEventUpdate(eventID, "ground_crew.deleted")
+	h.publishLogisticsUpdate("ground_crew.deleted", "ground_crew", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // NewHandler creates a logistics handler.
-func NewHandler(db *pgxpool.Pool) *Handler {
+func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
+	var streamHub *realtime.Hub
+	if len(streams) > 0 {
+		streamHub = streams[0]
+	}
 	return &Handler{
 		db:         db,
 		httpClient: &http.Client{Timeout: 8 * time.Second},
 		mapsAPIKey: strings.TrimSpace(os.Getenv("GOOGLE_MAPS_API_KEY")),
+		streams:    streamHub,
 	}
+}
+
+func (h *Handler) publishEventUpdate(eventID int64, reason string) {
+	if h.streams == nil || eventID <= 0 {
+		return
+	}
+	h.streams.Publish(
+		realtime.Topic("events", eventID),
+		"resource.updated",
+		realtime.UpdatePayload("events", eventID, reason),
+	)
+}
+
+func (h *Handler) publishLogisticsUpdate(reason string, relatedType string, relatedID int64) {
+	if h.streams == nil {
+		return
+	}
+	h.streams.Publish(
+		"logistics:index",
+		"resource.updated",
+		realtime.RelatedUpdatePayload("logistics", 0, reason, relatedType, relatedID),
+	)
 }
 
 // BackfillLegacyReferenceIDs resolves legacy string-only references into stable IDs.
@@ -2289,13 +2344,13 @@ func BackfillMissingRouteDurations(ctx context.Context, db *pgxpool.Pool) error 
 		return nil
 	}
 	type row struct {
-		id              int64
-		originLabel     string
-		originType      sql.NullString
-		originID        sql.NullInt64
+		id               int64
+		originLabel      string
+		originType       sql.NullString
+		originID         sql.NullInt64
 		destinationLabel string
-		destinationType sql.NullString
-		destinationID   sql.NullInt64
+		destinationType  sql.NullString
+		destinationID    sql.NullInt64
 	}
 	backfill := func(table string) error {
 		query := fmt.Sprintf(
@@ -2508,6 +2563,7 @@ func RecalculateRouteDurationsForLocationReference(ctx context.Context, db *pgxp
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/gear-assets", h.listGearAssets)
+	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/stream", h.streamLogisticsIndex)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Post("/gear-assets", h.createGearAsset)
 	r.With(enforcer.Authorize(rbac.PermissionViewLogistics)).Get("/transports", h.listTransports)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Post("/transports", h.createTransport)
@@ -2535,6 +2591,10 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Put("/meals/{mealID}", h.updateMeal)
 	r.With(enforcer.Authorize(rbac.PermissionManageLogistics)).Delete("/meals/{mealID}", h.deleteMeal)
 	return r
+}
+
+func (h *Handler) streamLogisticsIndex(w http.ResponseWriter, r *http.Request) {
+	h.streams.ServeHTTP(w, r, "logistics:index")
 }
 
 type GearAsset struct {
@@ -2735,7 +2795,7 @@ type routesAPILatLng struct {
 }
 
 type routesAPIResponse struct {
-	Routes       []struct {
+	Routes []struct {
 		Legs []struct {
 			Duration string `json:"duration"`
 		} `json:"legs"`
@@ -2855,7 +2915,7 @@ func (h *Handler) calculateRouteDurationMinutes(ctx context.Context, origin, des
 	body, err := json.Marshal(routesAPIRequest{
 		Origin:      buildRoutesWaypoint(origin),
 		Destination: buildRoutesWaypoint(destination),
-		TravelMode: "DRIVE",
+		TravelMode:  "DRIVE",
 	})
 	if err != nil {
 		return nil, err
@@ -3163,6 +3223,8 @@ func (h *Handler) createTransport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(payload.EventID, "transport.created")
+	h.publishLogisticsUpdate("transport.created", "transport", transport.ID)
 	httpx.WriteJSON(w, http.StatusCreated, transport)
 }
 
@@ -3234,6 +3296,8 @@ func (h *Handler) createVehicle(w http.ResponseWriter, r *http.Request) {
 	vehicle.PassengerCapacity = payload.PassengerCapacity
 	vehicle.Notes = notes
 
+	h.publishEventUpdate(payload.EventID, "vehicle.created")
+	h.publishLogisticsUpdate("vehicle.created", "vehicle", vehicle.ID)
 	httpx.WriteJSON(w, http.StatusCreated, vehicle)
 }
 
@@ -3326,6 +3390,8 @@ func (h *Handler) updateVehicle(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         createdAt,
 	}
 
+	h.publishEventUpdate(payload.EventID, "vehicle.updated")
+	h.publishLogisticsUpdate("vehicle.updated", "vehicle", vehicle.ID)
 	httpx.WriteJSON(w, http.StatusOK, vehicle)
 }
 
@@ -3391,5 +3457,7 @@ func (h *Handler) deleteVehicle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(vehicle.EventID, "vehicle.deleted")
+	h.publishLogisticsUpdate("vehicle.deleted", "vehicle", vehicle.ID)
 	w.WriteHeader(http.StatusNoContent)
 }

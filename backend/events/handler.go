@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 	"github.com/innhopp/central/backend/registrations"
 )
 
@@ -50,12 +52,17 @@ const defaultEventStatus = "draft"
 
 // Handler provides read/write APIs for seasons, events, and manifests.
 type Handler struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	streams *realtime.Hub
 }
 
 // NewHandler creates an events handler.
-func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
+	var streamHub *realtime.Hub
+	if len(streams) > 0 {
+		streamHub = streams[0]
+	}
+	return &Handler{db: db, streams: streamHub}
 }
 
 // Routes configures the HTTP routes for event resources.
@@ -66,19 +73,10 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewSeasons)).Get("/seasons/{seasonID}", h.getSeason)
 	r.With(enforcer.Authorize(rbac.PermissionManageSeasons)).Delete("/seasons/{seasonID}", h.deleteSeason)
 
-	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events", h.listEvents)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events", h.createEvent)
-	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events/{eventID}", h.getEvent)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/events/{eventID}", h.updateEvent)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events/{eventID}/copy", h.copyEvent)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/events/{eventID}", h.deleteEvent)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events/{eventID}/innhopps", h.createInnhopp)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/", h.listEvents)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/stream", h.streamEventIndex)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/", h.createEvent)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/accommodations", h.listAllAccommodations)
-	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events/{eventID}/accommodations", h.listAccommodations)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/events/{eventID}/accommodations", h.createAccommodation)
-	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/events/{eventID}/accommodations/{accID}", h.getAccommodation)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/events/{eventID}/accommodations/{accID}", h.updateAccommodation)
-	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/events/{eventID}/accommodations/{accID}", h.deleteAccommodation)
 
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/airfields", h.listAirfields)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/airfields/{airfieldID}", h.getAirfield)
@@ -95,6 +93,18 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Post("/manifests", h.createManifest)
 	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests/{manifestID}", h.getManifest)
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Put("/manifests/{manifestID}", h.updateManifest)
+
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/stream", h.streamEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}", h.getEvent)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}", h.updateEvent)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/copy", h.copyEvent)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}", h.deleteEvent)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/innhopps", h.createInnhopp)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/accommodations", h.listAccommodations)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/accommodations", h.createAccommodation)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/accommodations/{accID}", h.getAccommodation)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/accommodations/{accID}", h.updateAccommodation)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}/accommodations/{accID}", h.deleteAccommodation)
 	return r
 }
 
@@ -302,12 +312,31 @@ type landOwnerPayload struct {
 	Email     string `json:"email"`
 }
 
+type optionalInt64Field struct {
+	Set   bool
+	Value *int64
+}
+
+func (f *optionalInt64Field) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if string(data) == "null" {
+		f.Value = nil
+		return nil
+	}
+	var value int64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	f.Value = &value
+	return nil
+}
+
 type innhoppPayload struct {
 	ID                    *int64             `json:"id"`
 	Sequence              *int               `json:"sequence"`
 	Name                  string             `json:"name"`
 	Coordinates           string             `json:"coordinates"`
-	AircraftID            *int64             `json:"aircraft_id"`
+	AircraftID            optionalInt64Field `json:"aircraft_id"`
 	Elevation             *int               `json:"elevation"`
 	ScheduledAt           string             `json:"scheduled_at"`
 	Notes                 string             `json:"notes"`
@@ -339,6 +368,7 @@ type innhoppInput struct {
 	Name                  string
 	Coordinates           string
 	AircraftID            *int64
+	AircraftIDSet         bool
 	Elevation             *int
 	TakeoffAirfieldID     *int64
 	LandingAirfieldID     *int64
@@ -475,7 +505,18 @@ func (h *Handler) createSeason(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventIndexUpdate("season.created")
 	httpx.WriteJSON(w, http.StatusCreated, season)
+}
+
+func parseIDParam(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
+	raw := strings.TrimSpace(chi.URLParam(r, name))
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid "+name)
+		return 0, false
+	}
+	return id, true
 }
 
 func (h *Handler) getSeason(w http.ResponseWriter, r *http.Request) {
@@ -516,6 +557,7 @@ func (h *Handler) deleteSeason(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventIndexUpdate("season.deleted")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -523,7 +565,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(), `
 		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
 		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
-		       main_invoice_deadline, deposit_amount, main_invoice_amount, COALESCE(currency, 'EUR'),
+		       main_invoice_deadline, COALESCE(deposit_amount::TEXT, ''), COALESCE(main_invoice_amount::TEXT, ''), COALESCE(currency, 'EUR'),
 		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
 		FROM events
 		ORDER BY starts_at DESC`)
@@ -536,12 +578,29 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	var events []Event
 	for rows.Next() {
 		var e Event
+		var location sql.NullString
+		var depositAmount string
+		var mainInvoiceAmount string
 		if err := rows.Scan(
-			&e.ID, &e.SeasonID, &e.Name, &e.Location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots,
+			&e.ID, &e.SeasonID, &e.Name, &location, &e.Status, &e.StartsAt, &e.EndsAt, &e.Slots,
 			&e.PublicRegistrationSlug, &e.PublicRegistrationEnabled, &e.RegistrationOpenAt,
-			&e.MainInvoiceDeadline, &e.DepositAmount, &e.MainInvoiceAmount, &e.Currency,
+			&e.MainInvoiceDeadline, &depositAmount, &mainInvoiceAmount, &e.Currency,
 			&e.MinimumDepositCount, &e.CommercialStatus, &e.CreatedAt,
 		); err != nil {
+			log.Printf("listEvents scan failed: %v", err)
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
+			return
+		}
+		if location.Valid {
+			e.Location = location.String
+		}
+		if e.DepositAmount, err = parseOptionalMoney(depositAmount); err != nil {
+			log.Printf("listEvents deposit parse failed: raw=%q err=%v", depositAmount, err)
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
+			return
+		}
+		if e.MainInvoiceAmount, err = parseOptionalMoney(mainInvoiceAmount); err != nil {
+			log.Printf("listEvents main invoice parse failed: raw=%q err=%v", mainInvoiceAmount, err)
 			httpx.Error(w, http.StatusInternalServerError, "failed to parse event")
 			return
 		}
@@ -780,6 +839,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(ctx, created.ID, "event.created")
 	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
@@ -1011,6 +1071,10 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if replaceInnhopps {
+		if err := hydratePreservedInnhoppAircraftTx(ctx, tx, eventID, innhopps); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load existing innhopp aircraft")
+			return
+		}
 		if err := validateInnhoppAircraftAssignments(innhopps, attachedAircraftIDs); err != nil {
 			httpx.Error(w, http.StatusBadRequest, err.Error())
 			return
@@ -1032,6 +1096,7 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(ctx, updated.ID, "event.updated")
 	httpx.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -1052,6 +1117,7 @@ func (h *Handler) deleteEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(r.Context(), eventID, "event.deleted")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1345,6 +1411,7 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(ctx, cloned.ID, "event.copied")
 	httpx.WriteJSON(w, http.StatusCreated, cloned)
 }
 
@@ -1515,6 +1582,8 @@ func (h *Handler) createAccommodation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(r.Context(), eventID, "accommodation.created")
+	h.publishLogisticsIndexUpdate("accommodation.created", "accommodation", acc.ID)
 	httpx.WriteJSON(w, http.StatusCreated, acc)
 }
 
@@ -1657,6 +1726,8 @@ func (h *Handler) updateAccommodation(w http.ResponseWriter, r *http.Request) {
 		log.Printf("route duration recalculation failed (type=Accommodation id=%d): %v", acc.ID, err)
 	}
 
+	h.publishEventUpdate(r.Context(), eventID, "accommodation.updated")
+	h.publishLogisticsIndexUpdate("accommodation.updated", "accommodation", acc.ID)
 	httpx.WriteJSON(w, http.StatusOK, acc)
 }
 
@@ -1682,6 +1753,8 @@ func (h *Handler) deleteAccommodation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(r.Context(), eventID, "accommodation.deleted")
+	h.publishLogisticsIndexUpdate("accommodation.deleted", "accommodation", accID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1799,6 +1872,7 @@ func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(ctx, payload.EventID, "manifest.created")
 	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
@@ -1902,6 +1976,7 @@ func (h *Handler) updateManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventUpdate(ctx, payload.EventID, "manifest.updated")
 	httpx.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -1909,17 +1984,30 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 	row := h.db.QueryRow(ctx, `
 		SELECT id, season_id, name, location, status, starts_at, ends_at, slots,
 		       COALESCE(public_registration_slug, ''), COALESCE(public_registration_enabled, FALSE), registration_open_at,
-		       main_invoice_deadline, deposit_amount, main_invoice_amount, COALESCE(currency, 'EUR'),
+		       main_invoice_deadline, COALESCE(deposit_amount::TEXT, ''), COALESCE(main_invoice_amount::TEXT, ''), COALESCE(currency, 'EUR'),
 		       COALESCE(minimum_deposit_count, 0), COALESCE(commercial_status, 'draft'), created_at
 		FROM events
 		WHERE id = $1`, eventID)
 	var event Event
+	var location sql.NullString
+	var depositAmount string
+	var mainInvoiceAmount string
 	if err := row.Scan(
-		&event.ID, &event.SeasonID, &event.Name, &event.Location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots,
+		&event.ID, &event.SeasonID, &event.Name, &location, &event.Status, &event.StartsAt, &event.EndsAt, &event.Slots,
 		&event.PublicRegistrationSlug, &event.PublicRegistrationEnabled, &event.RegistrationOpenAt,
-		&event.MainInvoiceDeadline, &event.DepositAmount, &event.MainInvoiceAmount, &event.Currency,
+		&event.MainInvoiceDeadline, &depositAmount, &mainInvoiceAmount, &event.Currency,
 		&event.MinimumDepositCount, &event.CommercialStatus, &event.CreatedAt,
 	); err != nil {
+		return Event{}, err
+	}
+	if location.Valid {
+		event.Location = location.String
+	}
+	var err error
+	if event.DepositAmount, err = parseOptionalMoney(depositAmount); err != nil {
+		return Event{}, err
+	}
+	if event.MainInvoiceAmount, err = parseOptionalMoney(mainInvoiceAmount); err != nil {
 		return Event{}, err
 	}
 
@@ -1928,7 +2016,7 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 		return Event{}, err
 	}
 
-	events, err := h.attachEventRelations(ctx, events)
+	events, err = h.attachEventRelations(ctx, events)
 	if err != nil {
 		return Event{}, err
 	}
@@ -1936,6 +2024,18 @@ func (h *Handler) fetchEvent(ctx context.Context, eventID int64) (Event, error) 
 		return Event{}, pgx.ErrNoRows
 	}
 	return events[0], nil
+}
+
+func parseOptionalMoney(raw string) (*float64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
 }
 
 type eventVehicleSnapshot struct {
@@ -2442,7 +2542,7 @@ func (h *Handler) fetchAirfieldsForEvents(ctx context.Context, eventIDs []int64)
 
 func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(),
-		`SELECT id, name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+		`SELECT id, name, pricing_model, COALESCE(rate_currency, ''), capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, COALESCE(notes, ''), created_at, updated_at
          FROM aircraft
          ORDER BY created_at DESC, id DESC`,
 	)
@@ -2479,7 +2579,7 @@ func (h *Handler) listAircraft(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getAircraftByID(ctx context.Context, aircraftID int64) (Aircraft, error) {
 	row := h.db.QueryRow(ctx,
-		`SELECT id, name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, notes, created_at, updated_at
+		`SELECT id, name, pricing_model, COALESCE(rate_currency, ''), capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration, price_per_slot, COALESCE(notes, ''), created_at, updated_at
          FROM aircraft WHERE id = $1`,
 		aircraftID,
 	)
@@ -2544,6 +2644,14 @@ func (h *Handler) createAircraft(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
 		return
 	}
+	affectedEventIDs, err := h.findAffectedEventIDsForAircraft(r.Context(), aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load affected events")
+		return
+	}
+	for _, eventID := range affectedEventIDs {
+		h.publishEventUpdate(r.Context(), eventID, "aircraft.created")
+	}
 	httpx.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -2587,6 +2695,14 @@ func (h *Handler) updateAircraft(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load aircraft")
 		return
 	}
+	affectedEventIDs, err := h.findAffectedEventIDsForAircraft(r.Context(), aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load affected events")
+		return
+	}
+	for _, eventID := range affectedEventIDs {
+		h.publishEventUpdate(r.Context(), eventID, "aircraft.updated")
+	}
 	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -2594,6 +2710,11 @@ func (h *Handler) deleteAircraft(w http.ResponseWriter, r *http.Request) {
 	aircraftID, err := strconv.ParseInt(chi.URLParam(r, "aircraftID"), 10, 64)
 	if err != nil || aircraftID <= 0 {
 		httpx.Error(w, http.StatusBadRequest, "invalid aircraft id")
+		return
+	}
+	affectedEventIDs, err := h.findAffectedEventIDsForAircraft(r.Context(), aircraftID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load affected events")
 		return
 	}
 	var attachedCount int
@@ -2614,14 +2735,17 @@ func (h *Handler) deleteAircraft(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "aircraft not found")
 		return
 	}
+	for _, eventID := range affectedEventIDs {
+		h.publishEventUpdate(r.Context(), eventID, "aircraft.deleted")
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) fetchAircraftForEvents(ctx context.Context, eventIDs []int64) (map[int64][]Aircraft, error) {
 	result := make(map[int64][]Aircraft, len(eventIDs))
 	rows, err := h.db.Query(ctx,
-		`SELECT ea.event_id, a.id, a.name, a.pricing_model, a.rate_currency, a.capacity, a.crew_on_load_count, a.rate_per_minute,
-                a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot, a.notes,
+		`SELECT ea.event_id, a.id, a.name, a.pricing_model, COALESCE(a.rate_currency, ''), a.capacity, a.crew_on_load_count, a.rate_per_minute,
+                a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot, COALESCE(a.notes, ''),
                 ea.sort_order, a.created_at, a.updated_at
          FROM event_aircraft ea
          JOIN aircraft a ON a.id = ea.aircraft_id
@@ -2794,6 +2918,8 @@ func (h *Handler) createAirfield(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishEventIndexUpdate("airfield.created")
+	h.publishLogisticsIndexUpdate("airfield.created", "airfield", a.ID)
 	httpx.WriteJSON(w, http.StatusCreated, a)
 }
 
@@ -2856,10 +2982,24 @@ func (h *Handler) updateAirfield(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Coordinates = strings.TrimSpace(a.Latitude + " " + a.Longitude)
+	affectedEventIDs, err := h.findAffectedEventIDsForAirfield(r.Context(), a.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load affected events")
+		return
+	}
+	if err := h.recalculateInnhoppAirDistancesForAirfield(r.Context(), a.ID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to recalculate innhopp distances")
+		return
+	}
 	if err := logistics.RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Airfield", a.ID); err != nil {
 		log.Printf("route duration recalculation failed (type=Airfield id=%d): %v", a.ID, err)
 	}
+	for _, eventID := range affectedEventIDs {
+		h.publishEventUpdate(r.Context(), eventID, "airfield.updated")
+	}
 
+	h.publishEventIndexUpdate("airfield.updated")
+	h.publishLogisticsIndexUpdate("airfield.updated", "airfield", a.ID)
 	httpx.WriteJSON(w, http.StatusOK, a)
 }
 
@@ -2867,6 +3007,11 @@ func (h *Handler) deleteAirfield(w http.ResponseWriter, r *http.Request) {
 	airfieldID, err := strconv.ParseInt(chi.URLParam(r, "airfieldID"), 10, 64)
 	if err != nil || airfieldID <= 0 {
 		httpx.Error(w, http.StatusBadRequest, "invalid airfield id")
+		return
+	}
+	affectedEventIDs, err := h.findAffectedEventIDsForAirfield(r.Context(), airfieldID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load affected events")
 		return
 	}
 
@@ -2879,7 +3024,12 @@ func (h *Handler) deleteAirfield(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, "airfield not found")
 		return
 	}
+	for _, eventID := range affectedEventIDs {
+		h.publishEventUpdate(r.Context(), eventID, "airfield.deleted")
+	}
 
+	h.publishEventIndexUpdate("airfield.deleted")
+	h.publishLogisticsIndexUpdate("airfield.deleted", "airfield", airfieldID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -3685,6 +3835,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.publishEventUpdate(r.Context(), eventID, "innhopp.created")
 	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
@@ -3742,11 +3893,11 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 		}
 
 		var aircraftID *int64
-		if payload.AircraftID != nil {
-			if *payload.AircraftID <= 0 {
+		if payload.AircraftID.Set && payload.AircraftID.Value != nil {
+			if *payload.AircraftID.Value <= 0 {
 				return nil, errors.New("innhopps[" + strconv.Itoa(i) + "].aircraft_id must be positive")
 			}
-			aircraftID = payload.AircraftID
+			aircraftID = payload.AircraftID.Value
 		}
 
 		var distanceByAir *float64
@@ -3789,6 +3940,7 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 			Name:                  name,
 			Coordinates:           coordinates,
 			AircraftID:            aircraftID,
+			AircraftIDSet:         payload.AircraftID.Set,
 			Elevation:             elevation,
 			TakeoffAirfieldID:     takeoff,
 			LandingAirfieldID:     landing,
@@ -3836,6 +3988,71 @@ func normalizeAircraftPricingModel(raw string) (AircraftPricingModel, error) {
 	default:
 		return "", errors.New("pricing_model must be one of: time, slot")
 	}
+}
+
+func (h *Handler) streamEventIndex(w http.ResponseWriter, r *http.Request) {
+	h.streams.ServeHTTP(w, r, "events:index")
+}
+
+func (h *Handler) streamEvent(w http.ResponseWriter, r *http.Request) {
+	eventID, ok := parseIDParam(w, r, "eventID")
+	if !ok {
+		return
+	}
+	h.streams.ServeHTTP(w, r, realtime.Topic("events", eventID))
+}
+
+func (h *Handler) publishEventIndexUpdate(reason string) {
+	if h.streams == nil {
+		return
+	}
+	h.streams.Publish("events:index", "resource.updated", realtime.UpdatePayload("events", 0, reason))
+}
+
+func (h *Handler) publishLogisticsIndexUpdate(reason string, relatedType string, relatedID int64) {
+	if h.streams == nil {
+		return
+	}
+	h.streams.Publish(
+		"logistics:index",
+		"resource.updated",
+		realtime.RelatedUpdatePayload("logistics", 0, reason, relatedType, relatedID),
+	)
+}
+
+func (h *Handler) publishEventUpdate(ctx context.Context, eventID int64, reason string) {
+	if h.streams == nil || eventID <= 0 {
+		return
+	}
+	h.publishEventIndexUpdate(reason)
+	h.streams.Publish(
+		realtime.Topic("events", eventID),
+		"resource.updated",
+		realtime.UpdatePayload("events", eventID, reason),
+	)
+
+	budgetID, err := h.lookupBudgetIDByEventID(ctx, eventID)
+	if err != nil || budgetID <= 0 {
+		return
+	}
+
+	h.streams.Publish(
+		realtime.Topic("budgets", budgetID),
+		"resource.updated",
+		realtime.RelatedUpdatePayload("budgets", budgetID, reason, "event", eventID),
+	)
+}
+
+func (h *Handler) lookupBudgetIDByEventID(ctx context.Context, eventID int64) (int64, error) {
+	var budgetID int64
+	err := h.db.QueryRow(ctx, `SELECT id FROM event_budgets WHERE event_id = $1`, eventID).Scan(&budgetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return budgetID, nil
 }
 
 func normalizeAircraftPayloads(raw []aircraftPayload) ([]aircraftInput, error) {
@@ -4133,6 +4350,52 @@ func validateInnhoppAircraftAssignments(innhopps []innhoppInput, attachedAircraf
 	return nil
 }
 
+func hydratePreservedInnhoppAircraftTx(ctx context.Context, tx pgx.Tx, eventID int64, innhopps []innhoppInput) error {
+	ids := make([]int64, 0, len(innhopps))
+	for _, innhopp := range innhopps {
+		if innhopp.ID != nil && !innhopp.AircraftIDSet {
+			ids = append(ids, *innhopp.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `SELECT id, aircraft_id FROM event_innhopps WHERE event_id = $1 AND id = ANY($2)`, eventID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	existing := make(map[int64]*int64, len(ids))
+	for rows.Next() {
+		var innhoppID int64
+		var aircraftID sql.NullInt64
+		if err := rows.Scan(&innhoppID, &aircraftID); err != nil {
+			return err
+		}
+		if aircraftID.Valid {
+			val := aircraftID.Int64
+			existing[innhoppID] = &val
+		} else {
+			existing[innhoppID] = nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for i := range innhopps {
+		if innhopps[i].ID == nil || innhopps[i].AircraftIDSet {
+			continue
+		}
+		if preserved, ok := existing[*innhopps[i].ID]; ok {
+			innhopps[i].AircraftID = preserved
+		}
+	}
+	return nil
+}
+
 func ensureNoDetachedAircraftInUseTx(ctx context.Context, tx pgx.Tx, eventID int64, allowedAircraftIDs map[int64]struct{}) error {
 	rows, err := tx.Query(ctx, `SELECT id, aircraft_id FROM event_innhopps WHERE event_id = $1 AND aircraft_id IS NOT NULL`, eventID)
 	if err != nil {
@@ -4267,3 +4530,214 @@ func splitCoords(raw string) (string, string, error) {
 }
 
 // NOTE: Coordinate parsing/validation removed per request; values are stored as provided (split into latitude/longitude).
+
+type coordinatePair struct {
+	lat float64
+	lng float64
+}
+
+func parseCoordinatePair(raw string) (*coordinatePair, error) {
+	latRaw, lngRaw, err := splitCoords(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, err
+	}
+	lat, err := strconv.ParseFloat(strings.TrimSpace(latRaw), 64)
+	if err != nil {
+		return nil, err
+	}
+	lng, err := strconv.ParseFloat(strings.TrimSpace(lngRaw), 64)
+	if err != nil {
+		return nil, err
+	}
+	return &coordinatePair{lat: lat, lng: lng}, nil
+}
+
+func autoDistanceKilometers(origin, destination string) *float64 {
+	from, err := parseCoordinatePair(origin)
+	if err != nil {
+		return nil
+	}
+	to, err := parseCoordinatePair(destination)
+	if err != nil {
+		return nil
+	}
+
+	const earthRadiusKm = 6371.0
+	latDelta := (to.lat - from.lat) * math.Pi / 180
+	lngDelta := (to.lng - from.lng) * math.Pi / 180
+	lat1 := from.lat * math.Pi / 180
+	lat2 := to.lat * math.Pi / 180
+	sinLat := math.Sin(latDelta / 2)
+	sinLng := math.Sin(lngDelta / 2)
+	a := sinLat*sinLat + math.Cos(lat1)*math.Cos(lat2)*sinLng*sinLng
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	distance := earthRadiusKm * c
+
+	rounded := 0.0
+	if distance >= 1 {
+		rounded = math.Ceil(distance)
+	}
+	return &rounded
+}
+
+func (h *Handler) recalculateInnhoppAirDistancesForAirfield(ctx context.Context, airfieldID int64) error {
+	rows, err := h.db.Query(
+		ctx,
+		`SELECT i.id, i.coordinates, ta.latitude, ta.longitude, la.latitude, la.longitude
+         FROM event_innhopps i
+         LEFT JOIN airfields ta ON ta.id = i.takeoff_airfield_id
+         LEFT JOIN airfields la ON la.id = i.landing_airfield_id
+         WHERE i.takeoff_airfield_id = $1 OR i.landing_airfield_id = $1`,
+		airfieldID,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pendingUpdate struct {
+		id               int64
+		coordinates      string
+		takeoffLatitude  sql.NullString
+		takeoffLongitude sql.NullString
+		landingLatitude  sql.NullString
+		landingLongitude sql.NullString
+	}
+
+	var pending []pendingUpdate
+	for rows.Next() {
+		var item pendingUpdate
+		if err := rows.Scan(
+			&item.id,
+			&item.coordinates,
+			&item.takeoffLatitude,
+			&item.takeoffLongitude,
+			&item.landingLatitude,
+			&item.landingLongitude,
+		); err != nil {
+			return err
+		}
+		pending = append(pending, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, item := range pending {
+		var takeoffDistance any
+		if item.takeoffLatitude.Valid && item.takeoffLongitude.Valid {
+			if computed := autoDistanceKilometers(
+				strings.TrimSpace(item.takeoffLatitude.String)+" "+strings.TrimSpace(item.takeoffLongitude.String),
+				item.coordinates,
+			); computed != nil {
+				takeoffDistance = *computed
+			}
+		}
+
+		var landingDistance any
+		if item.landingLatitude.Valid && item.landingLongitude.Valid {
+			if computed := autoDistanceKilometers(
+				item.coordinates,
+				strings.TrimSpace(item.landingLatitude.String)+" "+strings.TrimSpace(item.landingLongitude.String),
+			); computed != nil {
+				landingDistance = *computed
+			}
+		}
+
+		if _, err := h.db.Exec(
+			ctx,
+			`UPDATE event_innhopps
+             SET distance_by_air = $1, landing_distance_by_air = $2
+             WHERE id = $3`,
+			takeoffDistance,
+			landingDistance,
+			item.id,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (h *Handler) findAffectedEventIDsForAirfield(ctx context.Context, airfieldID int64) ([]int64, error) {
+	rows, err := h.db.Query(
+		ctx,
+		`SELECT DISTINCT event_id
+         FROM (
+           SELECT ea.event_id
+           FROM event_airfields ea
+           WHERE ea.airfield_id = $1
+           UNION
+           SELECT i.event_id
+           FROM event_innhopps i
+           WHERE i.takeoff_airfield_id = $1 OR i.landing_airfield_id = $1
+           UNION
+           SELECT t.event_id
+           FROM logistics_transports t
+           WHERE t.event_id IS NOT NULL
+             AND ((t.pickup_location_type = 'Airfield' AND t.pickup_location_id = $1)
+               OR (t.destination_type = 'Airfield' AND t.destination_id = $1))
+           UNION
+           SELECT gc.event_id
+           FROM logistics_ground_crews gc
+           WHERE gc.event_id IS NOT NULL
+             AND ((gc.pickup_location_type = 'Airfield' AND gc.pickup_location_id = $1)
+               OR (gc.destination_type = 'Airfield' AND gc.destination_id = $1))
+           UNION
+           SELECT m.event_id
+           FROM logistics_meals m
+           WHERE m.event_id IS NOT NULL AND m.location_type = 'Airfield' AND m.location_id = $1
+         ) affected
+         WHERE event_id IS NOT NULL
+         ORDER BY event_id`,
+		airfieldID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var eventIDs []int64
+	for rows.Next() {
+		var eventID int64
+		if err := rows.Scan(&eventID); err != nil {
+			return nil, err
+		}
+		if eventID > 0 {
+			eventIDs = append(eventIDs, eventID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return eventIDs, nil
+}
+
+func (h *Handler) findAffectedEventIDsForAircraft(ctx context.Context, aircraftID int64) ([]int64, error) {
+	rows, err := h.db.Query(
+		ctx,
+		`SELECT DISTINCT event_id
+         FROM event_aircraft
+         WHERE aircraft_id = $1
+         ORDER BY event_id`,
+		aircraftID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var eventIDs []int64
+	for rows.Next() {
+		var eventID int64
+		if err := rows.Scan(&eventID); err != nil {
+			return nil, err
+		}
+		eventIDs = append(eventIDs, eventID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return eventIDs, nil
+}

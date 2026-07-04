@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { listSeasons, listEvents, Season, Event } from '../api/events';
 import { listOthers, OtherLogistic } from '../api/logistics';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return 'Unscheduled';
@@ -27,28 +28,38 @@ const LogisticsOthersPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [seasonResp, eventResp, otherResp] = await Promise.all([listSeasons(), listEvents(), listOthers()]);
-        if (cancelled) return;
-        setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
-        setOthers(Array.isArray(otherResp) ? otherResp : []);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load logistics');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [seasonResp, eventResp, otherResp] = await Promise.all([listSeasons(), listEvents(), listOthers()]);
+      setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
+      setEvents(Array.isArray(eventResp) ? eventResp : []);
+      setOthers(Array.isArray(otherResp) ? otherResp : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load logistics');
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      void load();
+    }
+  });
 
   const filteredEvents = useMemo(() => {
     if (!selectedSeason) return events;

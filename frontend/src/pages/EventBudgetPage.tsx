@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, MouseEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Fragment, MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Budget,
@@ -36,6 +36,7 @@ import {
   normalizeBudgetCurrency
 } from '../utils/budgetCurrency';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { useResourceStream } from '../hooks/useResourceStream';
 import {
   CostSplitMode,
   isApproveDisabled,
@@ -239,6 +240,7 @@ const EventBudgetPage = () => {
     return () => document.removeEventListener('mousedown', onDocumentMouseDown);
   }, [openScenarioMenuFor]);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [newLineItem, setNewLineItem] = useState({
     section_id: '',
     name: '',
@@ -409,7 +411,7 @@ const EventBudgetPage = () => {
   };
   const budgetMethod = Number(parameters[BUDGET_METHOD_KEY] ?? BUDGET_METHOD_HYBRID);
 
-  const loadBudgetData = async (targetEventID: number) => {
+  const loadBudgetData = useCallback(async (targetEventID: number) => {
     setLoading(true);
     setMessage(null);
     try {
@@ -474,7 +476,7 @@ const EventBudgetPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -521,7 +523,42 @@ const EventBudgetPage = () => {
       return;
     }
     void loadBudgetData(activeEventID);
-  }, [activeEventID]);
+  }, [activeEventID, hasValidEventID, loadBudgetData]);
+
+  const hasPendingEdits =
+    creating ||
+    savingParameters ||
+    savingLineItem ||
+    addingLineItem ||
+    editingLineItemID !== null ||
+    submittingReview ||
+    approvingBudget ||
+    copying ||
+    deleting;
+
+  useResourceStream({
+    path: hasValidEventID ? `/events/${activeEventID}/stream` : null,
+    onMessage: () => {
+      if (!hasValidEventID) return;
+      if (hasPendingEdits) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void loadBudgetData(activeEventID);
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingEdits || !hasValidEventID) return;
+    setPendingLiveRefresh(false);
+    void loadBudgetData(activeEventID);
+  }, [activeEventID, hasPendingEdits, hasValidEventID, loadBudgetData, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    if (!hasValidEventID) return;
+    setPendingLiveRefresh(false);
+    void loadBudgetData(activeEventID);
+  };
 
   useEffect(() => {
     if (!budget) return;
@@ -1492,6 +1529,16 @@ const EventBudgetPage = () => {
       </header>
 
       {message ? <p className="error-text">{message}</p> : null}
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
       {loadingFilters ? <p>Loading…</p> : null}
 
       {!routeHasEventID ? (
@@ -2280,6 +2327,7 @@ const EventBudgetPage = () => {
                               innhoppCoordinates: innhopp.coordinates || null,
                               innhoppTakeoffName: takeoff?.name || null,
                               innhoppLandingName: landingName,
+                              innhoppAircraftName: aircraft?.name || null,
                               innhoppDistanceByAir: innhopp.distance_by_air ?? null,
                               innhoppAircraftSpeedKmh: aircraft?.cruising_speed_kmh ?? null,
                               innhoppMinimumLoadDuration: aircraft?.minimum_load_duration ?? null,
@@ -2291,7 +2339,6 @@ const EventBudgetPage = () => {
                               innhoppRisk: innhopp.risk_assessment || null,
                               innhoppMinimumRequirements: innhopp.minimum_requirements || null,
                               innhoppRescueBoat: innhopp.rescue_boat ?? null,
-                              innhoppLandOwnerPermission: innhopp.land_owner_permission ?? null,
                               routeDurationLabel: formatDurationMinutesForInnhopp(minutes),
                               scheduledAt: innhopp.scheduled_at
                             });

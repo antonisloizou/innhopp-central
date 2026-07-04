@@ -21,14 +21,20 @@ import (
 
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db      *pgxpool.Pool
+	streams *realtime.Hub
 }
 
-func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
+	var streamHub *realtime.Hub
+	if len(streams) > 0 {
+		streamHub = streams[0]
+	}
+	return &Handler{db: db, streams: streamHub}
 }
 
 type Budget struct {
@@ -170,6 +176,7 @@ const autoEstimateWarningSuffix = ":estimate-generated"
 func (h *Handler) EventBudgetRoutes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/", h.getBudgetByEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/stream", h.streamBudgetByEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageBudget)).Post("/", h.createBudgetForEvent)
 	return r
 }
@@ -178,6 +185,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/events/{eventID}", h.getBudgetByEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageBudget)).Post("/events/{eventID}", h.createBudgetForEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/{budgetID}/stream", h.streamBudget)
 	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/{budgetID}", h.getBudget)
 	r.With(enforcer.Authorize(rbac.PermissionManageBudget)).Put("/{budgetID}", h.updateBudget)
 	r.With(enforcer.Authorize(rbac.PermissionViewBudget)).Get("/{budgetID}/sections", h.listSections)
@@ -219,6 +227,76 @@ func normalizeCurrency(v string) string {
 
 func assumptionCurrencyKey(assumptionKey string) string {
 	return assumptionKey + "_currency"
+}
+
+func (h *Handler) streamBudget(w http.ResponseWriter, r *http.Request) {
+	budgetID, ok := parseIDParam(w, r, "budgetID")
+	if !ok {
+		return
+	}
+	h.streams.ServeHTTP(w, r, realtime.Topic("budgets", budgetID))
+}
+
+func (h *Handler) streamBudgetByEvent(w http.ResponseWriter, r *http.Request) {
+	eventID, ok := parseIDParam(w, r, "eventID")
+	if !ok {
+		return
+	}
+	h.streams.ServeHTTP(w, r, realtime.Topic("events", eventID))
+}
+
+func (h *Handler) publishBudgetUpdate(ctx context.Context, budgetID int64, reason string) {
+	if h.streams == nil || budgetID <= 0 {
+		return
+	}
+
+	h.streams.Publish(
+		realtime.Topic("budgets", budgetID),
+		"resource.updated",
+		realtime.UpdatePayload("budgets", budgetID, reason),
+	)
+
+	eventID, err := h.lookupEventIDByBudgetID(ctx, budgetID)
+	if err != nil || eventID <= 0 {
+		return
+	}
+
+	h.streams.Publish(
+		realtime.Topic("events", eventID),
+		"resource.updated",
+		realtime.RelatedUpdatePayload("events", eventID, reason, "budget", budgetID),
+	)
+}
+
+func (h *Handler) publishBudgetUpdateForEvent(ctx context.Context, budgetID int64, eventID int64, reason string) {
+	if h.streams == nil || budgetID <= 0 {
+		return
+	}
+
+	h.streams.Publish(
+		realtime.Topic("budgets", budgetID),
+		"resource.updated",
+		realtime.UpdatePayload("budgets", budgetID, reason),
+	)
+	if eventID > 0 {
+		h.streams.Publish(
+			realtime.Topic("events", eventID),
+			"resource.updated",
+			realtime.RelatedUpdatePayload("events", eventID, reason, "budget", budgetID),
+		)
+	}
+}
+
+func (h *Handler) lookupEventIDByBudgetID(ctx context.Context, budgetID int64) (int64, error) {
+	var eventID int64
+	err := h.db.QueryRow(ctx, `SELECT event_id FROM event_budgets WHERE id = $1`, budgetID).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return eventID, nil
 }
 
 func appendUniqueCurrency(codes []string, code string) []string {
@@ -785,6 +863,7 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishBudgetUpdateForEvent(r.Context(), budget.ID, eventID, "budget.created")
 	httpx.WriteJSON(w, http.StatusCreated, budget)
 }
 
@@ -905,6 +984,7 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "budget.updated")
 	httpx.WriteJSON(w, http.StatusOK, updated)
 }
 
@@ -989,6 +1069,7 @@ func (h *Handler) reorderSections(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "sections.reordered")
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -1113,6 +1194,7 @@ func (h *Handler) createLineItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item.LineTotal = roundMoney(item.Quantity * item.UnitCost)
+	h.publishBudgetUpdate(r.Context(), budgetID, "line_item.created")
 	httpx.WriteJSON(w, http.StatusCreated, item)
 }
 
@@ -1201,6 +1283,7 @@ func (h *Handler) updateLineItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item.LineTotal = roundMoney(item.Quantity * item.UnitCost)
+	h.publishBudgetUpdate(r.Context(), budgetID, "line_item.updated")
 	httpx.WriteJSON(w, http.StatusOK, item)
 }
 
@@ -1226,6 +1309,7 @@ func (h *Handler) deleteLineItem(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "line_item.deleted")
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -1332,6 +1416,7 @@ func (h *Handler) updateAssumptions(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load assumptions")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "assumptions.updated")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"values":              updated,
 		"parameters":          updated,
@@ -1497,6 +1582,7 @@ func (h *Handler) updateCurrencies(w http.ResponseWriter, r *http.Request) {
 		rates[row.CurrencyCode] = rateToBase
 	}
 	rates[baseCurrency] = 1
+	h.publishBudgetUpdate(r.Context(), budgetID, "currencies.updated")
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"base_currency": budget.BaseCurrency,
 		"currencies":    codes,
@@ -1716,6 +1802,7 @@ func (h *Handler) createScenario(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "scenario.created")
 	httpx.WriteJSON(w, http.StatusCreated, created)
 }
 
@@ -1741,6 +1828,7 @@ func (h *Handler) deleteScenario(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync aircraft line items")
 		return
 	}
+	h.publishBudgetUpdate(r.Context(), budgetID, "scenario.deleted")
 	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

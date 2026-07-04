@@ -71,6 +71,7 @@ import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPage
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -78,7 +79,7 @@ type InnhoppFormRow = {
   id?: number;
   sequence: number;
   name: string;
-  aircraft_id?: number;
+  aircraft_id?: number | null;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -381,6 +382,7 @@ const EventDetailPage = () => {
   const [copying, setCopying] = useState(false);
   const [saved, setSaved] = useState(false);
   const [lastSavedSignature, setLastSavedSignature] = useState('');
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const saveButtonClass = 'primary';
   const saveButtonLabel = saving ? 'Saving…' : 'Save';
   const buildSignature = useCallback(
@@ -407,6 +409,82 @@ const currentSignature = useMemo(
   () => buildSignature(eventForm, participantIds, airfieldIds, innhopps, attachedAircraft),
   [buildSignature, eventForm, participantIds, airfieldIds, innhopps, attachedAircraft]
 );
+  const hasUnsavedChanges = currentSignature !== lastSavedSignature;
+  const loadEventDetailData = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (!eventId) return;
+
+      const targetEventID = Number(eventId);
+      const showLoading = options?.showLoading ?? true;
+
+      if (showLoading) {
+        setLoading(true);
+      }
+      setError(null);
+
+      try {
+        const [event, eventRegistrations, accommodationData, transportData, groundCrewData, otherData, mealData] =
+          await Promise.all([
+            getEvent(targetEventID),
+            listEventRegistrations(targetEventID),
+            listAccommodations(targetEventID),
+            listTransports(),
+            listGroundCrews(),
+            listOthers(),
+            listMeals()
+          ]);
+
+        const normalizedInnhopps = normalizeInnhopps(event);
+        const normalizedAircraft = Array.isArray(event.aircraft) ? event.aircraft.map(toAircraftFormRow) : [];
+        const normalizedParticipants = Array.isArray(event.participant_ids) ? event.participant_ids : [];
+        const normalizedAirfields = Array.isArray(event.airfield_ids) ? event.airfield_ids : [];
+        const nextForm = {
+          season_id: String(event.season_id),
+          name: event.name,
+          location: event.location || '',
+          slots: event.slots ? String(event.slots) : '',
+          status: event.status,
+          starts_at: toInputDate(event.starts_at),
+          ends_at: toInputDate(event.ends_at),
+          public_registration_slug: event.public_registration_slug || '',
+          public_registration_enabled: !!event.public_registration_enabled,
+          registration_open_at: toInputDateTime(event.registration_open_at),
+          main_invoice_deadline: toInputDateTime(event.main_invoice_deadline),
+          deposit_amount: typeof event.deposit_amount === 'number' ? String(event.deposit_amount) : '',
+          main_invoice_amount: typeof event.main_invoice_amount === 'number' ? String(event.main_invoice_amount) : '',
+          currency: event.currency || 'EUR',
+          minimum_deposit_count:
+            typeof event.minimum_deposit_count === 'number' && event.minimum_deposit_count > 0
+              ? String(event.minimum_deposit_count)
+              : '',
+          commercial_status: event.commercial_status || 'draft'
+        };
+
+        setEventData(event);
+        setRegistrations(Array.isArray(eventRegistrations) ? eventRegistrations : []);
+        setInnhopps(normalizedInnhopps);
+        setAttachedAircraft(normalizedAircraft);
+        setParticipantIds(normalizedParticipants);
+        setAirfieldIds(normalizedAirfields);
+        setEventForm(nextForm);
+        setAccommodations(Array.isArray(accommodationData) ? accommodationData : []);
+        setTransports(Array.isArray(transportData) ? transportData.filter((t) => t.event_id === targetEventID) : []);
+        setGroundCrews(Array.isArray(groundCrewData) ? groundCrewData.filter((g) => g.event_id === targetEventID) : []);
+        setOthers(Array.isArray(otherData) ? otherData.filter((o) => o.event_id === targetEventID) : []);
+        setMeals(Array.isArray(mealData) ? mealData.filter((m) => m.event_id === targetEventID) : []);
+        setLastSavedSignature(
+          buildSignature(nextForm, normalizedParticipants, normalizedAirfields, normalizedInnhopps, normalizedAircraft)
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load event');
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        }
+      }
+    },
+    [buildSignature, eventId]
+  );
   const publicRegistrationUrl = useMemo(() => {
     const slug = eventForm.public_registration_slug.trim().toLowerCase();
     if (!slug || typeof window === 'undefined') return '';
@@ -879,114 +957,40 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      if (!eventId) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const [event, eventRegistrations] = await Promise.all([
-          getEvent(Number(eventId)),
-          listEventRegistrations(Number(eventId))
-        ]);
-        if (cancelled) return;
-        setEventData(event);
-        setRegistrations(Array.isArray(eventRegistrations) ? eventRegistrations : []);
-        setInnhopps(normalizeInnhopps(event));
-        setAttachedAircraft(Array.isArray(event.aircraft) ? event.aircraft.map(toAircraftFormRow) : []);
-        setParticipantIds(Array.isArray(event.participant_ids) ? event.participant_ids : []);
-        setAirfieldIds(Array.isArray(event.airfield_ids) ? event.airfield_ids : []);
-        setEventForm({
-          season_id: String(event.season_id),
-          name: event.name,
-          location: event.location || '',
-          slots: event.slots ? String(event.slots) : '',
-          status: event.status,
-          starts_at: toInputDate(event.starts_at),
-          ends_at: toInputDate(event.ends_at),
-          public_registration_slug: event.public_registration_slug || '',
-          public_registration_enabled: !!event.public_registration_enabled,
-          registration_open_at: toInputDateTime(event.registration_open_at),
-          main_invoice_deadline: toInputDateTime(event.main_invoice_deadline),
-          deposit_amount:
-            typeof event.deposit_amount === 'number' ? String(event.deposit_amount) : '',
-          main_invoice_amount:
-            typeof event.main_invoice_amount === 'number' ? String(event.main_invoice_amount) : '',
-          currency: event.currency || 'EUR',
-          minimum_deposit_count:
-            typeof event.minimum_deposit_count === 'number' && event.minimum_deposit_count > 0
-              ? String(event.minimum_deposit_count)
-              : '',
-          commercial_status: event.commercial_status || 'draft'
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load event');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
+      await loadEventDetailData();
     };
-    load();
+    if (!cancelled) {
+      void load();
+    }
     return () => {
       cancelled = true;
     };
-  }, [eventId]);
+  }, [loadEventDetailData]);
+
+  const hasPendingLocalChanges =
+    saving || addingParticipant || addingStaff || addingAirfield || deleting || copying || hasUnsavedChanges;
+
+  useResourceStream({
+    path: eventId ? `/events/${eventId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void loadEventDetailData({ showLoading: false });
+    }
+  });
 
   useEffect(() => {
-    let cancelled = false;
-    const loadAccommodations = async () => {
-      if (!eventId) return;
-      try {
-        const data = await listAccommodations(Number(eventId));
-        if (!cancelled) {
-          setAccommodations(Array.isArray(data) ? data : []);
-        }
-      } catch {
-        if (!cancelled) setAccommodations([]);
-      }
-    };
-    loadAccommodations();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void loadEventDetailData({ showLoading: false });
+  }, [hasPendingLocalChanges, loadEventDetailData, pendingLiveRefresh]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadTransportsAndOthers = async () => {
-      if (!eventId) return;
-      try {
-        const [transportData, groundCrewData, otherData, mealData] = await Promise.all([listTransports(), listGroundCrews(), listOthers(), listMeals()]);
-        if (cancelled) return;
-        setTransports(
-          Array.isArray(transportData)
-            ? transportData.filter((t) => t.event_id === Number(eventId))
-            : []
-        );
-        setGroundCrews(
-          Array.isArray(groundCrewData)
-            ? groundCrewData.filter((g) => g.event_id === Number(eventId))
-            : []
-        );
-        setOthers(
-          Array.isArray(otherData) ? otherData.filter((o) => o.event_id === Number(eventId)) : []
-        );
-        setMeals(Array.isArray(mealData) ? mealData.filter((m) => m.event_id === Number(eventId)) : []);
-      } catch {
-        if (!cancelled) {
-          setTransports([]);
-          setGroundCrews([]);
-          setOthers([]);
-          setMeals([]);
-        }
-      }
-    };
-    loadTransportsAndOthers();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void loadEventDetailData({ showLoading: false });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1530,7 +1534,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     );
     if (removed?.id) {
       setInnhopps((prev) =>
-        prev.map((row) => (row.aircraft_id === removed.id ? { ...row, aircraft_id: undefined } : row))
+        prev.map((row) => (row.aircraft_id === removed.id ? { ...row, aircraft_id: null } : row))
       );
     }
   };
@@ -1834,6 +1838,18 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           }}
         />
       </header>
+
+      {message ? <p className="error-text">{message}</p> : null}
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <article className="card">
         <header
@@ -2602,7 +2618,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                               const next = [...prev];
                               next[draftIndex] = {
                                 ...next[draftIndex],
-                                aircraft_id: e.target.value ? Number(e.target.value) : undefined
+                                aircraft_id: e.target.value ? Number(e.target.value) : null
                               };
                               return next;
                             })

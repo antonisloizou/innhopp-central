@@ -174,19 +174,19 @@ export const createSeason = (payload: CreateSeasonPayload) =>
 export const deleteSeason = (id: number) =>
   apiRequest<void>(`/events/seasons/${id}`, { method: 'DELETE' });
 
-export const listEvents = () => apiRequest<Event[]>('/events/events');
+export const listEvents = () => apiRequest<Event[]>('/events');
 
 export const createEvent = (payload: CreateEventPayload) =>
-  apiRequest<Event>('/events/events', { method: 'POST', body: JSON.stringify(payload) });
+  apiRequest<Event>('/events', { method: 'POST', body: JSON.stringify(payload) });
 
-export const getEvent = (id: number) => apiRequest<Event>(`/events/events/${id}`);
+export const getEvent = (id: number) => apiRequest<Event>(`/events/${id}`);
 export const copyEvent = (id: number) =>
-  apiRequest<Event>(`/events/events/${id}/copy`, { method: 'POST' });
+  apiRequest<Event>(`/events/${id}/copy`, { method: 'POST' });
 export const deleteEvent = (id: number) =>
-  apiRequest<void>(`/events/events/${id}`, { method: 'DELETE' });
+  apiRequest<void>(`/events/${id}`, { method: 'DELETE' });
 
 export const listAccommodations = (eventId: number) =>
-  apiRequest<Accommodation[]>(`/events/events/${eventId}/accommodations`);
+  apiRequest<Accommodation[]>(`/events/${eventId}/accommodations`);
 export const listAllAccommodations = () => apiRequest<Accommodation[]>(`/events/accommodations`);
 
 export type CreateAccommodationPayload = {
@@ -200,27 +200,27 @@ export type CreateAccommodationPayload = {
 };
 
 export const createAccommodation = (eventId: number, payload: CreateAccommodationPayload) =>
-  apiRequest<Accommodation>(`/events/events/${eventId}/accommodations`, {
+  apiRequest<Accommodation>(`/events/${eventId}/accommodations`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
 
 export const getAccommodation = (eventId: number, accId: number) =>
-  apiRequest<Accommodation>(`/events/events/${eventId}/accommodations/${accId}`);
+  apiRequest<Accommodation>(`/events/${eventId}/accommodations/${accId}`);
 
 export const updateAccommodation = (eventId: number, accId: number, payload: CreateAccommodationPayload) =>
-  apiRequest<Accommodation>(`/events/events/${eventId}/accommodations/${accId}`, {
+  apiRequest<Accommodation>(`/events/${eventId}/accommodations/${accId}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
   });
 
 export const deleteAccommodation = (eventId: number, accId: number) =>
-  apiRequest<void>(`/events/events/${eventId}/accommodations/${accId}`, { method: 'DELETE' });
+  apiRequest<void>(`/events/${eventId}/accommodations/${accId}`, { method: 'DELETE' });
 
 export interface InnhoppInput {
   sequence?: number;
   name: string;
-  aircraft_id?: number;
+  aircraft_id?: number | null;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -273,7 +273,7 @@ export interface AircraftInput {
 export interface UpdateInnhoppPayload {
   sequence?: number;
   name: string;
-  aircraft_id?: number;
+  aircraft_id?: number | null;
   coordinates?: string;
   elevation?: number;
   takeoff_airfield_id?: number;
@@ -315,12 +315,12 @@ export const deleteAircraft = (id: number) =>
   apiRequest<void>(`/events/aircraft/${id}`, { method: 'DELETE' });
 
 export const updateEvent = (id: number, payload: UpdateEventPayload) =>
-  apiRequest<Event>(`/events/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
+  apiRequest<Event>(`/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 
 export const getInnhopp = (id: number) => apiRequest<Innhopp>(`/innhopps/${id}`);
 
 export const createInnhopp = (eventId: number, payload: InnhoppInput) =>
-  apiRequest<Innhopp>(`/events/events/${eventId}/innhopps`, {
+  apiRequest<Innhopp>(`/events/${eventId}/innhopps`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });

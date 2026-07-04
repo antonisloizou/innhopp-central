@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
@@ -11,6 +11,7 @@ import {
 import { fromEventLocalPickerDate, toEventLocalPickerDate } from '../utils/eventDate';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import DetailCostCard from '../components/DetailCostCard';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const AccommodationDetailPage = () => {
   const { eventId, accommodationId } = useParams();
@@ -28,44 +29,65 @@ const AccommodationDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const saveButtonClass = 'primary';
   const saveButtonLabel = submitting ? 'Saving…' : 'Save';
   const missingCoordinates = !form.coordinates.trim();
   const missingName = !form.name.trim();
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
+  const load = useCallback(async () => {
+    if (!eventId || !accommodationId) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const acc = await getAccommodation(Number(eventId), Number(accommodationId));
+      setForm({
+        name: acc.name,
+        capacity: String(acc.capacity),
+        coordinates: acc.coordinates || '',
+        booked: !!acc.booked,
+        check_in_at: acc.check_in_at || '',
+        check_out_at: acc.check_out_at || '',
+        notes: acc.notes || ''
+      });
+      setSaved(false);
+      setIsDirty(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to load accommodation');
+    } finally {
+      setLoading(false);
+    }
+  }, [accommodationId, eventId]);
+
   useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!eventId || !accommodationId) return;
-      setLoading(true);
-      setMessage(null);
-      try {
-        const acc = await getAccommodation(Number(eventId), Number(accommodationId));
-        if (cancelled) return;
-        setForm({
-          name: acc.name,
-          capacity: String(acc.capacity),
-          coordinates: acc.coordinates || '',
-          booked: !!acc.booked,
-          check_in_at: acc.check_in_at || '',
-          check_out_at: acc.check_out_at || '',
-          notes: acc.notes || ''
-        });
-        setSaved(false);
-      } catch (err) {
-        if (!cancelled) {
-          setMessage(err instanceof Error ? err.message : 'Failed to load accommodation');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+    void load();
+  }, [load]);
+
+  const hasPendingLocalChanges = isDirty || submitting;
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
       }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId, accommodationId]);
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -83,6 +105,7 @@ const AccommodationDetailPage = () => {
         notes: form.notes.trim() || undefined
       });
       setSaved(true);
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update accommodation');
     } finally {
@@ -104,6 +127,7 @@ const AccommodationDetailPage = () => {
   if (loading) return <p className="muted">Loading accommodation…</p>;
 
   const markDirty = () => {
+    setIsDirty(true);
     if (saved) setSaved(false);
   };
 
@@ -163,6 +187,16 @@ const AccommodationDetailPage = () => {
           </button>
         </div>
       </header>
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className={`form-field ${missingName ? 'field-missing' : ''}`}>

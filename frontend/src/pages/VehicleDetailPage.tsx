@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   getEventVehicle,
@@ -9,6 +9,7 @@ import {
 } from '../api/logistics';
 import { Event, listEvents } from '../api/events';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const VehicleDetailPage = () => {
   const { vehicleId } = useParams();
@@ -27,41 +28,62 @@ const VehicleDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!vehicleId) return;
-      setLoading(true);
-      setMessage(null);
-      try {
-        const [vehicle, eventList] = await Promise.all([
-          getEventVehicle(Number(vehicleId)),
-          listEvents()
-        ]);
-        if (cancelled) return;
-        setEvents(Array.isArray(eventList) ? eventList : []);
-        setForm({
-          event_id: String(vehicle.event_id),
-          name: vehicle.name,
-          driver: vehicle.driver || '',
-          passenger_capacity: String(vehicle.passenger_capacity),
-          notes: vehicle.notes || ''
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setMessage(err instanceof Error ? err.message : 'Failed to load vehicle');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    if (!vehicleId) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const [vehicle, eventList] = await Promise.all([
+        getEventVehicle(Number(vehicleId)),
+        listEvents()
+      ]);
+      setEvents(Array.isArray(eventList) ? eventList : []);
+      setForm({
+        event_id: String(vehicle.event_id),
+        name: vehicle.name,
+        driver: vehicle.driver || '',
+        passenger_capacity: String(vehicle.passenger_capacity),
+        notes: vehicle.notes || ''
+      });
+      setIsDirty(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to load vehicle');
+    } finally {
+      setLoading(false);
+    }
   }, [vehicleId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const hasPendingLocalChanges = isDirty || submitting;
+
+  useResourceStream({
+    path: '/logistics/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -83,6 +105,7 @@ const VehicleDetailPage = () => {
         passenger_capacity: String(payload.passenger_capacity),
         notes: payload.notes || ''
       });
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update vehicle');
     } finally {
@@ -152,13 +175,27 @@ const VehicleDetailPage = () => {
         </div>
       </header>
 
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className="form-field">
             <span>Event</span>
             <select
               value={form.event_id}
-              onChange={(e) => setForm((prev) => ({ ...prev, event_id: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, event_id: e.target.value }));
+              }}
               required
             >
               <option value="">Select event</option>
@@ -174,7 +211,10 @@ const VehicleDetailPage = () => {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+              }}
               required
             />
           </label>
@@ -183,7 +223,10 @@ const VehicleDetailPage = () => {
             <input
               type="text"
               value={form.driver}
-              onChange={(e) => setForm((prev) => ({ ...prev, driver: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, driver: e.target.value }));
+              }}
             />
           </label>
           <label className="form-field">
@@ -192,7 +235,10 @@ const VehicleDetailPage = () => {
               type="number"
               min={0}
               value={form.passenger_capacity}
-              onChange={(e) => setForm((prev) => ({ ...prev, passenger_capacity: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, passenger_capacity: e.target.value }));
+              }}
               required
             />
           </label>
@@ -201,7 +247,10 @@ const VehicleDetailPage = () => {
             <input
               type="text"
               value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, notes: e.target.value }));
+              }}
             />
           </label>
           <div className="form-actions">

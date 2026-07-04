@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   Airfield,
@@ -10,6 +10,7 @@ import {
 import { metersToFeet } from '../utils/units';
 import { formatMetersWithFeet } from '../utils/units';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const AirfieldDetailPage = () => {
   const { airfieldId } = useParams();
@@ -26,40 +27,59 @@ const AirfieldDetailPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const missingName = !form.name.trim();
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      if (!airfieldId) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getAirfield(Number(airfieldId));
-        if (cancelled) return;
-        setAirfield(data);
-        setForm({
-          name: data.name,
-          elevation: data.elevation,
-          coordinates: data.coordinates,
-          description: data.description || ''
-        });
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load airfield');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    if (!airfieldId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getAirfield(Number(airfieldId));
+      setAirfield(data);
+      setForm({
+        name: data.name,
+        elevation: data.elevation,
+        coordinates: data.coordinates,
+        description: data.description || ''
+      });
+      setIsDirty(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load airfield');
+    } finally {
+      setLoading(false);
+    }
   }, [airfieldId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const hasPendingLocalChanges = isDirty || saving || deleting;
+
+  useResourceStream({
+    path: '/events/stream',
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void load();
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void load();
+  }, [hasPendingLocalChanges, load, pendingLiveRefresh]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    void load();
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -81,6 +101,7 @@ const AirfieldDetailPage = () => {
         coordinates: updated.coordinates,
         description: updated.description || ''
       });
+      setIsDirty(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to update airfield');
     } finally {
@@ -167,6 +188,17 @@ const AirfieldDetailPage = () => {
         </div>
       </header>
 
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edits finish.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <article className="card">
         <form className="form-grid" onSubmit={handleSubmit}>
           <label className={`form-field ${missingName ? 'field-missing' : ''}`}>
@@ -174,7 +206,10 @@ const AirfieldDetailPage = () => {
             <input
               type="text"
               value={form.name}
-              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, name: e.target.value }));
+              }}
               required
             />
           </label>
@@ -186,7 +221,10 @@ const AirfieldDetailPage = () => {
                 min={0}
                 step={1}
                 value={form.elevation}
-                onChange={(e) => setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }))}
+                onChange={(e) => {
+                  setIsDirty(true);
+                  setForm((prev) => ({ ...prev, elevation: Number(e.target.value) }));
+                }}
                 required
               />
               <span className="muted airfield-detail-elevation-feet">
@@ -200,12 +238,13 @@ const AirfieldDetailPage = () => {
               <input
                 type="text"
                 value={form.coordinates}
-                onChange={(e) =>
+                onChange={(e) => {
+                  setIsDirty(true);
                   setForm((prev) => ({
                     ...prev,
                     coordinates: e.target.value
-                  }))
-                }
+                  }));
+                }}
                 placeholder="Lat, Long"
                 required
                 className="airfield-detail-coordinates-input"
@@ -227,7 +266,10 @@ const AirfieldDetailPage = () => {
             <input
               type="text"
               value={form.description}
-              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              onChange={(e) => {
+                setIsDirty(true);
+                setForm((prev) => ({ ...prev, description: e.target.value }));
+              }}
               placeholder="Optional notes"
             />
           </label>

@@ -22,6 +22,7 @@ import (
 	"github.com/innhopp/central/backend/logistics"
 	"github.com/innhopp/central/backend/participants"
 	"github.com/innhopp/central/backend/rbac"
+	"github.com/innhopp/central/backend/realtime"
 	"github.com/innhopp/central/backend/registrations"
 )
 
@@ -96,6 +97,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to configure auth handler: %v", err)
 	}
+	streams := realtime.NewHub()
 
 	var emailSender comms.EmailSender
 	smtpSender, err := comms.NewSMTPSender(comms.SMTPConfig{
@@ -142,12 +144,21 @@ func main() {
 	}
 
 	router := chi.NewRouter()
+	timeoutMiddleware := middleware.Timeout(60 * time.Second)
 	router.Use(
 		middleware.RequestID,
 		middleware.RealIP,
 		middleware.Logger,
 		middleware.Recoverer,
-		middleware.Timeout(60*time.Second),
+		func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/stream") {
+					next.ServeHTTP(w, r)
+					return
+				}
+				timeoutMiddleware(next).ServeHTTP(w, r)
+			})
+		},
 	)
 	router.Use(sessionManager.Middleware)
 
@@ -176,17 +187,17 @@ func main() {
 
 	router.Mount("/api/auth", authHandler.Routes())
 	if budgetsV1Enabled {
-		router.Mount("/api/events/{eventID}/budget", budgets.NewHandler(pool).EventBudgetRoutes(enforcer))
+		router.Mount("/api/events/{eventID}/budget", budgets.NewHandler(pool, streams).EventBudgetRoutes(enforcer))
 	}
-	router.Mount("/api/events", events.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/events", events.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/participants", participants.NewHandler(pool).Routes(enforcer))
-	router.Mount("/api/registrations", registrations.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/registrations", registrations.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/comms", comms.NewHandler(pool, authConfig.FrontendURL, emailSender).Routes(enforcer))
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
-	router.Mount("/api/logistics", logistics.NewHandler(pool).Routes(enforcer))
-	router.Mount("/api/innhopps", innhopps.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/logistics", logistics.NewHandler(pool, streams).Routes(enforcer))
+	router.Mount("/api/innhopps", innhopps.NewHandler(pool, streams).Routes(enforcer))
 	if budgetsV1Enabled {
-		router.Mount("/api/budgets", budgets.NewHandler(pool).Routes(enforcer))
+		router.Mount("/api/budgets", budgets.NewHandler(pool, streams).Routes(enforcer))
 		router.Mount("/api/accounting", accounting.NewHandler(pool).Routes(enforcer))
 	}
 

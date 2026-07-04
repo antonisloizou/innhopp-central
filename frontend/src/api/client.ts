@@ -1,4 +1,5 @@
 const defaultBaseUrl = '/api';
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || defaultBaseUrl;
 
 const buildHeaders = (init?: RequestInit) => {
   const headers = new Headers(init?.headers || {});
@@ -9,7 +10,7 @@ const buildHeaders = (init?: RequestInit) => {
 };
 
 export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
-  const url = `${import.meta.env.VITE_API_BASE_URL?.trim() || defaultBaseUrl}${path}`;
+  const url = `${apiBaseUrl}${path}`;
   const response = await fetch(url, {
     ...init,
     credentials: 'include',
@@ -36,3 +37,5 @@ export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T
 
   return payload as T;
 };
+
+export const buildApiUrl = (path: string) => `${apiBaseUrl}${path}`;

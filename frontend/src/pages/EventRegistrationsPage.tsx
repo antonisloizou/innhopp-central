@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { copyEvent, deleteEvent, Event, getEvent } from '../api/events';
 import { listParticipantProfiles, ParticipantProfile } from '../api/participants';
 import { createEventRegistration, listEventRegistrations, Registration, RegistrationStatus } from '../api/registrations';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
+import { useResourceStream } from '../hooks/useResourceStream';
 import {
   formatEventLocalDateInputFromDate,
   formatEventLocal,
@@ -117,6 +118,7 @@ const EventRegistrationsPage = () => {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [depositFilter, setDepositFilter] = useState<PaymentState>('all');
   const [mainInvoiceFilter, setMainInvoiceFilter] = useState<PaymentState>('all');
@@ -124,11 +126,14 @@ const EventRegistrationsPage = () => {
   const [createFormOpen, setCreateFormOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateRegistrationFormState>(createInitialFormState());
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
+  const reload = useCallback(
+    async (options?: { preserveLoading?: boolean; preserveCreateForm?: boolean }) => {
       if (!eventId) return;
-      setLoading(true);
+      const keepLoading = options?.preserveLoading;
+      const preserveCreateForm = options?.preserveCreateForm;
+      if (!keepLoading) {
+        setLoading(true);
+      }
       setError(null);
       setMessage(null);
       try {
@@ -137,7 +142,6 @@ const EventRegistrationsPage = () => {
           listEventRegistrations(Number(eventId)),
           listParticipantProfiles()
         ]);
-        if (cancelled) return;
         setEventData(nextEvent);
         setRegistrations(
           dedupeRegistrationsByParticipant(Array.isArray(nextRegistrations) ? nextRegistrations : [])
@@ -147,22 +151,49 @@ const EventRegistrationsPage = () => {
             a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })
           )
         );
-        setCreateForm(createInitialFormState(nextEvent));
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load registrations');
+        if (!preserveCreateForm) {
+          setCreateForm(createInitialFormState(nextEvent));
         }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load registrations');
       } finally {
-        if (!cancelled) {
+        if (!keepLoading) {
           setLoading(false);
         }
       }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [eventId]);
+    },
+    [eventId]
+  );
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const hasPendingLocalChanges = createFormOpen || creating || copying || deleting;
+
+  useResourceStream({
+    path: eventId ? `/events/${eventId}/stream` : null,
+    onMessage: () => {
+      if (hasPendingLocalChanges) {
+        setPendingLiveRefresh(true);
+        return;
+      }
+      void reload({ preserveLoading: true });
+    }
+  });
+
+  useEffect(() => {
+    if (!pendingLiveRefresh || hasPendingLocalChanges) return;
+    setPendingLiveRefresh(false);
+    void reload({ preserveLoading: true });
+  }, [hasPendingLocalChanges, pendingLiveRefresh, reload]);
+
+  const handleReloadLatest = () => {
+    setPendingLiveRefresh(false);
+    setCreateFormOpen(false);
+    setCreateForm(createInitialFormState(eventData));
+    void reload({ preserveLoading: true });
+  };
 
   const handleDelete = async () => {
     if (!eventId) return;
@@ -302,6 +333,16 @@ const EventRegistrationsPage = () => {
           onDelete={handleDelete}
         />
       </header>
+      {pendingLiveRefresh ? (
+        <div className="card">
+          <div className="event-live-refresh-banner">
+            <p className="muted">New changes are available and will load after your current edit finishes.</p>
+            <button className="button-link secondary" type="button" onClick={handleReloadLatest}>
+              Reload now
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <section className="registration-stats-grid">
         <article className="card registration-stat-card">
