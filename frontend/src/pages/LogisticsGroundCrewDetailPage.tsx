@@ -184,7 +184,7 @@ const LogisticsGroundCrewDetailPage = () => {
     setShowVehicleForm(false);
     setPickupOptionKey('');
     setDestinationOptionKey('');
-    setForm((prev) => ({ ...prev, pickup_location: '', destination: '', notes: '' }));
+    setForm((prev) => ({ ...prev, pickup_location: '', destination: '', duration_minutes: '', notes: '' }));
     setSaved(false);
     // do not clear loadedVehicles so existing attached vehicles remain visible
     if (selectedEventId) {
@@ -676,7 +676,11 @@ const LogisticsGroundCrewDetailPage = () => {
                   setPickupOptionKey(key);
                   const opt = findOptionByKey(key);
                   markDirty();
-                  setForm((prev) => ({ ...prev, pickup_location: opt ? opt.label : '' }));
+                  setForm((prev) => ({
+                    ...prev,
+                    pickup_location: opt ? opt.label : '',
+                    duration_minutes: ''
+                  }));
                 }}
                 required
                 className="logistics-detail-select-grow"
@@ -775,7 +779,11 @@ const LogisticsGroundCrewDetailPage = () => {
                     setDestinationOptionKey(key);
                     const opt = findOptionByKey(key);
                     markDirty();
-                    setForm((prev) => ({ ...prev, destination: opt ? opt.label : '' }));
+                    setForm((prev) => ({
+                      ...prev,
+                      destination: opt ? opt.label : '',
+                      duration_minutes: ''
+                    }));
                   }}
                   required
                   className="logistics-detail-select-grow"

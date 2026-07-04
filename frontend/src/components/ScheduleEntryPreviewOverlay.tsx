@@ -323,7 +323,8 @@ const ScheduleEntryPreviewOverlay = ({
                     {((canOpenMapsActions &&
                     (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
                     entry.transportRouteOrigin &&
-                    entry.transportRouteDestination) || (entry.to && onNavigateToEntry)) ? (
+                    entry.transportRouteDestination) ||
+                    ((entry.type === 'Transport' || entry.type === 'Ground Crew') && entry.to && onNavigateToEntry)) ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
                         {canOpenMapsActions &&
                         (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
