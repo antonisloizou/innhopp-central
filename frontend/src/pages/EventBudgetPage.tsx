@@ -1518,6 +1518,7 @@ const EventBudgetPage = () => {
             copying={copying}
             deleting={deleting}
             menuId="event-budget-actions-menu"
+            onPrint={() => navigate(`/events/${activeEventData.id}/print`)}
             onCopy={() => void handleCopyEvent()}
             onDelete={() => void handleDeleteEvent()}
           />

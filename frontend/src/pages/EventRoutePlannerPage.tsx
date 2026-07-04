@@ -1233,6 +1233,7 @@ const EventRoutePlannerPage = () => {
           copying={copying}
           deleting={deleting}
           menuId="event-route-planner-actions-menu"
+          onPrint={() => navigate(`/events/${eventData.id}/print`)}
           onCopy={handleCopy}
           onDelete={handleDelete}
         />

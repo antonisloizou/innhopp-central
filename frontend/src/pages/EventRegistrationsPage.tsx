@@ -329,6 +329,7 @@ const EventRegistrationsPage = () => {
           copying={copying}
           deleting={deleting}
           menuId="event-registrations-actions-menu"
+          onPrint={() => navigate(`/events/${eventData.id}/print`)}
           onCopy={handleCopy}
           onDelete={handleDelete}
         />

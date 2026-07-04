@@ -587,6 +587,7 @@ const EventAccountingPage = () => {
             currentPage="accounting"
             copying={copying}
             deleting={deleting}
+            onPrint={() => navigate(`/events/${activeEvent.id}/print`)}
             onCopy={handleCopy}
             onDelete={handleDelete}
           />

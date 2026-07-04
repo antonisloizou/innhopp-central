@@ -1822,6 +1822,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           copying={copying}
           deleting={deleting}
           menuId="event-detail-actions-menu"
+          onPrint={() => navigate(`/events/${eventData.id}/print`)}
           onCopy={(event) => {
             if (locked) {
               showLockedNoticeAtEvent(event);

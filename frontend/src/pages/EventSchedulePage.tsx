@@ -1749,6 +1749,7 @@ const EventSchedulePage = () => {
             copying={copying}
             deleting={deleting}
             menuId="event-schedule-actions-menu"
+            onPrint={() => navigate(`/events/${eventData.id}/print`)}
             onCopy={handleCopy}
             onDelete={handleDelete}
           />

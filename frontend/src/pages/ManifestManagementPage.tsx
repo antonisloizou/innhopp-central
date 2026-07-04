@@ -150,6 +150,7 @@ const ManifestManagementPage = () => {
             copying={copying}
             deleting={deleting}
             menuId="event-manifest-actions-menu"
+            onPrint={() => navigate(`/events/${selectedEvent.id}/print`)}
             onCopy={handleCopy}
             onDelete={handleDelete}
           />

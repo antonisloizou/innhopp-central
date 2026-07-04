@@ -50,6 +50,7 @@ import FinanceSummaryPage from './pages/FinanceSummaryPage';
 import EventAccountingPage from './pages/EventAccountingPage';
 import BudgetsOverviewPage from './pages/BudgetsOverviewPage';
 import AccountingOverviewPage from './pages/AccountingOverviewPage';
+import EventPrintPage from './pages/EventPrintPage';
 import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
@@ -71,6 +72,7 @@ const App = () => (
           <Route path="communications" element={<ParticipantRouteGuard><CommunicationsPage /></ParticipantRouteGuard>} />
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
+          <Route path="events/:eventId/print" element={<ParticipantRouteGuard eventParam="eventId"><EventPrintPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/route" element={<ParticipantRouteGuard eventParam="eventId"><EventRoutePlannerPage /></ParticipantRouteGuard>} />
           <Route path="events/airfields" element={<ParticipantRouteGuard><EventAirfieldsUsagePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />

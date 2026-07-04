@@ -2677,6 +2677,77 @@ button.ghost {
   margin-top: 0.15rem;
 }
 
+.event-print-page {
+  padding-bottom: 2rem;
+}
+
+.event-print-panel {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  background-color: var(--modal-surface);
+  border: 1px solid var(--modal-border);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32), 0 0 0 1px var(--modal-border);
+}
+
+.event-print-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.event-print-panel-kicker {
+  margin: 0 0 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.event-print-panel-title {
+  margin: 0;
+  font-size: clamp(1.4rem, 2vw, 1.9rem);
+}
+
+.event-print-panel-copy {
+  margin: 0.7rem 0 0;
+  max-width: 42rem;
+}
+
+.event-print-panel-options {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.5rem;
+}
+
+.event-print-option {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--panel-input-border);
+  background: var(--panel-input-bg);
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.event-print-option input[type='checkbox'] {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  accent-color: #2563eb;
+}
+
+.event-print-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  flex-wrap: wrap;
+}
+
 .logistics-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

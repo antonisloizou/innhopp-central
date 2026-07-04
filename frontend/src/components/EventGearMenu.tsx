@@ -4,6 +4,7 @@ import { budgetsV1Enabled } from '../config/flags';
 
 export type EventGearMenuPage =
   | 'schedule'
+  | 'print'
   | 'details'
   | 'route'
   | 'budget'
@@ -18,6 +19,7 @@ type EventGearMenuProps = {
   copying?: boolean;
   deleting?: boolean;
   menuId?: string;
+  onPrint?: () => void;
   onCopy: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
   onDelete: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
 };
@@ -39,6 +41,7 @@ const EventGearMenu = ({
   copying = false,
   deleting = false,
   menuId = `event-${currentPage}-actions-menu`,
+  onPrint,
   onCopy,
   onDelete
 }: EventGearMenuProps) => {
@@ -101,6 +104,19 @@ const EventGearMenu = ({
                 {item.label}
               </button>
             ))}
+          {onPrint ? (
+            <button
+              className="event-schedule-menu-item"
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onPrint();
+              }}
+            >
+              Print
+            </button>
+          ) : null}
           <button
             className="event-schedule-menu-item"
             type="button"
