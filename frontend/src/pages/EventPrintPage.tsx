@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
 import logo from '../assets/logo.webp';
+import materialSymbolsOutlinedTtf from '../assets/fonts/MaterialSymbolsOutlined.ttf';
+import printDocumentCss from './EventPrintDocument.css?raw';
 import {
   Accommodation,
   copyEvent,
@@ -26,6 +28,8 @@ import { listParticipantProfiles, ParticipantProfile } from '../api/participants
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
+import { hasConfiguredGoogleMapsApiKey, googleMapsApiKey } from '../config/google';
+import { parseCoordinates } from '../utils/coordinates';
 import {
   formatEventLocal,
   getEventLocalDateKey,
@@ -49,17 +53,50 @@ type DayBucket = {
   meals: Meal[];
 };
 
+type StopVisualType = 'innhopp' | 'accommodation' | 'meal' | 'other';
+
+type RouteStop = {
+  id: string;
+  label: string;
+  coordinates: string;
+  visualType: StopVisualType;
+};
+
+type NormalizedRouteStop = RouteStop & {
+  lat: number;
+  lng: number;
+  staticCoordinate: string;
+};
+
 type PrintSectionKey = 'route' | 'weekOverview' | 'schedule';
 type PrintOptions = Record<PrintSectionKey, boolean>;
 
 const DEFAULT_PRINT_OPTIONS: PrintOptions = {
-  route: false,
-  weekOverview: false,
-  schedule: false
+  route: true,
+  weekOverview: true,
+  schedule: true
 };
+
+const createDefaultPrintOptions = (): PrintOptions => ({
+  ...DEFAULT_PRINT_OPTIONS
+});
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
+
+const markerColorByType: Record<StopVisualType, string> = {
+  innhopp: '0x2b8a3e',
+  accommodation: '0x0d6efd',
+  meal: '0xd97706',
+  other: '0x7e22ce'
+};
+
+const iconNameByType: Record<StopVisualType, string> = {
+  innhopp: 'paragliding',
+  accommodation: 'bed',
+  meal: 'restaurant',
+  other: 'monitor_heart'
+};
 
 const formatDurationMinutes = (minutes?: number | null) => {
   if (!Number.isFinite(minutes) || (minutes as number) <= 0) return 'Unavailable';
@@ -113,6 +150,165 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+const dedupeConsecutiveStops = (points: RouteStop[]) => {
+  const deduped: RouteStop[] = [];
+  points.forEach((point) => {
+    const trimmed = point.coordinates.trim();
+    if (!trimmed || !parseCoordinates(trimmed)) return;
+    if (deduped[deduped.length - 1]?.coordinates !== trimmed) {
+      deduped.push({ ...point, coordinates: trimmed });
+    }
+  });
+  return deduped;
+};
+
+const normalizeRouteStops = (points: RouteStop[]): NormalizedRouteStop[] =>
+  dedupeConsecutiveStops(points)
+    .map((point) => {
+      const parsed = parseCoordinates(point.coordinates);
+      if (!parsed) return null;
+      return {
+        ...point,
+        lat: parsed.lat,
+        lng: parsed.lng,
+        staticCoordinate: `${parsed.lat.toFixed(6)},${parsed.lng.toFixed(6)}`
+      };
+    })
+    .filter((point): point is NormalizedRouteStop => !!point);
+
+const toRouteStops = (entry: ScheduleEntry): RouteStop[] => {
+  const coordinates = entry.coordinates?.trim();
+  if (!coordinates) return [];
+
+  switch (entry.type) {
+    case 'Innhopp':
+      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'innhopp' }];
+    case 'Accommodation':
+      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'accommodation' }];
+    case 'Meal':
+      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'meal' }];
+    case 'Other':
+      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'other' }];
+    default:
+      return [];
+  }
+};
+
+const buildStaticRouteMapUrl = (points: RouteStop[]) => {
+  if (!hasConfiguredGoogleMapsApiKey) return null;
+  const normalized = normalizeRouteStops(points);
+  if (normalized.length === 0) return null;
+
+  const params = new URLSearchParams({
+    key: googleMapsApiKey,
+    size: '640x640',
+    scale: '2',
+    maptype: 'roadmap',
+    format: 'png'
+  });
+
+  params.append('visible', normalized.map((point) => point.staticCoordinate).join('|'));
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
+};
+
+const fetchImageAsDataUrl = async (url: string) => {
+  const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+  if (!response.ok) {
+    throw new Error(`Failed to load route map image (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Failed to encode route map image.'));
+    };
+    reader.onerror = () => reject(new Error('Failed to read route map image.'));
+    reader.readAsDataURL(blob);
+  });
+};
+
+const buildInlineRouteSvgMarkup = (points: RouteStop[]) => {
+  const parsedStops = normalizeRouteStops(points);
+
+  if (parsedStops.length === 0) return null;
+
+  const width = 1200;
+  const height = 880;
+  const padding = 88;
+  const lats = parsedStops.map((stop) => stop.lat);
+  const lngs = parsedStops.map((stop) => stop.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const latRange = maxLat - minLat || 0.01;
+  const lngRange = maxLng - minLng || 0.01;
+
+  const projectedStops = parsedStops.map((stop) => ({
+    ...stop,
+    x: padding + ((stop.lng - minLng) / lngRange) * (width - padding * 2),
+    y: height - padding - ((stop.lat - minLat) / latRange) * (height - padding * 2)
+  }));
+
+  const polylinePoints = projectedStops.map((stop) => `${stop.x.toFixed(2)},${stop.y.toFixed(2)}`).join(' ');
+
+  const markerMarkup = projectedStops
+    .map(
+      (stop, index) => `
+        <g>
+          <circle cx="${stop.x.toFixed(2)}" cy="${stop.y.toFixed(2)}" r="16" fill="#${markerColorByType[stop.visualType].slice(2)}" stroke="#ffffff" stroke-width="4" />
+          <text x="${stop.x.toFixed(2)}" y="${(stop.y + 5).toFixed(2)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">${index + 1}</text>
+        </g>
+      `
+    )
+    .join('');
+
+  return `
+    <svg class="print-route-map-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Route map preview for the selected event stops" xmlns="http://www.w3.org/2000/svg">
+      <polyline points="${polylinePoints}" fill="none" stroke="#4fa3ff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+      <polyline points="${polylinePoints}" fill="none" stroke="#1d4ed8" stroke-opacity="0.18" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+      ${markerMarkup}
+    </svg>
+  `;
+};
+
+const waitForPrintAssets = async (doc: Document) => {
+  const images = Array.from(doc.images);
+  if (images.length === 0) return;
+
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise<void>((resolve) => {
+          if (image.complete && image.naturalWidth > 0) {
+            resolve();
+            return;
+          }
+
+          const finalize = () => {
+            image.removeEventListener('load', finalize);
+            image.removeEventListener('error', finalize);
+            resolve();
+          };
+
+          image.addEventListener('load', finalize, { once: true });
+          image.addEventListener('error', finalize, { once: true });
+        })
+    )
+  );
+};
+
+const OVERVIEW_TIME_BANDS = [
+  { key: '06-12', label: '06-12', start: 6 * 60, end: 12 * 60 },
+  { key: '12-16', label: '12-16', start: 12 * 60, end: 16 * 60 },
+  { key: '16-22', label: '16-22', start: 16 * 60, end: 22 * 60 }
+] as const;
+
 const getScheduleStatusMeta = (
   entry: ScheduleEntry
 ): { label: string; variant: 'success' | 'danger' } | null => {
@@ -155,7 +351,7 @@ const EventPrintPage = () => {
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [printOptions, setPrintOptions] = useState<PrintOptions>(DEFAULT_PRINT_OPTIONS);
+  const [printOptions, setPrintOptions] = useState<PrintOptions>(() => createDefaultPrintOptions());
 
   const load = useCallback(async () => {
     if (!eventId) return;
@@ -191,6 +387,10 @@ const EventPrintPage = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setPrintOptions(createDefaultPrintOptions());
+  }, [eventId]);
 
   const handleDelete = async () => {
     if (!eventId) return;
@@ -355,6 +555,7 @@ const EventPrintPage = () => {
           subtitle: '',
           type: 'Innhopp',
           ready: isInnhoppReady(item),
+          coordinates: item.coordinates || null,
           missingCoordinates: !hasText(item.coordinates),
           notes: item.notes || undefined,
           innhoppAircraftWarning: aircraftWarning,
@@ -460,6 +661,7 @@ const EventPrintPage = () => {
           title: item.name || 'Other logistics',
           subtitle: '',
           type: 'Other',
+          coordinates: item.coordinates || null,
           missingCoordinates: !hasText(item.coordinates),
           notes: item.notes || null,
           otherComplete: hasText(item.name) && hasText(item.coordinates) && hasText(item.scheduled_at),
@@ -468,6 +670,7 @@ const EventPrintPage = () => {
       });
 
       day.meals.forEach((item) => {
+        const mealCoordinates = locationCoordinates(item.location);
         entries.push({
           id: `meal-${item.id}`,
           hourKey: formatTimeLabel(item.scheduled_at || undefined),
@@ -478,6 +681,7 @@ const EventPrintPage = () => {
           title: item.name,
           subtitle: '',
           type: 'Meal',
+          coordinates: mealCoordinates,
           mealComplete: hasText(item.name) && hasText(item.location) && hasText(item.scheduled_at),
           location: item.location || null,
           notes: item.notes || null,
@@ -498,6 +702,7 @@ const EventPrintPage = () => {
             subtitle: '',
             type: 'Accommodation',
             booked: !!item.booked,
+            coordinates: item.coordinates || null,
             missingCoordinates: !hasText(item.coordinates),
             notes: item.notes || null,
             scheduledAt: item.check_in_at
@@ -515,6 +720,7 @@ const EventPrintPage = () => {
             subtitle: '',
             type: 'Accommodation',
             booked: !!item.booked,
+            coordinates: item.coordinates || null,
             missingCoordinates: !hasText(item.coordinates),
             notes: item.notes || null,
             scheduledAt: item.check_out_at
@@ -529,6 +735,7 @@ const EventPrintPage = () => {
             subtitle: '',
             type: 'Accommodation',
             booked: !!item.booked,
+            coordinates: item.coordinates || null,
             missingCoordinates: !hasText(item.coordinates),
             scheduledAt: null
           });
@@ -547,22 +754,81 @@ const EventPrintPage = () => {
   const participantLookup = useMemo(() => new Map(participants.map((participant) => [participant.id, participant])), [participants]);
   const nonStaffCount = eventData ? countVisibleParticipants(eventData.participant_ids, participantLookup) : 0;
   const printSectionCount = Object.values(printOptions).filter(Boolean).length;
-  const printableRouteDays = useMemo(
+  const printableRouteStops = useMemo(
+    () =>
+      dayBuckets.flatMap((day) =>
+        buildOrderedEntriesForDay(day).flatMap((entry) => toRouteStops(entry))
+      ),
+    [buildOrderedEntriesForDay, dayBuckets]
+  );
+  const printableRouteMapUrl = useMemo(() => buildStaticRouteMapUrl(printableRouteStops), [printableRouteStops]);
+  const printableRouteSvgMarkup = useMemo(() => buildInlineRouteSvgMarkup(printableRouteStops), [printableRouteStops]);
+  const printableOverviewDays = useMemo(
     () =>
       dayBuckets
-        .map((day) => ({
-          ...day,
-          entries: buildOrderedEntriesForDay(day).filter(
-            (entry) => entry.type === 'Innhopp' || entry.type === 'Transport' || entry.type === 'Ground Crew'
-          )
-        }))
-        .filter((day) => day.entries.length > 0),
-    [buildOrderedEntriesForDay, dayBuckets]
+        .filter((day) => day.key !== 'unscheduled')
+        .map((day) => {
+          const entries = buildOrderedEntriesForDay(day).filter(
+            (entry) => entry.type !== 'Transport' && entry.type !== 'Ground Crew'
+          );
+          const bandMap = new Map<string, ScheduleEntry[]>();
+          OVERVIEW_TIME_BANDS.forEach((band) => bandMap.set(band.key, []));
+
+          entries.forEach((entry) => {
+            if (entry.type === 'Accommodation') return;
+            const parts = parseTimeParts(entry.scheduledAt ?? undefined);
+            if (!parts) return;
+            const minutes = parts.hour * 60 + parts.minute;
+            const normalized = minutes < 6 * 60 ? minutes + 24 * 60 : minutes;
+            const band = OVERVIEW_TIME_BANDS.find(
+              (candidate) => 'start' in candidate && 'end' in candidate && normalized >= candidate.start && normalized < candidate.end
+            );
+            if (band) {
+              bandMap.get(band.key)?.push(entry);
+            }
+          });
+
+          const unscheduledEntries = entries.filter((entry) => !parseTimeParts(entry.scheduledAt ?? undefined));
+          const nightAccommodationName =
+            accommodations.find((item) => {
+              const checkInKey = extractDateKey(item.check_in_at || undefined);
+              const checkOutKey = extractDateKey(item.check_out_at || undefined);
+
+              if (checkInKey && checkOutKey) {
+                return day.key >= checkInKey && day.key < checkOutKey;
+              }
+              if (checkInKey) {
+                return day.key === checkInKey;
+              }
+              if (checkOutKey) {
+                return day.key === checkOutKey;
+              }
+              return false;
+            })?.name || null;
+
+          return {
+            ...day,
+            shortLabel: formatEventLocal(day.date.toISOString(), { weekday: 'short', day: 'numeric' }) || day.label,
+            bands: OVERVIEW_TIME_BANDS.map((band) => ({
+              ...band,
+              entries: bandMap.get(band.key) || []
+            })),
+            unscheduledEntries,
+            nightAccommodationName
+          };
+        }),
+    [accommodations, buildOrderedEntriesForDay, dayBuckets]
   );
 
   const buildPrintDocument = useCallback(
-    (options: PrintOptions) => {
+    (options: PrintOptions, routeMapImageSrc?: string | null) => {
       if (!eventData) return '';
+
+      const hasOverview = options.weekOverview;
+      const hasRoute = options.route;
+      const hasSchedule = options.schedule;
+      const overviewNeedsPageBreak = hasOverview && (hasRoute || hasSchedule);
+      const scheduleNeedsPageBreak = hasOverview || hasRoute;
 
       const renderMetaLine = (entry: ScheduleEntry) => {
         const base = entry.routeDurationLabel && (entry.routeVehiclesLabel || entry.type === 'Innhopp')
@@ -598,62 +864,187 @@ const EventPrintPage = () => {
         `;
       };
 
-      const weekOverviewSection = options.weekOverview
-        ? `
-          <section class="print-section">
-            <div class="print-section-kicker">Week Overview</div>
-            <h2>${escapeHtml(eventData.name)}</h2>
-            <p class="print-location">${escapeHtml(eventData.location || 'Location TBD')}</p>
-            <div class="print-overview-badges">
-              ${eventData.status ? `<span class="print-badge status-neutral">${escapeHtml(eventData.status)}</span>` : ''}
-              <span class="print-badge status-neutral">${escapeHtml(totalSlots > 0 ? `${totalSlots} slots` : 'Slots not set')}</span>
-            </div>
-            <dl class="print-overview-grid">
-              <div><dt>Starts</dt><dd>${escapeHtml(
-                eventData.starts_at
-                  ? formatEventLocal(eventData.starts_at, { month: 'short', day: 'numeric', year: 'numeric' }) || 'TBD'
-                  : 'TBD'
-              )}</dd></div>
-              <div><dt>Ends</dt><dd>${escapeHtml(
-                eventData.ends_at
-                  ? formatEventLocal(eventData.ends_at, { month: 'short', day: 'numeric', year: 'numeric' }) || 'TBD'
-                  : 'TBD'
-              )}</dd></div>
-              <div><dt>Participants</dt><dd>${escapeHtml(String(nonStaffCount))}</dd></div>
-              <div><dt>Innhopps</dt><dd>${escapeHtml(String(eventData.innhopps?.length ?? 0))}</dd></div>
-            </dl>
-          </section>
-        `
-        : '';
+      const renderOverviewEntry = (entry: ScheduleEntry) => {
+        const typeClass = `type-${entry.type.toLowerCase().replace(/\s+/g, '-')}`;
+        return `
+        <div class="print-overview-item ${typeClass}">
+          <span class="print-overview-item-title">${escapeHtml(entry.title)}</span>
+        </div>
+      `;
+      };
 
-      const routeSection = options.route
+      const mergedNightCells = (() => {
+        const cells: string[] = [];
+        let index = 0;
+
+        while (index < printableOverviewDays.length) {
+          const name = printableOverviewDays[index].nightAccommodationName;
+          let span = 1;
+          while (index + span < printableOverviewDays.length && printableOverviewDays[index + span].nightAccommodationName === name) {
+            span += 1;
+          }
+          cells.push(`
+            <td${span > 1 ? ` colspan="${span}"` : ''} class="print-overview-night-cell">
+              ${name ? `<div class="print-overview-night-title">${escapeHtml(name)}</div>` : '<div class="print-overview-empty">-</div>'}
+            </td>
+          `);
+          index += span;
+        }
+
+        return cells.join('');
+      })();
+
+      const weekOverviewSection = hasOverview
         ? `
-          <section class="print-section">
-            <div class="print-section-kicker">Route</div>
-            <h2>Route Snapshot</h2>
+          <section class="print-overview-page${overviewNeedsPageBreak ? ' print-overview-page--page-break' : ''}">
+            <header class="print-overview-hero">
+              <div class="print-schedule-header">
+                <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
+                <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
+                <div class="print-schedule-header-spacer" aria-hidden="true"></div>
+              </div>
+              <div class="print-overview-meta">
+                <div class="print-overview-hero-main">
+                  <p class="print-overview-dates">${escapeHtml(
+                    eventData.starts_at
+                      ? formatEventLocal(eventData.starts_at, { month: 'short', day: 'numeric', year: 'numeric' }) || 'TBD'
+                      : 'TBD'
+                  )} - ${escapeHtml(
+                    eventData.ends_at
+                      ? formatEventLocal(eventData.ends_at, { month: 'short', day: 'numeric', year: 'numeric' }) || 'TBD'
+                      : 'TBD'
+                  )}</p>
+                  <div class="print-overview-badges">
+                    ${
+                      eventData.status
+                        ? `<span class="print-badge print-overview-summary-badge status-${escapeHtml(eventData.status)}">${escapeHtml(
+                            eventData.status
+                          )}</span>`
+                        : ''
+                    }
+                    <span class="print-badge print-overview-summary-badge print-overview-summary-badge--slots">${escapeHtml(
+                      totalSlots > 0 ? `${totalSlots} slots` : 'Slots not set'
+                    )}</span>
+                    <span class="print-badge print-overview-summary-badge print-overview-summary-badge--participants">${escapeHtml(
+                      `${nonStaffCount} participants`
+                    )}</span>
+                    <span class="print-badge print-overview-summary-badge print-overview-summary-badge--innhopps">${escapeHtml(
+                      `${eventData.innhopps?.length ?? 0} innhopps`
+                    )}</span>
+                  </div>
+                  <p class="print-location">${escapeHtml(eventData.location || 'Location TBD')}</p>
+                </div>
+              </div>
+            </header>
+            <div class="print-overview-board-wrap">
+              <table class="print-overview-board">
+                <thead>
+                  <tr>
+                    <th class="print-overview-axis">Time</th>
+                    ${printableOverviewDays
+                      .map(
+                        (day) => `
+                          <th>
+                            <div class="print-overview-day-name">${escapeHtml(day.shortLabel)}</div>
+                            <div class="print-overview-day-date">${escapeHtml(
+                              formatEventLocal(day.date.toISOString(), { month: 'short' }) || ''
+                            )}</div>
+                          </th>
+                        `
+                      )
+                      .join('')}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${OVERVIEW_TIME_BANDS.map(
+                    (band) => `
+                      <tr>
+                        <th class="print-overview-axis">${escapeHtml(band.label)}</th>
+                        ${printableOverviewDays
+                          .map((day) => {
+                            const entries = day.bands.find((candidate) => candidate.key === band.key)?.entries || [];
+                            return `
+                              <td>
+                                ${
+                                  entries.length > 0
+                                    ? entries.map(renderOverviewEntry).join('')
+                                    : '<div class="print-overview-empty">-</div>'
+                                }
+                              </td>
+                            `;
+                          })
+                          .join('')}
+                      </tr>
+                    `
+                  ).join('')}
+                  <tr>
+                    <th class="print-overview-axis">Night</th>
+                    ${mergedNightCells}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             ${
-              printableRouteDays.length === 0
-                ? '<p class="empty-state">No route items scheduled.</p>'
-                : printableRouteDays
-                    .map(
-                      (day) => `
-                        <article class="print-day-block">
-                          <h3>${escapeHtml(day.label)}</h3>
-                          <ul class="print-entry-list">
-                            ${day.entries.map(renderEntry).join('')}
-                          </ul>
-                        </article>
-                      `
-                    )
-                    .join('')
+              printableOverviewDays.some((day) => day.unscheduledEntries.length > 0)
+                ? `
+                    <section class="print-overview-notes">
+                      <div class="print-overview-notes-label">Unscheduled</div>
+                      <div class="print-overview-notes-list">
+                        ${printableOverviewDays
+                          .flatMap((day) =>
+                            day.unscheduledEntries.map(
+                              (entry) => `<span class="print-overview-note">${escapeHtml(`${day.shortLabel}: ${entry.title}`)}</span>`
+                            )
+                          )
+                          .join('')}
+                      </div>
+                    </section>
+                  `
+                : ''
             }
           </section>
         `
         : '';
 
-      const scheduleSection = options.schedule
+      const routeSection = hasRoute
         ? `
-          <section class="print-section">
+          <section class="print-section print-route-page${hasOverview ? ' print-section--new-page' : ''}">
+            <header class="print-route-header">
+              <div class="print-schedule-header">
+                <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
+                <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
+                <div class="print-schedule-header-spacer" aria-hidden="true"></div>
+              </div>
+            </header>
+            <div class="print-route-legend">
+              <span class="print-route-legend-item"><span class="print-route-legend-icon print-route-legend-icon--innhopp"><span class="material-symbols-outlined">${iconNameByType.innhopp}</span></span>Innhopp</span>
+              <span class="print-route-legend-item"><span class="print-route-legend-icon print-route-legend-icon--accommodation"><span class="material-symbols-outlined">${iconNameByType.accommodation}</span></span>Hotel</span>
+              <span class="print-route-legend-item"><span class="print-route-legend-icon print-route-legend-icon--meal"><span class="material-symbols-outlined">${iconNameByType.meal}</span></span>Meal</span>
+              <span class="print-route-legend-item"><span class="print-route-legend-icon print-route-legend-icon--other"><span class="material-symbols-outlined">${iconNameByType.other}</span></span>Other</span>
+            </div>
+            ${
+              printableRouteMapUrl || printableRouteSvgMarkup
+                ? `
+                    <figure class="print-route-map-frame">
+                      ${
+                        routeMapImageSrc
+                          ? `<img src="${routeMapImageSrc}" alt="Route map preview for the selected event stops" class="print-route-map-image" />`
+                          : ''
+                      }
+                      <div class="print-route-map-overlay${routeMapImageSrc ? '' : ' print-route-map-overlay--standalone'}">
+                        ${printableRouteSvgMarkup || ''}
+                      </div>
+                    </figure>
+                  `
+                : '<div class="print-route-empty">No route stops with valid coordinates are available.</div>'
+            }
+          </section>
+        `
+        : '';
+
+      const scheduleSection = hasSchedule
+        ? `
+          <section class="print-section${scheduleNeedsPageBreak ? ' print-section--new-page' : ''}">
             ${
               dayBuckets.length === 0
                 ? '<p class="empty-state">No schedule yet.</p>'
@@ -754,188 +1145,14 @@ const EventPrintPage = () => {
     <meta charset="utf-8" />
     <title>${escapeHtml(eventData.name)} Print</title>
     <style>
-      :root {
-        color-scheme: light;
-        --text: #0f172a;
-        --muted: #475569;
-        --border: #d7dee8;
-        --success: #166534;
-        --success-bg: #dcfce7;
-        --danger: #991b1b;
-        --danger-bg: #fee2e2;
-        --neutral: #1d4ed8;
-        --neutral-bg: #dbeafe;
-        --innhopp: #2b8a3e;
-        --transport: #e6b84a;
-        --ground-crew: #f6dea0;
-        --accommodation: #0d6efd;
-        --meal: #d97706;
-        --other: #7e22ce;
-      }
-      * { box-sizing: border-box; }
-      html, body { margin: 0; padding: 0; background: #fff; color: var(--text); font-family: Inter, Arial, sans-serif; }
-      body { padding: 0; }
-      .print-section { margin-top: 10mm; page-break-inside: avoid; }
-      .print-section:first-child { margin-top: 0; }
-      .print-section-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-      .print-section h2 { margin: 0 0 12px; font-size: 22px; }
-      .print-location { margin: 0 0 12px; color: var(--muted); }
-      .print-overview-badges, .print-entry-badges { display: flex; flex-wrap: wrap; gap: 8px; }
-      .print-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0 0; }
-      .print-overview-grid dt { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
-      .print-overview-grid dd { margin: 0; font-size: 18px; font-weight: 700; }
-      .print-day-block { margin-top: 18px; padding-top: 18px; break-before: page; page-break-before: always; }
-      .print-day-block:first-of-type { break-before: auto; page-break-before: auto; }
-      .print-day-block h3 { margin: 0; font-size: 20px; }
-      .print-day-block--schedule {
-        margin-top: 0;
-        padding-top: 0;
-      }
-      .print-day-block--schedule:first-of-type {
-        padding-top: 0;
-      }
-      .print-schedule-table {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-      }
-      .print-schedule-table col.print-schedule-col-time {
-        width: 84px;
-      }
-      .print-schedule-table col.print-schedule-col-main {
-        width: auto;
-      }
-      .print-schedule-table col.print-schedule-col-badges {
-        width: 230px;
-      }
-      .print-schedule-table thead {
-        display: table-header-group;
-      }
-      .print-schedule-table tbody {
-        display: table-row-group;
-      }
-      .print-schedule-header-cell {
-        padding: 0 0 14px;
-      }
-      .print-schedule-placeholder-cell {
-        padding: 0;
-      }
-      .print-schedule-header {
-        display: grid;
-        grid-template-columns: 42mm minmax(0, 1fr) 42mm;
-        align-items: center;
-        gap: 4mm;
-      }
-      .print-schedule-header-logo {
-        display: block;
-        justify-self: start;
-        max-width: 40mm;
-        height: 13mm;
-        width: auto;
-        object-fit: contain;
-      }
-      .print-schedule-header-title {
-        margin: 0;
-        font-size: 28px;
-        line-height: 1.2;
-        font-weight: 700;
-        text-align: center;
-      }
-      .print-schedule-header-spacer {
-        width: 40mm;
-        height: 1px;
-        justify-self: end;
-      }
-      .print-schedule-day-heading {
-        font-size: 20px;
-        font-weight: 700;
-        text-align: left;
-      }
-      .print-schedule-day-heading--placeholder {
-        visibility: hidden;
-        margin-top: 0;
-      }
-      .print-day-divider {
-        margin: 12px 0 0;
-        border-top: 1px solid var(--border);
-      }
-      .print-day-divider--placeholder {
-        visibility: hidden;
-      }
-      .print-schedule-row {
-        border-top: 1px solid var(--border);
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-      .print-schedule-day-row {
-        border: 0;
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-      .print-schedule-day-cell {
-        padding: 0 0 0;
-      }
-      .print-schedule-time-cell,
-      .print-schedule-main-cell,
-      .print-schedule-badges-cell {
-        vertical-align: top;
-        padding: 9px 0;
-        break-inside: avoid;
-        page-break-inside: avoid;
-      }
-      .print-schedule-time-cell {
-        padding-right: 14px;
-        font-weight: 700;
-        font-size: 15px;
-      }
-      .print-schedule-main-cell {
-        padding-right: 14px;
-      }
-      .print-schedule-badges-cell {
-        text-align: right;
-      }
-      .print-schedule-empty-cell {
-        padding: 18px 0 0;
-      }
-      .print-schedule-day-row + .print-schedule-row {
-        border-top: 0;
-      }
-      .print-entry-time { font-weight: 700; font-size: 15px; }
-      .print-entry-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-      .print-entry-title { font-size: 18px; font-weight: 700; line-height: 1.25; }
-      .print-entry-subtitle { margin-top: 2px; color: var(--muted); font-size: 14px; line-height: 1.35; }
-      .print-badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; line-height: 1; border: 1px solid transparent; text-transform: uppercase; text-align: center; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .print-type-badge { padding: 0.4rem 0.95rem; }
-      .print-badge.status-success, .print-badge.status-danger { min-width: 28px; padding-left: 8px; padding-right: 8px; }
-      .status-success { color: var(--success); background: var(--success-bg); }
-      .status-danger { color: var(--danger); background: var(--danger-bg); }
-      .status-neutral { color: var(--neutral); background: var(--neutral-bg); }
-      .type-innhopp, .type-transport, .type-ground-crew, .type-accommodation, .type-meal, .type-other {
-        color: #fff;
-        text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45), 1px 1px 0 rgba(0, 0, 0, 0.45);
-      }
-      .type-innhopp { background: var(--innhopp); }
-      .type-transport { background: var(--transport); }
-      .type-ground-crew { background: var(--ground-crew); }
-      .type-accommodation { background: var(--accommodation); }
-      .type-meal { background: var(--meal); }
-      .type-other { background: var(--other); }
-      .empty-state { margin: 0; color: var(--muted); }
-      @page { size: A4; margin: 22mm 15mm 18mm 15mm; }
-      @media print {
-        body { padding: 0; }
-        .print-section { break-inside: avoid; }
-        .print-day-block { break-inside: avoid; }
-        .print-schedule-row,
-        .print-schedule-day-row,
-        .print-schedule-time-cell,
-        .print-schedule-main-cell,
-        .print-schedule-badges-cell {
-          break-inside: avoid;
-          page-break-inside: avoid;
-        }
+      @font-face {
+        font-family: 'Material Symbols Outlined';
+        font-style: normal;
+        font-weight: 400;
+        src: url('${materialSymbolsOutlinedTtf}') format('truetype');
       }
     </style>
+    <style>${printDocumentCss}</style>
   </head>
   <body>
     <main class="print-content">
@@ -946,7 +1163,7 @@ const EventPrintPage = () => {
   </body>
 </html>`;
     },
-    [buildOrderedEntriesForDay, dayBuckets, eventData, nonStaffCount, printableRouteDays, totalSlots]
+    [buildOrderedEntriesForDay, dayBuckets, eventData, nonStaffCount, printableOverviewDays, printableRouteMapUrl, printableRouteStops, printableRouteSvgMarkup, totalSlots]
   );
 
   const handleCreatePdf = useCallback(() => {
@@ -955,71 +1172,87 @@ const EventPrintPage = () => {
     setMessage(null);
     setPrinting(true);
 
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.position = 'fixed';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-    document.body.appendChild(iframe);
-
-    const cleanup = () => {
-      if (iframe.parentNode) {
-        iframe.parentNode.removeChild(iframe);
+    void (async () => {
+      let routeMapImageSrc: string | null = null;
+      if (printOptions.route && printableRouteMapUrl) {
+        try {
+          routeMapImageSrc = await fetchImageAsDataUrl(printableRouteMapUrl);
+        } catch {
+          routeMapImageSrc = null;
+        }
       }
-      setPrinting(false);
-    };
 
-    const printWindow = iframe.contentWindow;
-    const printDocument = iframe.contentDocument;
-    if (!printWindow || !printDocument) {
-      cleanup();
-      setMessage('Failed to create print preview');
-      return;
-    }
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.style.position = 'fixed';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.style.opacity = '0';
+      iframe.style.pointerEvents = 'none';
+      document.body.appendChild(iframe);
 
-    let cleaned = false;
-    const safeCleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      window.removeEventListener('focus', handleWindowFocus);
-      cleanup();
-    };
-
-    const handleWindowFocus = () => {
-      window.setTimeout(safeCleanup, 150);
-    };
-
-    printWindow.onafterprint = () => {
-      safeCleanup();
-    };
-
-    try {
-      printDocument.open();
-      printDocument.write(buildPrintDocument(printOptions));
-      printDocument.close();
-    } catch (err) {
-      safeCleanup();
-      setMessage(err instanceof Error ? err.message : 'Failed to render print document');
-      return;
-    }
-
-    window.setTimeout(() => {
-      try {
-        window.addEventListener('focus', handleWindowFocus, { once: true });
-        printWindow.focus();
-        printWindow.print();
+      const cleanup = () => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
         setPrinting(false);
-      } catch (err) {
-        safeCleanup();
-        setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
+      };
+
+      const printWindow = iframe.contentWindow;
+      const printDocument = iframe.contentDocument;
+      if (!printWindow || !printDocument) {
+        cleanup();
+        setMessage('Failed to create print preview');
         return;
       }
-      window.setTimeout(safeCleanup, 60_000);
-    }, 120);
-  }, [buildPrintDocument, eventData, printOptions, printSectionCount, printing]);
+
+      let cleaned = false;
+      const safeCleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        window.removeEventListener('focus', handleWindowFocus);
+        cleanup();
+      };
+
+      const handleWindowFocus = () => {
+        window.setTimeout(safeCleanup, 150);
+      };
+
+      printWindow.onafterprint = () => {
+        safeCleanup();
+      };
+
+      try {
+        printDocument.open();
+        printDocument.write(buildPrintDocument(printOptions, routeMapImageSrc));
+        printDocument.close();
+      } catch (err) {
+        safeCleanup();
+        setMessage(err instanceof Error ? err.message : 'Failed to render print document');
+        return;
+      }
+
+      window.setTimeout(() => {
+        try {
+          void Promise.race([
+            waitForPrintAssets(printDocument),
+            new Promise<void>((resolve) => window.setTimeout(resolve, 3000))
+          ]).then(() => {
+            window.addEventListener('focus', handleWindowFocus, { once: true });
+            printWindow.focus();
+            printWindow.print();
+            setPrinting(false);
+          });
+        } catch (err) {
+          safeCleanup();
+          setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
+          return;
+        }
+        window.setTimeout(safeCleanup, 60_000);
+      }, 120);
+    })();
+  }, [buildPrintDocument, eventData, printOptions, printSectionCount, printableRouteMapUrl, printing]);
 
   if (loading) return <p className="muted">Loading print page…</p>;
   if (error) return <p className="error-text">{error}</p>;
@@ -1046,16 +1279,12 @@ const EventPrintPage = () => {
         <div className="event-print-panel-header">
           <div>
             <p className="event-print-panel-kicker">Printable Event Pack</p>
-            <h3 className="event-print-panel-title">Choose what goes into the PDF</h3>
-            <p className="muted event-print-panel-copy">
-              The browser print dialog will open so you can save the document as PDF.
-            </p>
           </div>
         </div>
         <div className="event-print-panel-options">
           {([
+            ['weekOverview', 'Event Overview'],
             ['route', 'Route'],
-            ['weekOverview', 'Week Overview'],
             ['schedule', 'Schedule']
           ] as Array<[PrintSectionKey, string]>).map(([key, label]) => (
             <label key={key} className="event-print-option">

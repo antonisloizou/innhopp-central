@@ -1,0 +1,722 @@
+:root {
+  color-scheme: light;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #d7dee8;
+  --success: #166534;
+  --success-bg: #dcfce7;
+  --danger: #991b1b;
+  --danger-bg: #fee2e2;
+  --neutral: #1d4ed8;
+  --neutral-bg: #dbeafe;
+  --innhopp: #2b8a3e;
+  --transport: #e6b84a;
+  --ground-crew: #f6dea0;
+  --accommodation: #0d6efd;
+  --meal: #d97706;
+  --other: #7e22ce;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  color: var(--text);
+  font-family: Inter, Arial, sans-serif;
+}
+
+body { padding: 0; }
+
+.print-section {
+  margin-top: 10mm;
+  page-break-inside: avoid;
+}
+
+.print-section:first-child { margin-top: 0; }
+
+.print-section--new-page {
+  break-before: page;
+  page-break-before: always;
+}
+
+.print-section-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.print-section h2 {
+  margin: 0 0 12px;
+  font-size: 22px;
+}
+
+.print-location {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.print-overview-badges,
+.print-entry-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.print-overview-page {
+  page: overview-landscape;
+  display: flex;
+  flex-direction: column;
+}
+
+.print-overview-hero {
+  display: grid;
+  gap: 3mm;
+}
+
+.print-overview-meta {
+  display: flex;
+  justify-content: center;
+}
+
+.print-overview-hero-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.print-overview-dates {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.print-location {
+  margin: 4px 0 0;
+}
+
+.print-overview-board-wrap {
+  margin-top: 4mm;
+  flex: 1;
+}
+
+.print-overview-badges {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.print-overview-badges .print-badge {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.print-overview-summary-badge--slots {
+  background: var(--accommodation);
+  color: #fff;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.print-overview-summary-badge--participants {
+  background: var(--meal);
+  color: #fff;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.print-overview-summary-badge--innhopps {
+  background: var(--innhopp);
+  color: #fff;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.print-overview-board {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.print-overview-board th,
+.print-overview-board td {
+  border: 1px solid var(--border);
+  padding: 5px 6px;
+  vertical-align: top;
+}
+
+.print-overview-board thead th {
+  background: #f8fafc;
+}
+
+.print-overview-axis {
+  width: 15mm;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #f8fafc;
+}
+
+.print-overview-day-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.print-overview-day-date {
+  margin-top: 1px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.print-overview-item {
+  display: block;
+  background: transparent;
+  text-shadow: none;
+}
+
+.print-overview-item + .print-overview-item {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dotted var(--border);
+}
+
+.print-overview-item-title {
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.print-overview-item.type-innhopp .print-overview-item-title {
+  color: var(--innhopp);
+}
+
+.print-overview-item.type-innhopp,
+.print-overview-item.type-transport,
+.print-overview-item.type-ground-crew,
+.print-overview-item.type-accommodation,
+.print-overview-item.type-meal,
+.print-overview-item.type-other {
+  background: transparent;
+  text-shadow: none;
+}
+
+.print-overview-item.type-transport .print-overview-item-title {
+  color: var(--transport);
+}
+
+.print-overview-item.type-ground-crew .print-overview-item-title {
+  color: #8a6d1a;
+}
+
+.print-overview-item.type-accommodation .print-overview-item-title {
+  color: var(--accommodation);
+}
+
+.print-overview-item.type-meal .print-overview-item-title {
+  color: var(--meal);
+}
+
+.print-overview-item.type-other .print-overview-item-title {
+  color: var(--other);
+}
+
+.print-overview-empty {
+  font-size: 10px;
+  color: var(--muted);
+  text-align: center;
+  padding-top: 2px;
+}
+
+.print-overview-night-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.print-overview-night-title {
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 700;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.print-overview-notes {
+  margin-top: 4mm;
+  border-top: 1px solid var(--border);
+  padding-top: 3mm;
+}
+
+.print-overview-notes-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.print-overview-notes-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.print-route-page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(297mm - 22mm - 18mm);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-route-page.print-section--new-page {
+  margin-top: 0;
+}
+
+.print-route-header {
+  display: grid;
+  gap: 10px;
+}
+
+.print-route-title-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.print-route-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+
+.print-route-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.print-route-legend-icon {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  color: #ffffff;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.print-route-legend-icon .material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: 400;
+  font-style: normal;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: block;
+  white-space: nowrap;
+  direction: ltr;
+  font-variation-settings: 'FILL' 0;
+  color: inherit;
+}
+
+.print-route-legend-icon--innhopp { background-color: var(--innhopp); }
+.print-route-legend-icon--accommodation { background-color: var(--accommodation); }
+.print-route-legend-icon--meal { background-color: var(--meal); }
+.print-route-legend-icon--other { background-color: var(--other); }
+
+.print-route-map-frame,
+.print-route-empty {
+  margin: 16px 0 0;
+}
+
+.print-route-map-frame {
+  position: relative;
+  flex: 1 1 auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  min-height: 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-route-map-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.print-route-map-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.print-route-map-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.print-route-map-overlay--standalone {
+  position: relative;
+}
+
+.print-route-empty {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 16px;
+  min-height: 0;
+}
+
+.print-overview-note {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.print-day-block {
+  margin-top: 18px;
+  padding-top: 18px;
+  break-before: page;
+  page-break-before: always;
+}
+
+.print-day-block:first-of-type {
+  break-before: auto;
+  page-break-before: auto;
+}
+
+.print-day-block h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.print-day-block--schedule {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.print-day-block--schedule:first-of-type {
+  padding-top: 0;
+}
+
+.print-schedule-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.print-schedule-table col.print-schedule-col-time {
+  width: 84px;
+}
+
+.print-schedule-table col.print-schedule-col-main {
+  width: auto;
+}
+
+.print-schedule-table col.print-schedule-col-badges {
+  width: 230px;
+}
+
+.print-schedule-table thead {
+  display: table-header-group;
+}
+
+.print-schedule-table tbody {
+  display: table-row-group;
+}
+
+.print-schedule-header-cell {
+  padding: 0 0 14px;
+}
+
+.print-schedule-placeholder-cell {
+  padding: 0;
+}
+
+.print-schedule-header {
+  display: grid;
+  grid-template-columns: 42mm minmax(0, 1fr) 42mm;
+  align-items: center;
+  gap: 4mm;
+}
+
+.print-schedule-header-logo {
+  display: block;
+  justify-self: start;
+  max-width: 40mm;
+  height: 13mm;
+  width: auto;
+  object-fit: contain;
+}
+
+.print-schedule-header-title {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 700;
+  text-align: center;
+}
+
+.print-schedule-header-spacer {
+  width: 40mm;
+  height: 1px;
+  justify-self: end;
+}
+
+.print-schedule-day-heading {
+  font-size: 20px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.print-schedule-day-heading--placeholder {
+  visibility: hidden;
+  margin-top: 0;
+}
+
+.print-day-divider {
+  margin: 12px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.print-day-divider--placeholder {
+  visibility: hidden;
+}
+
+.print-schedule-row {
+  border-top: 1px solid var(--border);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-schedule-day-row {
+  border: 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-schedule-day-cell {
+  padding: 0 0 0;
+}
+
+.print-schedule-time-cell,
+.print-schedule-main-cell,
+.print-schedule-badges-cell {
+  vertical-align: top;
+  padding: 9px 0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.print-schedule-time-cell {
+  padding-right: 14px;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.print-schedule-main-cell {
+  padding-right: 14px;
+}
+
+.print-schedule-badges-cell {
+  text-align: right;
+}
+
+.print-schedule-empty-cell {
+  padding: 18px 0 0;
+}
+
+.print-schedule-day-row + .print-schedule-row {
+  border-top: 0;
+}
+
+.print-entry-time {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.print-entry-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.print-entry-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.print-entry-subtitle {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.print-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  text-align: center;
+  white-space: nowrap;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.print-type-badge { padding: 0.4rem 0.95rem; }
+
+.print-badge.status-success,
+.print-badge.status-danger {
+  min-width: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.status-success {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.status-danger {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.status-neutral {
+  color: var(--neutral);
+  background: var(--neutral-bg);
+}
+
+.print-badge.status-draft {
+  background: #e5e7eb;
+  color: #111827;
+}
+
+.print-badge.status-review {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.print-badge.status-approved {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+.print-badge.status-planned {
+  background: #fecdd3;
+  color: #9b1c1c;
+}
+
+.print-badge.status-launched {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.print-badge.status-scouted {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.print-badge.status-live {
+  background: #2b8a3e;
+  color: #ffffff;
+}
+
+.print-badge.status-past {
+  background: var(--neutral-bg);
+  color: var(--neutral);
+}
+
+.type-innhopp,
+.type-transport,
+.type-ground-crew,
+.type-accommodation,
+.type-meal,
+.type-other {
+  color: #fff;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.type-innhopp { background: var(--innhopp); }
+.type-transport { background: var(--transport); }
+.type-ground-crew { background: var(--ground-crew); }
+.type-accommodation { background: var(--accommodation); }
+.type-meal { background: var(--meal); }
+.type-other { background: var(--other); }
+
+.empty-state {
+  margin: 0;
+  color: var(--muted);
+}
+
+@page { size: A4; margin: 22mm 15mm 18mm 15mm; }
+@page overview-landscape { size: A4 landscape; margin: 14mm 12mm 12mm 12mm; }
+
+@media print {
+  body { padding: 0; }
+
+  .print-section { break-inside: avoid; }
+
+  .print-section--new-page {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .print-day-block { break-inside: avoid; }
+
+  .print-schedule-row,
+  .print-schedule-day-row,
+  .print-schedule-time-cell,
+  .print-schedule-main-cell,
+  .print-schedule-badges-cell {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}
