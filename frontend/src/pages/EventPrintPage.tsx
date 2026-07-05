@@ -654,27 +654,91 @@ const EventPrintPage = () => {
       const scheduleSection = options.schedule
         ? `
           <section class="print-section">
-            <div class="print-section-kicker">Schedule</div>
             ${
               dayBuckets.length === 0
                 ? '<p class="empty-state">No schedule yet.</p>'
                 : dayBuckets
                     .map((day) => {
                       const entries = buildOrderedEntriesForDay(day);
+                      const dayHeader = `
+                        <colgroup>
+                          <col class="print-schedule-col-time" />
+                          <col class="print-schedule-col-main" />
+                          <col class="print-schedule-col-badges" />
+                        </colgroup>
+                        <thead>
+                          <tr>
+                            <th colspan="3" class="print-schedule-header-cell">
+                              <div class="print-schedule-header">
+                                <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
+                                <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
+                                <div class="print-schedule-header-spacer" aria-hidden="true"></div>
+                              </div>
+                            </th>
+                          </tr>
+                          <tr>
+                            <th colspan="3" class="print-schedule-placeholder-cell" aria-hidden="true">
+                              <div class="print-schedule-day-heading print-schedule-day-heading--placeholder">${escapeHtml(day.label)}</div>
+                              <div class="print-day-divider print-day-divider--placeholder"></div>
+                            </th>
+                          </tr>
+                        </thead>
+                      `;
+                      const dayOpeningRow = `
+                        <tr class="print-schedule-day-row">
+                          <td colspan="3" class="print-schedule-day-cell">
+                            <div class="print-schedule-day-heading">${escapeHtml(day.label)}</div>
+                            <div class="print-day-divider"></div>
+                          </td>
+                        </tr>
+                      `;
                       if (entries.length === 0) {
                         return `
-                          <article class="print-day-block">
-                            <h3>${escapeHtml(day.label)}</h3>
-                            <p class="empty-state">Nothing scheduled.</p>
+                          <article class="print-day-block print-day-block--schedule">
+                            <table class="print-schedule-table">
+                              ${dayHeader}
+                              <tbody>
+                                ${dayOpeningRow}
+                                <tr>
+                                  <td colspan="3" class="print-schedule-empty-cell">
+                                    <p class="empty-state">Nothing scheduled.</p>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
                           </article>
                         `;
                       }
                       return `
-                        <article class="print-day-block">
-                          <h3>${escapeHtml(day.label)}</h3>
-                          <ul class="print-entry-list">
-                            ${entries.map(renderEntry).join('')}
-                          </ul>
+                        <article class="print-day-block print-day-block--schedule">
+                          <table class="print-schedule-table">
+                            ${dayHeader}
+                            <tbody>
+                              ${dayOpeningRow}
+                              ${entries
+                                .map((entry) => {
+                                  const status = getScheduleStatusMeta(entry);
+                                  const typeClass = `type-${entry.type.toLowerCase().replace(/\s+/g, '-')}`;
+                                  const metaLine = renderMetaLine(entry);
+                                  return `
+                                    <tr class="print-schedule-row">
+                                      <td class="print-schedule-time-cell">${escapeHtml(entry.hourKey || 'Unscheduled')}</td>
+                                      <td class="print-schedule-main-cell">
+                                        <div class="print-entry-title">${escapeHtml(entry.title)}</div>
+                                        ${metaLine ? `<div class="print-entry-subtitle">${escapeHtml(metaLine)}</div>` : ''}
+                                      </td>
+                                      <td class="print-schedule-badges-cell">
+                                        <div class="print-entry-badges">
+                                          ${status ? `<span class="print-badge status-${status.variant}">${escapeHtml(status.label)}</span>` : ''}
+                                          <span class="print-badge print-type-badge ${typeClass}">${escapeHtml(entry.type.toUpperCase())}</span>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  `;
+                                })
+                                .join('')}
+                            </tbody>
+                          </table>
                         </article>
                       `;
                     })
@@ -711,43 +775,6 @@ const EventPrintPage = () => {
       * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; background: #fff; color: var(--text); font-family: Inter, Arial, sans-serif; }
       body { padding: 0; }
-      .print-running-header {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 30mm;
-        display: grid;
-        grid-template-columns: 42mm minmax(0, 1fr) 42mm;
-        align-items: center;
-        gap: 4mm;
-        padding: 0 4mm;
-        background: #fff;
-      }
-      .print-running-header-logo {
-        display: block;
-        justify-self: start;
-        max-width: 40mm;
-        height: 13mm;
-        width: auto;
-        object-fit: contain;
-      }
-      .print-running-header-title {
-        margin: 0;
-        font-size: 28px;
-        line-height: 1.2;
-        font-weight: 700;
-        text-align: center;
-        grid-column: 2;
-      }
-      .print-running-header-spacer {
-        width: 40mm;
-        height: 1px;
-        justify-self: end;
-      }
-      .print-content {
-        padding-top: 34mm;
-      }
       .print-section { margin-top: 10mm; page-break-inside: avoid; }
       .print-section:first-child { margin-top: 0; }
       .print-section-kicker { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
@@ -757,16 +784,126 @@ const EventPrintPage = () => {
       .print-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0 0; }
       .print-overview-grid dt { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
       .print-overview-grid dd { margin: 0; font-size: 18px; font-weight: 700; }
-      .print-day-block { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--border); break-before: page; page-break-before: always; }
+      .print-day-block { margin-top: 18px; padding-top: 18px; break-before: page; page-break-before: always; }
       .print-day-block:first-of-type { break-before: auto; page-break-before: auto; }
-      .print-day-block h3 { margin: 0 0 14px; font-size: 20px; }
-      .print-entry-list { list-style: none; margin: 0; padding: 0; }
-      .print-entry { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--border); }
-      .print-entry:first-child { border-top: 0; padding-top: 0; }
+      .print-day-block h3 { margin: 0; font-size: 20px; }
+      .print-day-block--schedule {
+        margin-top: 0;
+        padding-top: 0;
+      }
+      .print-day-block--schedule:first-of-type {
+        padding-top: 0;
+      }
+      .print-schedule-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .print-schedule-table col.print-schedule-col-time {
+        width: 84px;
+      }
+      .print-schedule-table col.print-schedule-col-main {
+        width: auto;
+      }
+      .print-schedule-table col.print-schedule-col-badges {
+        width: 230px;
+      }
+      .print-schedule-table thead {
+        display: table-header-group;
+      }
+      .print-schedule-table tbody {
+        display: table-row-group;
+      }
+      .print-schedule-header-cell {
+        padding: 0 0 14px;
+      }
+      .print-schedule-placeholder-cell {
+        padding: 0;
+      }
+      .print-schedule-header {
+        display: grid;
+        grid-template-columns: 42mm minmax(0, 1fr) 42mm;
+        align-items: center;
+        gap: 4mm;
+      }
+      .print-schedule-header-logo {
+        display: block;
+        justify-self: start;
+        max-width: 40mm;
+        height: 13mm;
+        width: auto;
+        object-fit: contain;
+      }
+      .print-schedule-header-title {
+        margin: 0;
+        font-size: 28px;
+        line-height: 1.2;
+        font-weight: 700;
+        text-align: center;
+      }
+      .print-schedule-header-spacer {
+        width: 40mm;
+        height: 1px;
+        justify-self: end;
+      }
+      .print-schedule-day-heading {
+        font-size: 20px;
+        font-weight: 700;
+        text-align: left;
+      }
+      .print-schedule-day-heading--placeholder {
+        visibility: hidden;
+        margin-top: 0;
+      }
+      .print-day-divider {
+        margin: 12px 0 0;
+        border-top: 1px solid var(--border);
+      }
+      .print-day-divider--placeholder {
+        visibility: hidden;
+      }
+      .print-schedule-row {
+        border-top: 1px solid var(--border);
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .print-schedule-day-row {
+        border: 0;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .print-schedule-day-cell {
+        padding: 0 0 0;
+      }
+      .print-schedule-time-cell,
+      .print-schedule-main-cell,
+      .print-schedule-badges-cell {
+        vertical-align: top;
+        padding: 9px 0;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .print-schedule-time-cell {
+        padding-right: 14px;
+        font-weight: 700;
+        font-size: 15px;
+      }
+      .print-schedule-main-cell {
+        padding-right: 14px;
+      }
+      .print-schedule-badges-cell {
+        text-align: right;
+      }
+      .print-schedule-empty-cell {
+        padding: 18px 0 0;
+      }
+      .print-schedule-day-row + .print-schedule-row {
+        border-top: 0;
+      }
       .print-entry-time { font-weight: 700; font-size: 15px; }
       .print-entry-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
       .print-entry-title { font-size: 18px; font-weight: 700; line-height: 1.25; }
-      .print-entry-subtitle { margin-top: 6px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+      .print-entry-subtitle { margin-top: 2px; color: var(--muted); font-size: 14px; line-height: 1.35; }
       .print-badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 0.35rem 0.75rem; font-size: 0.75rem; font-weight: 600; line-height: 1; border: 1px solid transparent; text-transform: uppercase; text-align: center; white-space: nowrap; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .print-type-badge { padding: 0.4rem 0.95rem; }
       .print-badge.status-success, .print-badge.status-danger { min-width: 28px; padding-left: 8px; padding-right: 8px; }
@@ -784,20 +921,23 @@ const EventPrintPage = () => {
       .type-meal { background: var(--meal); }
       .type-other { background: var(--other); }
       .empty-state { margin: 0; color: var(--muted); }
-      @page { size: A4; margin: 18mm 15mm 18mm 15mm; }
+      @page { size: A4; margin: 22mm 15mm 18mm 15mm; }
       @media print {
         body { padding: 0; }
         .print-section { break-inside: avoid; }
         .print-day-block { break-inside: avoid; }
+        .print-schedule-row,
+        .print-schedule-day-row,
+        .print-schedule-time-cell,
+        .print-schedule-main-cell,
+        .print-schedule-badges-cell {
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
       }
     </style>
   </head>
   <body>
-    <header class="print-running-header">
-      <img src="${logo}" alt="The Innhopp Project logo" class="print-running-header-logo" />
-      <h1 class="print-running-header-title">${escapeHtml(eventData.name)}</h1>
-      <div class="print-running-header-spacer" aria-hidden="true"></div>
-    </header>
     <main class="print-content">
       ${weekOverviewSection}
       ${routeSection}
