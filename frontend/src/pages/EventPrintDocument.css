@@ -286,7 +286,7 @@ body { padding: 0; }
 
 .print-route-header {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
 
 .print-route-title-row {
@@ -299,8 +299,8 @@ body { padding: 0; }
 .print-route-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 16px;
-  margin-top: 12px;
+  gap: 6px 12px;
+  margin-top: 8px;
 }
 
 .print-route-legend-item {
@@ -347,44 +347,44 @@ body { padding: 0; }
 
 .print-route-map-frame,
 .print-route-empty {
-  margin: 16px 0 0;
+  margin: 8px 0 0;
 }
 
 .print-route-map-frame {
   position: relative;
+  display: flex;
   flex: 1 1 auto;
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
-  min-height: 0;
+  min-height: 254mm;
+  height: 254mm;
+  margin-top: 8px;
   break-inside: avoid;
   page-break-inside: avoid;
 }
 
 .print-route-map-image {
   display: block;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: fill;
 }
 
-.print-route-map-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+.print-route-map-google {
+  display: block;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  pointer-events: none;
+  min-height: 254mm;
 }
 
 .print-route-map-svg {
   display: block;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-}
-
-.print-route-map-overlay--standalone {
-  position: relative;
 }
 
 .print-route-empty {
@@ -696,8 +696,8 @@ body { padding: 0; }
   color: var(--muted);
 }
 
-@page { size: A4; margin: 22mm 15mm 18mm 15mm; }
-@page overview-landscape { size: A4 landscape; margin: 14mm 12mm 12mm 12mm; }
+@page { size: A4; margin: 10mm 8mm 4mm 8mm; }
+@page overview-landscape { size: A4 landscape; margin: 8mm 6mm 6mm 6mm; }
 
 @media print {
   body { padding: 0; }

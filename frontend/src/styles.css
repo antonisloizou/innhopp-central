@@ -2681,6 +2681,82 @@ button.ghost {
   padding-bottom: 2rem;
 }
 
+.event-print-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem;
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  overflow: auto;
+}
+
+.event-print-preview-overlay--debug {
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(3px);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.event-print-preview-shell {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.event-print-preview-root {
+  width: min(1180px, calc(100vw - 3rem));
+  background: #ffffff;
+  color: #0f172a;
+  opacity: 1;
+}
+
+.event-print-preview-overlay--debug .event-print-preview-root {
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.35);
+}
+
+.event-print-preview-root .print-route-map-frame {
+  min-height: 34rem;
+}
+
+.event-print-preview-root .print-route-map-google {
+  width: 100%;
+  min-height: 34rem;
+  flex: 1 1 auto;
+}
+
+@media print {
+  body.event-print-preview-active #root {
+    display: none !important;
+  }
+
+  body.event-print-preview-active .event-print-preview-overlay {
+    position: static !important;
+    inset: auto !important;
+    display: block !important;
+    padding: 0 !important;
+    background: transparent !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+    pointer-events: none !important;
+  }
+
+  body.event-print-preview-active .event-print-preview-shell {
+    display: block !important;
+    width: auto !important;
+  }
+
+  body.event-print-preview-active .event-print-preview-root {
+    width: auto !important;
+    max-width: none !important;
+    opacity: 1 !important;
+    box-shadow: none !important;
+  }
+}
+
 .event-print-panel {
   width: min(760px, 100%);
   margin: 0 auto;

@@ -10,6 +10,7 @@ import { formatEventLocal, getEventLocalDateKey, getEventLocalTimeParts, parseEv
 import { parseCoordinates } from '../utils/coordinates';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
+import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, dedupeConsecutiveRouteStops } from '../utils/routeStops';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
@@ -31,16 +32,6 @@ type DayBucket = {
 type RoutePlannerEntry = ScheduleEntry & {
   routePoints: RouteStop[];
   disabled: boolean;
-};
-
-type StopVisualType = 'innhopp' | 'accommodation' | 'meal' | 'other' | 'generic';
-
-type RouteStop = {
-  id: string;
-  entryId: string;
-  label: string;
-  coordinates: string;
-  visualType: StopVisualType;
 };
 
 const OVERLAY_EXIT_MS = 180;
@@ -96,20 +87,8 @@ const buildDateFromKey = (key: string) => {
   return new Date(year, month - 1, day, 12, 0, 0, 0);
 };
 
-const dedupeConsecutiveStops = (points: RouteStop[]) => {
-  const deduped: RouteStop[] = [];
-  points.forEach((point) => {
-    const trimmed = point.coordinates.trim();
-    if (!trimmed) return;
-    if (deduped[deduped.length - 1]?.coordinates !== trimmed) {
-      deduped.push({ ...point, coordinates: trimmed });
-    }
-  });
-  return deduped;
-};
-
 const buildMapsUrl = (points: RouteStop[]) => {
-  const ordered = dedupeConsecutiveStops(points).map((point) => point.coordinates);
+  const ordered = dedupeConsecutiveRouteStops(points).map((point) => point.coordinates);
   if (ordered.length === 0) return null;
   if (ordered.length === 1) {
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ordered[0])}`;
@@ -585,18 +564,7 @@ const EventRoutePlannerPage = () => {
         const aircraftWarning = getInnhoppAircraftWarning(item, eventData?.aircraft || []);
         const elevationDiff =
           typeof item.elevation === 'number' && typeof takeoff?.elevation === 'number' ? item.elevation - takeoff.elevation : null;
-        const routePoints = hasText(item.coordinates)
-          ? [
-              {
-                id: `i-${item.id}`,
-                entryId: `i-${item.id}`,
-                label: item.name,
-                coordinates: item.coordinates!.trim(),
-                visualType: 'innhopp' as const
-              }
-            ]
-          : [];
-        entries.push({
+        const entry: ScheduleEntry = {
           id: `i-${item.id}`,
           title: `Innhopp #${item.sequence}: ${item.name}`,
           subtitle: '',
@@ -629,7 +597,11 @@ const EventRoutePlannerPage = () => {
           innhoppSecondarySize: item.secondary_landing_area?.size || null,
           innhoppRisk: item.risk_assessment || null,
           innhoppMinimumRequirements: item.minimum_requirements || null,
-          innhoppRescueBoat: item.rescue_boat ?? null,
+          innhoppRescueBoat: item.rescue_boat ?? null
+        };
+        const routePoints = buildScheduleEntryRouteStops(entry);
+        entries.push({
+          ...entry,
           routePoints,
           disabled: routePoints.length === 0
         });
@@ -672,18 +644,7 @@ const EventRoutePlannerPage = () => {
       });
 
       day.others.forEach((item) => {
-        const routePoints = hasText(item.coordinates)
-          ? [
-              {
-                id: `o-${item.id}`,
-                entryId: `o-${item.id}`,
-                label: item.name || 'Other logistics',
-                coordinates: item.coordinates!.trim(),
-                visualType: 'other' as const
-              }
-            ]
-          : [];
-        entries.push({
+        const entry: ScheduleEntry = {
           id: `o-${item.id}`,
           title: item.name || 'Other logistics',
           subtitle: item.description || '',
@@ -695,7 +656,11 @@ const EventRoutePlannerPage = () => {
           })(),
           scheduledAt: item.scheduled_at || undefined,
           notes: item.notes || null,
-          coordinates: item.coordinates || null,
+          coordinates: item.coordinates || null
+        };
+        const routePoints = buildScheduleEntryRouteStops(entry);
+        entries.push({
+          ...entry,
           routePoints,
           disabled: routePoints.length === 0
         });
@@ -703,7 +668,7 @@ const EventRoutePlannerPage = () => {
 
       day.meals.forEach((item) => {
         const mealStop = resolveLocationStop(item.location, item.location_type, item.location_id);
-        entries.push({
+        const entry: ScheduleEntry = {
           id: `meal-${item.id}`,
           title: item.name,
           subtitle: item.location || '',
@@ -716,39 +681,20 @@ const EventRoutePlannerPage = () => {
           scheduledAt: item.scheduled_at || undefined,
           notes: item.notes || null,
           location: item.location || null,
-          routePoints: mealStop
-            ? [
-                {
-                  id: `meal-${item.id}`,
-                  entryId: `meal-${item.id}`,
-                  label: item.name,
-                  coordinates: mealStop.coordinates.trim(),
-                  visualType: 'meal'
-                }
-              ]
-            : [],
-          disabled: !mealStop
+          coordinates: mealStop?.coordinates || null
+        };
+        const routePoints = buildScheduleEntryRouteStops(entry);
+        entries.push({
+          ...entry,
+          routePoints,
+          disabled: routePoints.length === 0
         });
       });
 
       day.accommodations.forEach((item) => {
-        const buildAccommodationRoutePoints = (entryId: string) =>
-          hasText(item.coordinates)
-            ? [
-                {
-                  id: `${entryId}-point`,
-                  entryId,
-                  label: item.name,
-                  coordinates: item.coordinates!.trim(),
-                  visualType: 'accommodation' as const
-                }
-              ]
-            : [];
         if (item.check_in_at && extractDateKey(item.check_in_at) === day.key) {
-          const entryId = `acc-in-${item.id}`;
-          const routePoints = buildAccommodationRoutePoints(entryId);
-          entries.push({
-            id: entryId,
+          const entry: ScheduleEntry = {
+            id: `acc-in-${item.id}`,
             title: `Check-in: ${item.name}`,
             subtitle: '',
             type: 'Accommodation',
@@ -760,16 +706,18 @@ const EventRoutePlannerPage = () => {
             scheduledAt: item.check_in_at || undefined,
             notes: item.notes || null,
             booked: !!item.booked,
-            coordinates: item.coordinates || null,
+            coordinates: item.coordinates || null
+          };
+          const routePoints = buildScheduleEntryRouteStops(entry);
+          entries.push({
+            ...entry,
             routePoints,
             disabled: routePoints.length === 0
           });
         }
         if (item.check_out_at && extractDateKey(item.check_out_at) === day.key) {
-          const entryId = `acc-out-${item.id}`;
-          const routePoints = buildAccommodationRoutePoints(entryId);
-          entries.push({
-            id: entryId,
+          const entry: ScheduleEntry = {
+            id: `acc-out-${item.id}`,
             title: `Check-out: ${item.name}`,
             subtitle: '',
             type: 'Accommodation',
@@ -781,16 +729,18 @@ const EventRoutePlannerPage = () => {
             scheduledAt: item.check_out_at || undefined,
             notes: item.notes || null,
             booked: !!item.booked,
-            coordinates: item.coordinates || null,
+            coordinates: item.coordinates || null
+          };
+          const routePoints = buildScheduleEntryRouteStops(entry);
+          entries.push({
+            ...entry,
             routePoints,
             disabled: routePoints.length === 0
           });
         }
         if (!item.check_in_at && !item.check_out_at) {
-          const entryId = `acc-${item.id}`;
-          const routePoints = buildAccommodationRoutePoints(entryId);
-          entries.push({
-            id: entryId,
+          const entry: ScheduleEntry = {
+            id: `acc-${item.id}`,
             title: item.name,
             subtitle: '',
             type: 'Accommodation',
@@ -799,7 +749,11 @@ const EventRoutePlannerPage = () => {
             scheduledAt: null,
             notes: item.notes || null,
             booked: !!item.booked,
-            coordinates: item.coordinates || null,
+            coordinates: item.coordinates || null
+          };
+          const routePoints = buildScheduleEntryRouteStops(entry);
+          entries.push({
+            ...entry,
             routePoints,
             disabled: routePoints.length === 0
           });
@@ -850,7 +804,7 @@ const EventRoutePlannerPage = () => {
   );
 
   const previewStops = useMemo(() => {
-    const deduped = dedupeConsecutiveStops(selectedPoints);
+    const deduped = dedupeConsecutiveRouteStops(selectedPoints);
     return deduped
       .map((stop, index) => {
         const parsed = parseCoordinates(stop.coordinates);

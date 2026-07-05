@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
@@ -28,8 +29,7 @@ import { listParticipantProfiles, ParticipantProfile } from '../api/participants
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
-import { hasConfiguredGoogleMapsApiKey, googleMapsApiKey } from '../config/google';
-import { parseCoordinates } from '../utils/coordinates';
+import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
 import {
   formatEventLocal,
   getEventLocalDateKey,
@@ -40,6 +40,7 @@ import { countVisibleParticipants } from '../utils/eventParticipants';
 import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
+import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
 
 type DayBucket = {
   date: Date;
@@ -51,21 +52,6 @@ type DayBucket = {
   accommodations: Accommodation[];
   others: OtherLogistic[];
   meals: Meal[];
-};
-
-type StopVisualType = 'innhopp' | 'accommodation' | 'meal' | 'other';
-
-type RouteStop = {
-  id: string;
-  label: string;
-  coordinates: string;
-  visualType: StopVisualType;
-};
-
-type NormalizedRouteStop = RouteStop & {
-  lat: number;
-  lng: number;
-  staticCoordinate: string;
 };
 
 type PrintSectionKey = 'route' | 'weekOverview' | 'schedule';
@@ -84,18 +70,62 @@ const createDefaultPrintOptions = (): PrintOptions => ({
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 const cleanLocation = (val: string) => val.replace(/^#\s*\d+\s*/, '').trim();
 
-const markerColorByType: Record<StopVisualType, string> = {
-  innhopp: '0x2b8a3e',
-  accommodation: '0x0d6efd',
-  meal: '0xd97706',
-  other: '0x7e22ce'
-};
-
 const iconNameByType: Record<StopVisualType, string> = {
   innhopp: 'paragliding',
   accommodation: 'bed',
   meal: 'restaurant',
-  other: 'monitor_heart'
+  other: 'monitor_heart',
+  generic: 'location_on'
+};
+
+const markerColorByType: Record<StopVisualType, string> = {
+  innhopp: '#2b8a3e',
+  accommodation: '#0d6efd',
+  meal: '#d97706',
+  other: '#7e22ce',
+  generic: '#64748b'
+};
+
+let googleMapsLoader: Promise<any> | null = null;
+
+const loadGoogleMapsApi = (targetWindow: Window = window, targetDocument: Document = document) => {
+  if (typeof window === 'undefined') {
+    return Promise.reject(new Error('Google Maps can only load in the browser.'));
+  }
+  if ((targetWindow as any).google?.maps) {
+    return Promise.resolve((targetWindow as any).google.maps);
+  }
+  if (!hasConfiguredGoogleMapsApiKey) {
+    return Promise.reject(new Error('Google Maps API key is not configured.'));
+  }
+  if (targetWindow === window && googleMapsLoader) return googleMapsLoader;
+
+  const loader = new Promise((resolve, reject) => {
+    const callbackName = '__innhoppInitGoogleMapsPrintPreview';
+    (targetWindow as any)[callbackName] = () => {
+      resolve((targetWindow as any).google.maps);
+      delete (targetWindow as any)[callbackName];
+    };
+
+    const script = targetDocument.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsApiKey)}&v=weekly&libraries=marker&loading=async&callback=${callbackName}`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      if (targetWindow === window) {
+        googleMapsLoader = null;
+      }
+      delete (targetWindow as any)[callbackName];
+      reject(new Error('Failed to load Google Maps.'));
+    };
+    targetDocument.head.appendChild(script);
+  });
+
+  if (targetWindow === window) {
+    googleMapsLoader = loader;
+  }
+
+  return loader;
 };
 
 const formatDurationMinutes = (minutes?: number | null) => {
@@ -150,131 +180,9 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const dedupeConsecutiveStops = (points: RouteStop[]) => {
-  const deduped: RouteStop[] = [];
-  points.forEach((point) => {
-    const trimmed = point.coordinates.trim();
-    if (!trimmed || !parseCoordinates(trimmed)) return;
-    if (deduped[deduped.length - 1]?.coordinates !== trimmed) {
-      deduped.push({ ...point, coordinates: trimmed });
-    }
-  });
-  return deduped;
-};
-
-const normalizeRouteStops = (points: RouteStop[]): NormalizedRouteStop[] =>
-  dedupeConsecutiveStops(points)
-    .map((point) => {
-      const parsed = parseCoordinates(point.coordinates);
-      if (!parsed) return null;
-      return {
-        ...point,
-        lat: parsed.lat,
-        lng: parsed.lng,
-        staticCoordinate: `${parsed.lat.toFixed(6)},${parsed.lng.toFixed(6)}`
-      };
-    })
-    .filter((point): point is NormalizedRouteStop => !!point);
-
-const toRouteStops = (entry: ScheduleEntry): RouteStop[] => {
-  const coordinates = entry.coordinates?.trim();
-  if (!coordinates) return [];
-
-  switch (entry.type) {
-    case 'Innhopp':
-      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'innhopp' }];
-    case 'Accommodation':
-      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'accommodation' }];
-    case 'Meal':
-      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'meal' }];
-    case 'Other':
-      return [{ id: entry.id, label: entry.title, coordinates, visualType: 'other' }];
-    default:
-      return [];
-  }
-};
-
-const buildStaticRouteMapUrl = (points: RouteStop[]) => {
-  if (!hasConfiguredGoogleMapsApiKey) return null;
-  const normalized = normalizeRouteStops(points);
-  if (normalized.length === 0) return null;
-
-  const params = new URLSearchParams({
-    key: googleMapsApiKey,
-    size: '640x640',
-    scale: '2',
-    maptype: 'roadmap',
-    format: 'png'
-  });
-
-  params.append('visible', normalized.map((point) => point.staticCoordinate).join('|'));
-  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`;
-};
-
-const fetchImageAsDataUrl = async (url: string) => {
-  const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
-  if (!response.ok) {
-    throw new Error(`Failed to load route map image (${response.status})`);
-  }
-
-  const blob = await response.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Failed to encode route map image.'));
-    };
-    reader.onerror = () => reject(new Error('Failed to read route map image.'));
-    reader.readAsDataURL(blob);
-  });
-};
-
-const buildInlineRouteSvgMarkup = (points: RouteStop[]) => {
-  const parsedStops = normalizeRouteStops(points);
-
-  if (parsedStops.length === 0) return null;
-
-  const width = 1200;
-  const height = 880;
-  const padding = 88;
-  const lats = parsedStops.map((stop) => stop.lat);
-  const lngs = parsedStops.map((stop) => stop.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const latRange = maxLat - minLat || 0.01;
-  const lngRange = maxLng - minLng || 0.01;
-
-  const projectedStops = parsedStops.map((stop) => ({
-    ...stop,
-    x: padding + ((stop.lng - minLng) / lngRange) * (width - padding * 2),
-    y: height - padding - ((stop.lat - minLat) / latRange) * (height - padding * 2)
-  }));
-
-  const polylinePoints = projectedStops.map((stop) => `${stop.x.toFixed(2)},${stop.y.toFixed(2)}`).join(' ');
-
-  const markerMarkup = projectedStops
-    .map(
-      (stop, index) => `
-        <g>
-          <circle cx="${stop.x.toFixed(2)}" cy="${stop.y.toFixed(2)}" r="16" fill="#${markerColorByType[stop.visualType].slice(2)}" stroke="#ffffff" stroke-width="4" />
-          <text x="${stop.x.toFixed(2)}" y="${(stop.y + 5).toFixed(2)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">${index + 1}</text>
-        </g>
-      `
-    )
-    .join('');
-
-  return `
-    <svg class="print-route-map-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Route map preview for the selected event stops" xmlns="http://www.w3.org/2000/svg">
-      <polyline points="${polylinePoints}" fill="none" stroke="#4fa3ff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
-      <polyline points="${polylinePoints}" fill="none" stroke="#1d4ed8" stroke-opacity="0.18" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
-      ${markerMarkup}
-    </svg>
-  `;
+const extractPrintContentHtml = (documentHtml: string) => {
+  const match = documentHtml.match(/<main class="print-content">([\s\S]*)<\/main>/);
+  return match ? match[1] : '';
 };
 
 const waitForPrintAssets = async (doc: Document) => {
@@ -301,6 +209,22 @@ const waitForPrintAssets = async (doc: Document) => {
         })
     )
   );
+};
+
+const waitForMapTiles = async (mapElement: HTMLElement, timeoutMs = 4000) => {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const tileImages = Array.from(mapElement.querySelectorAll('img'));
+    if (tileImages.length > 0) {
+      const allLoaded = tileImages.every((image) => image.complete && image.naturalWidth > 0);
+      if (allLoaded) {
+        return;
+      }
+    }
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 120));
+  }
 };
 
 const OVERVIEW_TIME_BANDS = [
@@ -351,8 +275,17 @@ const EventPrintPage = () => {
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [printDebugMode, setPrintDebugMode] = useState(false);
+  const [debugPreviewOpen, setDebugPreviewOpen] = useState(false);
+  const [routeMapReady, setRouteMapReady] = useState(false);
+  const [routeMapError, setRouteMapError] = useState<string | null>(null);
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions>(() => createDefaultPrintOptions());
-
+  const printPreviewHostRef = useRef<HTMLDivElement | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const mapPolylineRef = useRef<any>(null);
+  const mapMarkersRef = useRef<any[]>([]);
   const load = useCallback(async () => {
     if (!eventId) return;
     setLoading(true);
@@ -757,12 +690,19 @@ const EventPrintPage = () => {
   const printableRouteStops = useMemo(
     () =>
       dayBuckets.flatMap((day) =>
-        buildOrderedEntriesForDay(day).flatMap((entry) => toRouteStops(entry))
+        buildOrderedEntriesForDay(day).flatMap((entry) => buildScheduleEntryRouteStops(entry))
       ),
     [buildOrderedEntriesForDay, dayBuckets]
   );
-  const printableRouteMapUrl = useMemo(() => buildStaticRouteMapUrl(printableRouteStops), [printableRouteStops]);
-  const printableRouteSvgMarkup = useMemo(() => buildInlineRouteSvgMarkup(printableRouteStops), [printableRouteStops]);
+  const printableRouteGeometry = useMemo(
+    () =>
+      normalizeRouteStops(printableRouteStops).map((stop) => ({
+        ...stop,
+        color: markerColorByType[stop.visualType]
+      })),
+    [printableRouteStops]
+  );
+
   const printableOverviewDays = useMemo(
     () =>
       dayBuckets
@@ -821,7 +761,7 @@ const EventPrintPage = () => {
   );
 
   const buildPrintDocument = useCallback(
-    (options: PrintOptions, routeMapImageSrc?: string | null) => {
+    (options: PrintOptions, routeMapMarkup?: string) => {
       if (!eventData) return '';
 
       const hasOverview = options.weekOverview;
@@ -1023,17 +963,10 @@ const EventPrintPage = () => {
               <span class="print-route-legend-item"><span class="print-route-legend-icon print-route-legend-icon--other"><span class="material-symbols-outlined">${iconNameByType.other}</span></span>Other</span>
             </div>
             ${
-              printableRouteMapUrl || printableRouteSvgMarkup
+              routeMapMarkup
                 ? `
                     <figure class="print-route-map-frame">
-                      ${
-                        routeMapImageSrc
-                          ? `<img src="${routeMapImageSrc}" alt="Route map preview for the selected event stops" class="print-route-map-image" />`
-                          : ''
-                      }
-                      <div class="print-route-map-overlay${routeMapImageSrc ? '' : ' print-route-map-overlay--standalone'}">
-                        ${printableRouteSvgMarkup || ''}
-                      </div>
+                      ${routeMapMarkup}
                     </figure>
                   `
                 : '<div class="print-route-empty">No route stops with valid coordinates are available.</div>'
@@ -1163,96 +1096,234 @@ const EventPrintPage = () => {
   </body>
 </html>`;
     },
-    [buildOrderedEntriesForDay, dayBuckets, eventData, nonStaffCount, printableOverviewDays, printableRouteMapUrl, printableRouteStops, printableRouteSvgMarkup, totalSlots]
+    [buildOrderedEntriesForDay, dayBuckets, eventData, nonStaffCount, printableOverviewDays, totalSlots]
   );
+
+  const printPreviewHtml = useMemo(
+    () =>
+      extractPrintContentHtml(
+        buildPrintDocument(
+          printOptions,
+          printOptions.route
+            ? '<div id="print-route-google-map" class="print-route-map-google" aria-label="Route map preview for the selected event stops"></div>'
+            : undefined
+        )
+      ),
+    [buildPrintDocument, printOptions]
+  );
+
+  const fitRouteMap = useCallback(
+    (maps: any, map: any) => {
+      if (printableRouteGeometry.length === 0) return;
+      if (printableRouteGeometry.length === 1) {
+        map.setCenter({ lat: printableRouteGeometry[0].lat, lng: printableRouteGeometry[0].lng });
+        map.setZoom(12);
+        return;
+      }
+      const bounds = new maps.LatLngBounds();
+      printableRouteGeometry.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
+      map.fitBounds(bounds, 56);
+    },
+    [printableRouteGeometry]
+  );
+
+  useEffect(() => {
+    if (!printPreviewOpen || !printOptions.route) {
+      setRouteMapReady(false);
+      setRouteMapError(null);
+      return;
+    }
+    if (printableRouteGeometry.length === 0) {
+      setRouteMapReady(false);
+      setRouteMapError('No route stops with valid coordinates are available.');
+      return;
+    }
+    if (!hasConfiguredGoogleMapsApiKey) {
+      setRouteMapReady(false);
+      setRouteMapError('Google Maps API key is not configured.');
+      return;
+    }
+
+    const mapElement = document.getElementById('print-route-google-map') as HTMLDivElement | null;
+    if (!mapElement) {
+      setRouteMapReady(false);
+      setRouteMapError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setRouteMapReady(false);
+    setRouteMapError(null);
+
+    void loadGoogleMapsApi()
+      .then((maps) => {
+        if (cancelled) return;
+
+        if (!mapInstanceRef.current || mapContainerRef.current !== mapElement) {
+          mapInstanceRef.current = new maps.Map(mapElement, {
+            mapId: 'DEMO_MAP_ID',
+            mapTypeId: 'hybrid',
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false,
+            gestureHandling: 'none',
+            clickableIcons: false
+          });
+          mapContainerRef.current = mapElement;
+        }
+
+        const map = mapInstanceRef.current;
+        mapMarkersRef.current.forEach((marker) => marker.setMap?.(null));
+        mapMarkersRef.current = [];
+        mapPolylineRef.current?.setMap?.(null);
+        mapPolylineRef.current = null;
+
+        mapPolylineRef.current = new maps.Polyline({
+          path: printableRouteGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
+          geodesic: true,
+          strokeColor: '#4fa3ff',
+          strokeOpacity: 0.95,
+          strokeWeight: 4,
+          map
+        });
+
+        mapMarkersRef.current = printableRouteGeometry.map(
+          (stop, index) =>
+            new maps.Marker({
+              position: { lat: stop.lat, lng: stop.lng },
+              map,
+              title: `${index + 1}. ${stop.label}`,
+              label: {
+                text: String(index + 1),
+                color: '#ffffff',
+                fontWeight: '700',
+                fontSize: '12px'
+              },
+              icon: {
+                path: maps.SymbolPath.CIRCLE,
+                fillColor: stop.color,
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 2,
+                scale: 18
+              }
+            })
+        );
+
+        fitRouteMap(maps, map);
+        window.setTimeout(() => {
+          if (cancelled) return;
+          maps.event?.trigger?.(map, 'resize');
+          fitRouteMap(maps, map);
+          maps.event?.addListenerOnce?.(map, 'tilesloaded', () => {
+            if (!cancelled) setRouteMapReady(true);
+          });
+          window.setTimeout(() => {
+            if (!cancelled) setRouteMapReady(true);
+          }, 1800);
+        }, 150);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setRouteMapReady(false);
+          setRouteMapError(err instanceof Error ? err.message : 'Failed to load Google Maps preview.');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fitRouteMap, printOptions.route, printPreviewOpen, printableRouteGeometry]);
+
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      if (!printDebugMode) {
+        setPrintPreviewOpen(false);
+      }
+      setPrinting(false);
+    };
+
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, [printDebugMode]);
+
+  useEffect(() => {
+    document.body.classList.toggle('event-print-preview-active', printPreviewOpen);
+    return () => {
+      document.body.classList.remove('event-print-preview-active');
+    };
+  }, [printPreviewOpen]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const host = document.createElement('div');
+    host.className = 'event-print-preview-host';
+    document.body.prepend(host);
+    printPreviewHostRef.current = host;
+
+    return () => {
+      if (host.parentNode) {
+        host.parentNode.removeChild(host);
+      }
+      if (printPreviewHostRef.current === host) {
+        printPreviewHostRef.current = null;
+      }
+    };
+  }, []);
 
   const handleCreatePdf = useCallback(() => {
     if (!eventData || printSectionCount === 0 || printing || typeof document === 'undefined') return;
+    if (printOptions.route && printableRouteStops.length === 0) {
+      setMessage('No route stops with valid coordinates are available.');
+      return;
+    }
+    if (printOptions.route && !hasConfiguredGoogleMapsApiKey) {
+      setMessage('Google Maps API key is not configured.');
+      return;
+    }
 
     setMessage(null);
     setPrinting(true);
+    setDebugPreviewOpen(printDebugMode);
+    setPrintPreviewOpen(true);
+  }, [eventData, printDebugMode, printOptions.route, printSectionCount, printableRouteStops.length, printing]);
 
-    void (async () => {
-      let routeMapImageSrc: string | null = null;
-      if (printOptions.route && printableRouteMapUrl) {
-        try {
-          routeMapImageSrc = await fetchImageAsDataUrl(printableRouteMapUrl);
-        } catch {
-          routeMapImageSrc = null;
+  useEffect(() => {
+    if (!printing || !printPreviewOpen) return;
+    if (printOptions.route && routeMapError) {
+      setMessage(routeMapError);
+      setPrinting(false);
+      return;
+    }
+    if (printOptions.route && !routeMapReady) return;
+
+    if (printDebugMode) {
+      setMessage('Debug preview is open. Printing is skipped while debug mode is enabled.');
+      setPrinting(false);
+      return;
+    }
+
+    const run = async () => {
+      await waitForPrintAssets(document);
+      if (printOptions.route) {
+        const mapElement = document.getElementById('print-route-google-map') as HTMLDivElement | null;
+        if (mapElement) {
+          await waitForMapTiles(mapElement);
         }
       }
-
-      const iframe = document.createElement('iframe');
-      iframe.setAttribute('aria-hidden', 'true');
-      iframe.style.position = 'fixed';
-      iframe.style.width = '0';
-      iframe.style.height = '0';
-      iframe.style.border = '0';
-      iframe.style.opacity = '0';
-      iframe.style.pointerEvents = 'none';
-      document.body.appendChild(iframe);
-
-      const cleanup = () => {
-        if (iframe.parentNode) {
-          iframe.parentNode.removeChild(iframe);
-        }
-        setPrinting(false);
-      };
-
-      const printWindow = iframe.contentWindow;
-      const printDocument = iframe.contentDocument;
-      if (!printWindow || !printDocument) {
-        cleanup();
-        setMessage('Failed to create print preview');
-        return;
-      }
-
-      let cleaned = false;
-      const safeCleanup = () => {
-        if (cleaned) return;
-        cleaned = true;
-        window.removeEventListener('focus', handleWindowFocus);
-        cleanup();
-      };
-
-      const handleWindowFocus = () => {
-        window.setTimeout(safeCleanup, 150);
-      };
-
-      printWindow.onafterprint = () => {
-        safeCleanup();
-      };
-
-      try {
-        printDocument.open();
-        printDocument.write(buildPrintDocument(printOptions, routeMapImageSrc));
-        printDocument.close();
-      } catch (err) {
-        safeCleanup();
-        setMessage(err instanceof Error ? err.message : 'Failed to render print document');
-        return;
-      }
-
       window.setTimeout(() => {
-        try {
-          void Promise.race([
-            waitForPrintAssets(printDocument),
-            new Promise<void>((resolve) => window.setTimeout(resolve, 3000))
-          ]).then(() => {
-            window.addEventListener('focus', handleWindowFocus, { once: true });
-            printWindow.focus();
-            printWindow.print();
-            setPrinting(false);
-          });
-        } catch (err) {
-          safeCleanup();
-          setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
-          return;
-        }
-        window.setTimeout(safeCleanup, 60_000);
-      }, 120);
-    })();
-  }, [buildPrintDocument, eventData, printOptions, printSectionCount, printableRouteMapUrl, printing]);
+        window.print();
+      }, 150);
+    };
+
+    void run().catch((err) => {
+      setPrinting(false);
+      setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
+    });
+  }, [printDebugMode, printOptions.route, printPreviewOpen, printing, routeMapError, routeMapReady]);
 
   if (loading) return <p className="muted">Loading print page…</p>;
   if (error) return <p className="error-text">{error}</p>;
@@ -1274,6 +1345,29 @@ const EventPrintPage = () => {
       </header>
 
       {message ? <p className="error-text">{message}</p> : null}
+
+      {printPreviewOpen && printPreviewHostRef.current
+        ? createPortal(
+            <section
+              className={`event-print-preview-overlay${printDebugMode ? ' event-print-preview-overlay--debug' : ''}`}
+              aria-hidden={!printDebugMode}
+            >
+              <div className="event-print-preview-shell">
+                <style>{`
+                  @font-face {
+                    font-family: 'Material Symbols Outlined';
+                    font-style: normal;
+                    font-weight: 400;
+                    src: url('${materialSymbolsOutlinedTtf}') format('truetype');
+                  }
+                `}</style>
+                <style>{printDocumentCss}</style>
+                <div className="event-print-preview-root" dangerouslySetInnerHTML={{ __html: printPreviewHtml }} />
+              </div>
+            </section>,
+            printPreviewHostRef.current
+          )
+        : null}
 
       <article className="card event-print-panel">
         <div className="event-print-panel-header">
@@ -1302,6 +1396,15 @@ const EventPrintPage = () => {
               <span>{label}</span>
             </label>
           ))}
+          <label className="event-print-option">
+            <input
+              type="checkbox"
+              checked={printDebugMode}
+              onChange={(event) => setPrintDebugMode(event.target.checked)}
+              disabled={printing}
+            />
+            <span>Debug print preview</span>
+          </label>
         </div>
         <div className="event-print-panel-actions">
           <button
@@ -1312,6 +1415,20 @@ const EventPrintPage = () => {
           >
             {printing ? 'Preparing…' : 'Create PDF'}
           </button>
+          {debugPreviewOpen ? (
+            <button
+              type="button"
+              className="button-link secondary"
+              onClick={() => {
+                setDebugPreviewOpen(false);
+                setPrintPreviewOpen(false);
+                setPrinting(false);
+                setMessage(null);
+              }}
+            >
+              Close Debug Preview
+            </button>
+          ) : null}
         </div>
       </article>
     </section>
