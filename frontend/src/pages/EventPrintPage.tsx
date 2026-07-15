@@ -1480,7 +1480,7 @@ const EventPrintPage = () => {
         <div className="event-print-panel-actions">
           <button
             type="button"
-            className="button-link secondary"
+            className="button-link primary"
             onClick={handleOpenPrintPreview}
             disabled={printSectionCount === 0 || printing}
           >
