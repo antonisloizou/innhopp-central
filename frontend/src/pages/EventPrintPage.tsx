@@ -57,6 +57,8 @@ type DayBucket = {
 type PrintSectionKey = 'route' | 'weekOverview' | 'schedule';
 type PrintOptions = Record<PrintSectionKey, boolean>;
 
+const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'];
+
 const DEFAULT_PRINT_OPTIONS: PrintOptions = {
   route: true,
   weekOverview: true,
@@ -65,6 +67,15 @@ const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 
 const createDefaultPrintOptions = (): PrintOptions => ({
   ...DEFAULT_PRINT_OPTIONS
+});
+
+const createDefaultTypeFilters = (): Record<EntryType, boolean> => ({
+  Innhopp: true,
+  Transport: true,
+  'Ground Crew': true,
+  Accommodation: true,
+  Other: true,
+  Meal: true
 });
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
@@ -275,12 +286,12 @@ const EventPrintPage = () => {
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [printing, setPrinting] = useState(false);
-  const [printDebugMode, setPrintDebugMode] = useState(false);
   const [debugPreviewOpen, setDebugPreviewOpen] = useState(false);
   const [routeMapReady, setRouteMapReady] = useState(false);
   const [routeMapError, setRouteMapError] = useState<string | null>(null);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions>(() => createDefaultPrintOptions());
+  const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>(() => createDefaultTypeFilters());
   const printPreviewHostRef = useRef<HTMLDivElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -323,6 +334,7 @@ const EventPrintPage = () => {
 
   useEffect(() => {
     setPrintOptions(createDefaultPrintOptions());
+    setTypeFilters(createDefaultTypeFilters());
   }, [eventId]);
 
   const handleDelete = async () => {
@@ -355,6 +367,17 @@ const EventPrintPage = () => {
   };
 
   const visibleGroundCrews = participantOnly ? [] : groundCrews;
+  const visibleTypeFilterOrder = participantOnly
+    ? typeFilterOrder.filter((type) => type !== 'Ground Crew')
+    : typeFilterOrder;
+  const typeBadgeClassNames: Record<EntryType, string> = {
+    Innhopp: 'schedule-type-badge schedule-type-badge--innhopp',
+    Transport: 'schedule-type-badge schedule-type-badge--transport',
+    'Ground Crew': 'schedule-type-badge schedule-type-badge--ground-crew',
+    Accommodation: 'schedule-type-badge schedule-type-badge--accommodation',
+    Meal: 'schedule-type-badge schedule-type-badge--meal',
+    Other: 'schedule-type-badge schedule-type-badge--other'
+  };
   const aircraftByID = useMemo(() => {
     const entries = (eventData?.aircraft || []).map((aircraft) => [aircraft.id, aircraft] as const);
     return new Map(entries);
@@ -769,6 +792,9 @@ const EventPrintPage = () => {
       const hasSchedule = options.schedule;
       const overviewNeedsPageBreak = hasOverview && (hasRoute || hasSchedule);
       const scheduleNeedsPageBreak = hasOverview || hasRoute;
+      const scheduleTypeFilterSet = new Set(
+        visibleTypeFilterOrder.filter((type) => typeFilters[type])
+      );
 
       const renderMetaLine = (entry: ScheduleEntry) => {
         const base = entry.routeDurationLabel && (entry.routeVehiclesLabel || entry.type === 'Innhopp')
@@ -983,7 +1009,7 @@ const EventPrintPage = () => {
                 ? '<p class="empty-state">No schedule yet.</p>'
                 : dayBuckets
                     .map((day) => {
-                      const entries = buildOrderedEntriesForDay(day);
+                      const entries = buildOrderedEntriesForDay(day).filter((entry) => scheduleTypeFilterSet.has(entry.type));
                       const dayHeader = `
                         <colgroup>
                           <col class="print-schedule-col-time" />
@@ -1096,7 +1122,16 @@ const EventPrintPage = () => {
   </body>
 </html>`;
     },
-    [buildOrderedEntriesForDay, dayBuckets, eventData, nonStaffCount, printableOverviewDays, totalSlots]
+    [
+      buildOrderedEntriesForDay,
+      dayBuckets,
+      eventData,
+      nonStaffCount,
+      printableOverviewDays,
+      totalSlots,
+      typeFilters,
+      visibleTypeFilterOrder
+    ]
   );
 
   const printPreviewHtml = useMemo(
@@ -1237,7 +1272,7 @@ const EventPrintPage = () => {
 
   useEffect(() => {
     const handleAfterPrint = () => {
-      if (!printDebugMode) {
+      if (!debugPreviewOpen) {
         setPrintPreviewOpen(false);
       }
       setPrinting(false);
@@ -1247,7 +1282,7 @@ const EventPrintPage = () => {
     return () => {
       window.removeEventListener('afterprint', handleAfterPrint);
     };
-  }, [printDebugMode]);
+  }, [debugPreviewOpen]);
 
   useEffect(() => {
     document.body.classList.toggle('event-print-preview-active', printPreviewOpen);
@@ -1274,22 +1309,36 @@ const EventPrintPage = () => {
     };
   }, []);
 
-  const handleCreatePdf = useCallback(() => {
-    if (!eventData || printSectionCount === 0 || printing || typeof document === 'undefined') return;
+  const validatePrintRequest = useCallback(() => {
+    if (!eventData || printSectionCount === 0 || printing || typeof document === 'undefined') return false;
     if (printOptions.route && printableRouteStops.length === 0) {
       setMessage('No route stops with valid coordinates are available.');
-      return;
+      return false;
     }
     if (printOptions.route && !hasConfiguredGoogleMapsApiKey) {
       setMessage('Google Maps API key is not configured.');
-      return;
+      return false;
     }
+    return true;
+  }, [eventData, printOptions.route, printSectionCount, printableRouteStops.length, printing]);
+
+  const handleOpenPrintPreview = useCallback(() => {
+    if (!validatePrintRequest()) return;
+
+    setMessage(null);
+    setPrinting(false);
+    setDebugPreviewOpen(true);
+    setPrintPreviewOpen(true);
+  }, [validatePrintRequest]);
+
+  const handleCreatePdf = useCallback(() => {
+    if (!validatePrintRequest()) return;
 
     setMessage(null);
     setPrinting(true);
-    setDebugPreviewOpen(printDebugMode);
+    setDebugPreviewOpen(false);
     setPrintPreviewOpen(true);
-  }, [eventData, printDebugMode, printOptions.route, printSectionCount, printableRouteStops.length, printing]);
+  }, [validatePrintRequest]);
 
   useEffect(() => {
     if (!printing || !printPreviewOpen) return;
@@ -1300,8 +1349,8 @@ const EventPrintPage = () => {
     }
     if (printOptions.route && !routeMapReady) return;
 
-    if (printDebugMode) {
-      setMessage('Debug preview is open. Printing is skipped while debug mode is enabled.');
+    if (debugPreviewOpen) {
+      setMessage('Print preview is open. Printing is skipped while preview mode is enabled.');
       setPrinting(false);
       return;
     }
@@ -1323,7 +1372,7 @@ const EventPrintPage = () => {
       setPrinting(false);
       setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
     });
-  }, [printDebugMode, printOptions.route, printPreviewOpen, printing, routeMapError, routeMapReady]);
+  }, [debugPreviewOpen, printOptions.route, printPreviewOpen, printing, routeMapError, routeMapReady]);
 
   if (loading) return <p className="muted">Loading print page…</p>;
   if (error) return <p className="error-text">{error}</p>;
@@ -1349,8 +1398,8 @@ const EventPrintPage = () => {
       {printPreviewOpen && printPreviewHostRef.current
         ? createPortal(
             <section
-              className={`event-print-preview-overlay${printDebugMode ? ' event-print-preview-overlay--debug' : ''}`}
-              aria-hidden={!printDebugMode}
+              className={`event-print-preview-overlay${debugPreviewOpen ? ' event-print-preview-overlay--debug' : ''}`}
+              aria-hidden={!debugPreviewOpen}
             >
               <div className="event-print-preview-shell">
                 <style>{`
@@ -1396,17 +1445,47 @@ const EventPrintPage = () => {
               <span>{label}</span>
             </label>
           ))}
-          <label className="event-print-option">
-            <input
-              type="checkbox"
-              checked={printDebugMode}
-              onChange={(event) => setPrintDebugMode(event.target.checked)}
-              disabled={printing}
-            />
-            <span>Debug print preview</span>
-          </label>
+          {printOptions.schedule ? (
+            <div className="event-schedule-filters">
+              <strong>Show:</strong>
+              <div className="event-schedule-filter-list">
+                {visibleTypeFilterOrder.map((type) => {
+                  const selected = typeFilters[type];
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() =>
+                        setTypeFilters((prev) => ({
+                          ...prev,
+                          [type]: !prev[type]
+                        }))
+                      }
+                      className="event-schedule-filter-button"
+                      aria-pressed={selected}
+                      disabled={printing}
+                    >
+                      <span
+                        className={`badge ${typeBadgeClassNames[type]} ${selected ? '' : 'schedule-type-badge--inactive'}`.trim()}
+                      >
+                        {type.toUpperCase()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="event-print-panel-actions">
+          <button
+            type="button"
+            className="button-link secondary"
+            onClick={handleOpenPrintPreview}
+            disabled={printSectionCount === 0 || printing}
+          >
+            Print Preview
+          </button>
           <button
             type="button"
             className="button-link primary"
