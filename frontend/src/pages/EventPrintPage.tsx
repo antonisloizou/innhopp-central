@@ -56,6 +56,9 @@ type DayBucket = {
 
 type PrintSectionKey = 'route' | 'weekOverview' | 'schedule';
 type PrintOptions = Record<PrintSectionKey, boolean>;
+type SchedulePrintOptions = {
+  newPagePerDay: boolean;
+};
 
 const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'];
 
@@ -67,6 +70,10 @@ const DEFAULT_PRINT_OPTIONS: PrintOptions = {
 
 const createDefaultPrintOptions = (): PrintOptions => ({
   ...DEFAULT_PRINT_OPTIONS
+});
+
+const createDefaultSchedulePrintOptions = (): SchedulePrintOptions => ({
+  newPagePerDay: true
 });
 
 const createDefaultTypeFilters = (): Record<EntryType, boolean> => ({
@@ -291,6 +298,9 @@ const EventPrintPage = () => {
   const [routeMapError, setRouteMapError] = useState<string | null>(null);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions>(() => createDefaultPrintOptions());
+  const [schedulePrintOptions, setSchedulePrintOptions] = useState<SchedulePrintOptions>(() =>
+    createDefaultSchedulePrintOptions()
+  );
   const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>(() => createDefaultTypeFilters());
   const printPreviewHostRef = useRef<HTMLDivElement | null>(null);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -334,6 +344,7 @@ const EventPrintPage = () => {
 
   useEffect(() => {
     setPrintOptions(createDefaultPrintOptions());
+    setSchedulePrintOptions(createDefaultSchedulePrintOptions());
     setTypeFilters(createDefaultTypeFilters());
   }, [eventId]);
 
@@ -1001,98 +1012,112 @@ const EventPrintPage = () => {
         `
         : '';
 
+      const scheduleDocumentHeader = `
+        <colgroup>
+          <col class="print-schedule-col-time" />
+          <col class="print-schedule-col-main" />
+          <col class="print-schedule-col-badges" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th colspan="3" class="print-schedule-header-cell">
+              <div class="print-schedule-header">
+                <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
+                <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
+                <div class="print-schedule-header-spacer" aria-hidden="true"></div>
+              </div>
+            </th>
+          </tr>
+        </thead>
+      `;
+      const renderScheduleDayRows = (day: DayBucket) => {
+        const entries = buildOrderedEntriesForDay(day).filter((entry) => scheduleTypeFilterSet.has(entry.type));
+        const dayOpeningRow = `
+          <tr class="print-schedule-day-row">
+            <td colspan="3" class="print-schedule-day-cell">
+              <div class="print-schedule-day-heading">${escapeHtml(day.label)}</div>
+              <div class="print-day-divider"></div>
+            </td>
+          </tr>
+        `;
+
+        if (entries.length === 0) {
+          return `
+            ${dayOpeningRow}
+            <tr>
+              <td colspan="3" class="print-schedule-empty-cell">
+                <p class="empty-state">Nothing scheduled.</p>
+              </td>
+            </tr>
+          `;
+        }
+
+        return `
+          ${dayOpeningRow}
+          ${entries
+            .map((entry) => {
+              const status = getScheduleStatusMeta(entry);
+              const typeClass = `type-${entry.type.toLowerCase().replace(/\s+/g, '-')}`;
+              const metaLine = renderMetaLine(entry);
+              return `
+                <tr class="print-schedule-row">
+                  <td class="print-schedule-time-cell">${escapeHtml(entry.hourKey || 'Unscheduled')}</td>
+                  <td class="print-schedule-main-cell">
+                    <div class="print-entry-title">${escapeHtml(entry.title)}</div>
+                    ${metaLine ? `<div class="print-entry-subtitle">${escapeHtml(metaLine)}</div>` : ''}
+                  </td>
+                  <td class="print-schedule-badges-cell">
+                    <div class="print-entry-badges">
+                      ${status ? `<span class="print-badge status-${status.variant}">${escapeHtml(status.label)}</span>` : ''}
+                      <span class="print-badge print-type-badge ${typeClass}">${escapeHtml(entry.type.toUpperCase())}</span>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join('')}
+        `;
+      };
+
       const scheduleSection = hasSchedule
         ? `
           <section class="print-section${scheduleNeedsPageBreak ? ' print-section--new-page' : ''}">
             ${
               dayBuckets.length === 0
                 ? '<p class="empty-state">No schedule yet.</p>'
-                : dayBuckets
-                    .map((day) => {
-                      const entries = buildOrderedEntriesForDay(day).filter((entry) => scheduleTypeFilterSet.has(entry.type));
-                      const dayHeader = `
-                        <colgroup>
-                          <col class="print-schedule-col-time" />
-                          <col class="print-schedule-col-main" />
-                          <col class="print-schedule-col-badges" />
-                        </colgroup>
-                        <thead>
-                          <tr>
-                            <th colspan="3" class="print-schedule-header-cell">
-                              <div class="print-schedule-header">
-                                <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
-                                <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
-                                <div class="print-schedule-header-spacer" aria-hidden="true"></div>
-                              </div>
-                            </th>
-                          </tr>
+                : schedulePrintOptions.newPagePerDay
+                  ? dayBuckets
+                      .map((day) => {
+                        const dayPlaceholderHeader = `
                           <tr>
                             <th colspan="3" class="print-schedule-placeholder-cell" aria-hidden="true">
                               <div class="print-schedule-day-heading print-schedule-day-heading--placeholder">${escapeHtml(day.label)}</div>
                               <div class="print-day-divider print-day-divider--placeholder"></div>
                             </th>
                           </tr>
-                        </thead>
-                      `;
-                      const dayOpeningRow = `
-                        <tr class="print-schedule-day-row">
-                          <td colspan="3" class="print-schedule-day-cell">
-                            <div class="print-schedule-day-heading">${escapeHtml(day.label)}</div>
-                            <div class="print-day-divider"></div>
-                          </td>
-                        </tr>
-                      `;
-                      if (entries.length === 0) {
+                        `;
                         return `
-                          <article class="print-day-block print-day-block--schedule">
+                          <article class="print-day-block print-day-block--schedule print-day-block--page-break">
                             <table class="print-schedule-table">
-                              ${dayHeader}
+                              ${scheduleDocumentHeader.replace('</thead>', `${dayPlaceholderHeader}</thead>`)}
                               <tbody>
-                                ${dayOpeningRow}
-                                <tr>
-                                  <td colspan="3" class="print-schedule-empty-cell">
-                                    <p class="empty-state">Nothing scheduled.</p>
-                                  </td>
-                                </tr>
+                                ${renderScheduleDayRows(day)}
                               </tbody>
                             </table>
                           </article>
                         `;
-                      }
-                      return `
-                        <article class="print-day-block print-day-block--schedule">
-                          <table class="print-schedule-table">
-                            ${dayHeader}
-                            <tbody>
-                              ${dayOpeningRow}
-                              ${entries
-                                .map((entry) => {
-                                  const status = getScheduleStatusMeta(entry);
-                                  const typeClass = `type-${entry.type.toLowerCase().replace(/\s+/g, '-')}`;
-                                  const metaLine = renderMetaLine(entry);
-                                  return `
-                                    <tr class="print-schedule-row">
-                                      <td class="print-schedule-time-cell">${escapeHtml(entry.hourKey || 'Unscheduled')}</td>
-                                      <td class="print-schedule-main-cell">
-                                        <div class="print-entry-title">${escapeHtml(entry.title)}</div>
-                                        ${metaLine ? `<div class="print-entry-subtitle">${escapeHtml(metaLine)}</div>` : ''}
-                                      </td>
-                                      <td class="print-schedule-badges-cell">
-                                        <div class="print-entry-badges">
-                                          ${status ? `<span class="print-badge status-${status.variant}">${escapeHtml(status.label)}</span>` : ''}
-                                          <span class="print-badge print-type-badge ${typeClass}">${escapeHtml(entry.type.toUpperCase())}</span>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  `;
-                                })
-                                .join('')}
-                            </tbody>
-                          </table>
-                        </article>
-                      `;
-                    })
-                    .join('')
+                      })
+                      .join('')
+                  : `
+                      <article class="print-day-block print-day-block--schedule">
+                        <table class="print-schedule-table">
+                          ${scheduleDocumentHeader}
+                          <tbody>
+                            ${dayBuckets.map((day) => renderScheduleDayRows(day)).join('')}
+                          </tbody>
+                        </table>
+                      </article>
+                    `
             }
           </section>
         `
@@ -1128,6 +1153,7 @@ const EventPrintPage = () => {
       eventData,
       nonStaffCount,
       printableOverviewDays,
+      schedulePrintOptions.newPagePerDay,
       totalSlots,
       typeFilters,
       visibleTypeFilterOrder
@@ -1292,6 +1318,25 @@ const EventPrintPage = () => {
   }, [printPreviewOpen]);
 
   useEffect(() => {
+    if (!debugPreviewOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDebugPreviewOpen(false);
+      setPrintPreviewOpen(false);
+      setPrinting(false);
+      setMessage(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [debugPreviewOpen]);
+
+  useEffect(() => {
     if (typeof document === 'undefined') return;
 
     const host = document.createElement('div');
@@ -1427,8 +1472,7 @@ const EventPrintPage = () => {
         <div className="event-print-panel-options">
           {([
             ['weekOverview', 'Event Overview'],
-            ['route', 'Route'],
-            ['schedule', 'Schedule']
+            ['route', 'Route']
           ] as Array<[PrintSectionKey, string]>).map(([key, label]) => (
             <label key={key} className="event-print-option">
               <input
@@ -1445,37 +1489,69 @@ const EventPrintPage = () => {
               <span>{label}</span>
             </label>
           ))}
-          {printOptions.schedule ? (
-            <div className="event-schedule-filters">
-              <strong>Show:</strong>
-              <div className="event-schedule-filter-list">
-                {visibleTypeFilterOrder.map((type) => {
-                  const selected = typeFilters[type];
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() =>
-                        setTypeFilters((prev) => ({
-                          ...prev,
-                          [type]: !prev[type]
-                        }))
-                      }
-                      className="event-schedule-filter-button"
-                      aria-pressed={selected}
-                      disabled={printing}
-                    >
-                      <span
-                        className={`badge ${typeBadgeClassNames[type]} ${selected ? '' : 'schedule-type-badge--inactive'}`.trim()}
-                      >
-                        {type.toUpperCase()}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
+          <div className="event-print-option-group">
+            <label className="event-print-option">
+              <input
+                type="checkbox"
+                checked={printOptions.schedule}
+                onChange={(event) =>
+                  setPrintOptions((prev) => ({
+                    ...prev,
+                    schedule: event.target.checked
+                  }))
+                }
+                disabled={printing}
+              />
+              <span>Schedule</span>
+            </label>
+            {printOptions.schedule ? (
+              <>
+                <label className="event-print-option event-print-option--sub">
+                  <input
+                    type="checkbox"
+                    checked={schedulePrintOptions.newPagePerDay}
+                    onChange={(event) =>
+                      setSchedulePrintOptions((prev) => ({
+                        ...prev,
+                        newPagePerDay: event.target.checked
+                      }))
+                    }
+                    disabled={printing}
+                  />
+                  <span>New page for every day</span>
+                </label>
+                <div className="event-schedule-filters">
+                  <strong>Include:</strong>
+                  <div className="event-schedule-filter-list">
+                    {visibleTypeFilterOrder.map((type) => {
+                      const selected = typeFilters[type];
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() =>
+                            setTypeFilters((prev) => ({
+                              ...prev,
+                              [type]: !prev[type]
+                            }))
+                          }
+                          className="event-schedule-filter-button"
+                          aria-pressed={selected}
+                          disabled={printing}
+                        >
+                          <span
+                            className={`badge ${typeBadgeClassNames[type]} ${selected ? '' : 'schedule-type-badge--inactive'}`.trim()}
+                          >
+                            {type.toUpperCase()}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
         </div>
         <div className="event-print-panel-actions">
           <button

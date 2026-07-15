@@ -2797,6 +2797,11 @@ button.ghost {
   margin-top: 1.5rem;
 }
 
+.event-print-option-group {
+  display: grid;
+  gap: 0.9rem;
+}
+
 .event-print-option {
   display: flex;
   align-items: center;
@@ -2807,6 +2812,21 @@ button.ghost {
   background: var(--panel-input-bg);
   font-weight: 700;
   color: var(--text-strong);
+}
+
+.event-print-option--sub {
+  width: calc(100% - 2.5rem);
+  margin-left: 2.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.event-print-option-group .event-schedule-filters {
+  width: calc(100% - 2.5rem);
+  margin-left: 2.5rem;
 }
 
 .event-print-option input[type='checkbox'] {

@@ -413,11 +413,14 @@ body { padding: 0; }
 .print-day-block {
   margin-top: 18px;
   padding-top: 18px;
+}
+
+.print-day-block--page-break {
   break-before: page;
   page-break-before: always;
 }
 
-.print-day-block:first-of-type {
+.print-day-block--page-break:first-of-type {
   break-before: auto;
   page-break-before: auto;
 }
@@ -710,6 +713,11 @@ body { padding: 0; }
   }
 
   .print-day-block { break-inside: avoid; }
+
+  .print-day-block--page-break {
+    break-before: page;
+    page-break-before: always;
+  }
 
   .print-schedule-row,
   .print-schedule-day-row,
