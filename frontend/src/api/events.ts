@@ -105,6 +105,7 @@ export interface Event {
   location?: string;
   slots: number;
   remaining_slots: number;
+  participant_count: number;
   status: EventStatus;
   starts_at: string;
   ends_at?: string | null;

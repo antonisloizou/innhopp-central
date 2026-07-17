@@ -755,7 +755,9 @@ const EventPrintPage = () => {
 
   const totalSlots = eventData?.slots ?? 0;
   const participantLookup = useMemo(() => new Map(participants.map((participant) => [participant.id, participant])), [participants]);
-  const nonStaffCount = eventData ? countVisibleParticipants(eventData.participant_ids, participantLookup) : 0;
+  const nonStaffCount = eventData
+    ? countVisibleParticipants(eventData.participant_ids, participantLookup, eventData.participant_count)
+    : 0;
   const printSectionCount = Object.values(printOptions).filter(Boolean).length;
   const printableRouteStops = useMemo(
     () =>

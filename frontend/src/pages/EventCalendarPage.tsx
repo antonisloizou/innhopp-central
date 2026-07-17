@@ -621,7 +621,7 @@ const EventCalendarPage = () => {
                           </div>
                           <div>
                             <dt>Participants</dt>
-                            <dd>{countVisibleParticipants(event.participant_ids, participantLookup)}</dd>
+                            <dd>{countVisibleParticipants(event.participant_ids, participantLookup, event.participant_count)}</dd>
                           </div>
                           <div>
                             <dt>INNHOPPS</dt>
@@ -708,7 +708,8 @@ const EventCalendarPage = () => {
                     {segments.map((segment) => {
                       const participantCount = countVisibleParticipants(
                         segment.event.participant_ids,
-                        participantLookup
+                        participantLookup,
+                        segment.event.participant_count
                       );
                       return (
                         <Link

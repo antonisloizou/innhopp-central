@@ -1718,7 +1718,11 @@ const EventSchedulePage = () => {
 
   const totalSlots = eventData.slots ?? 0;
   const participantLookup = new Map(participants.map((participant) => [participant.id, participant]));
-  const nonStaffCount = countVisibleParticipants(eventData.participant_ids, participantLookup);
+  const nonStaffCount = countVisibleParticipants(
+    eventData.participant_ids,
+    participantLookup,
+    eventData.participant_count
+  );
   const pastEvent = eventData.status === 'past';
   const openCreateFromDayMenu = (dayKey: string, type: EntryType) => {
     if (!eventId) return;

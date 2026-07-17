@@ -126,6 +126,7 @@ type Event struct {
 	EndsAt                    *time.Time `json:"ends_at,omitempty"`
 	Slots                     int        `json:"slots"`
 	RemainingSlots            int        `json:"remaining_slots"`
+	ParticipantCount          int        `json:"participant_count"`
 	PublicRegistrationSlug    string     `json:"public_registration_slug,omitempty"`
 	PublicRegistrationEnabled bool       `json:"public_registration_enabled"`
 	RegistrationOpenAt        *time.Time `json:"registration_open_at,omitempty"`
@@ -2427,6 +2428,10 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 	if err != nil {
 		return nil, err
 	}
+	participantCountMap, err := h.fetchParticipantCountsForEvents(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 
 	attached := make([]Event, len(events))
 	copy(attached, events)
@@ -2436,8 +2441,45 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 		attached[i].Innhopps = innhoppMap[attached[i].ID]
 		attached[i].AirfieldIDs = airfieldMap[attached[i].ID]
 		attached[i].RemainingSlots = remainingSlotsMap[attached[i].ID]
+		attached[i].ParticipantCount = participantCountMap[attached[i].ID]
 	}
 	return attached, nil
+}
+
+// fetchParticipantCountsForEvents returns roster members who are not staff.
+// Keeping this derived value in the event response lets participant-only
+// sessions display the same count without access to the participant directory.
+func (h *Handler) fetchParticipantCountsForEvents(ctx context.Context, eventIDs []int64) (map[int64]int, error) {
+	result := make(map[int64]int, len(eventIDs))
+	for _, eventID := range eventIDs {
+		result[eventID] = 0
+	}
+
+	rows, err := h.db.Query(ctx, `
+		SELECT ep.event_id, COUNT(*)
+		FROM event_participants ep
+		JOIN participant_profiles p ON p.id = ep.participant_id
+		WHERE ep.event_id = ANY($1)
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		GROUP BY ep.event_id
+	`, eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var eventID int64
+		var participantCount int
+		if err := rows.Scan(&eventID, &participantCount); err != nil {
+			return nil, err
+		}
+		result[eventID] = participantCount
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (h *Handler) fetchRemainingSlotsForEvents(ctx context.Context, eventIDs []int64) (map[int64]int, error) {

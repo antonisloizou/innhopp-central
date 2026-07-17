@@ -33,6 +33,10 @@ describe('countVisibleParticipants', () => {
     expect(countVisibleParticipants([1, 2], new Map())).toBe(2);
   });
 
+  it('uses the event-provided count when participant role data is unavailable', () => {
+    expect(countVisibleParticipants([1, 2], new Map(), 0)).toBe(0);
+  });
+
   it('returns zero for empty input', () => {
     expect(countVisibleParticipants(undefined, new Map())).toBe(0);
   });
