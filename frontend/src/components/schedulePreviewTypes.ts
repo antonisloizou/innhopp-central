@@ -19,6 +19,8 @@ export type ScheduleEntry = {
   description?: string | null;
   notes?: string | null;
   innhoppReason?: string | null;
+  innhoppSequence?: number | null;
+  innhoppName?: string | null;
   innhoppElevation?: number | null;
   innhoppCoordinates?: string | null;
   innhoppTakeoffName?: string | null;

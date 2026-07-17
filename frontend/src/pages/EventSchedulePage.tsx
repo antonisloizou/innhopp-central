@@ -52,6 +52,7 @@ import {
 import Flatpickr from 'react-flatpickr';
 import 'flatpickr/dist/flatpickr.css';
 import { countVisibleParticipants } from '../utils/eventParticipants';
+import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
 import { useResourceStream } from '../hooks/useResourceStream';
 
 const OVERLAY_EXIT_MS = 180;
@@ -1872,7 +1873,7 @@ const EventSchedulePage = () => {
           </div>
           <div>
             <dt>Innhopps</dt>
-            <dd>{eventData.innhopps?.length ?? 0}</dd>
+            <dd>{getInnhoppSequenceCount(eventData.innhopps)}</dd>
           </div>
           <div>
             <dt>Slots</dt>

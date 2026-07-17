@@ -6,6 +6,7 @@ import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/eve
 import { ParticipantProfile, getMyParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 import { countVisibleParticipants } from '../utils/eventParticipants';
+import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
 import { useResourceStream } from '../hooks/useResourceStream';
 
 const normalizeEvents = (raw: Event[]) =>
@@ -624,7 +625,7 @@ const EventCalendarPage = () => {
                           </div>
                           <div>
                             <dt>INNHOPPS</dt>
-                            <dd>{event.innhopps?.length ?? 0}</dd>
+                            <dd>{getInnhoppSequenceCount(event.innhopps)}</dd>
                           </div>
                           <div>
                             <dt>Slots</dt>

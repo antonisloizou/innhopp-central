@@ -42,6 +42,7 @@ import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
 import { createEventOverviewPdfUrl } from '../utils/eventOverviewPdf';
+import { mergeOverviewInnhoppEntries, truncateEventOverviewTitle } from '../utils/eventOverviewInnhopps';
 
 type DayBucket = {
   date: Date;
@@ -554,6 +555,8 @@ const EventPrintPage = () => {
           title: `Innhopp #${item.sequence}: ${item.name}`,
           subtitle: '',
           type: 'Innhopp',
+          innhoppSequence: item.sequence,
+          innhoppName: item.name,
           ready: isInnhoppReady(item),
           coordinates: item.coordinates || null,
           missingCoordinates: !hasText(item.coordinates),
@@ -775,8 +778,8 @@ const EventPrintPage = () => {
       dayBuckets
         .filter((day) => day.key !== 'unscheduled')
         .map((day) => {
-          const entries = buildOrderedEntriesForDay(day).filter(
-            (entry) => entry.type !== 'Transport' && entry.type !== 'Ground Crew'
+          const entries = mergeOverviewInnhoppEntries(
+            buildOrderedEntriesForDay(day).filter((entry) => entry.type !== 'Transport' && entry.type !== 'Ground Crew')
           );
           const bandMap = new Map<string, ScheduleEntry[]>();
           OVERVIEW_TIME_BANDS.forEach((band) => bandMap.set(band.key, []));
@@ -878,7 +881,7 @@ const EventPrintPage = () => {
         const typeClass = `type-${entry.type.toLowerCase().replace(/\s+/g, '-')}`;
         return `
         <div class="print-overview-item ${typeClass}">
-          <span class="print-overview-item-title">${escapeHtml(entry.title)}</span>
+          <span class="print-overview-item-title">${escapeHtml(truncateEventOverviewTitle(entry.title))}</span>
         </div>
       `;
       };
