@@ -743,7 +743,7 @@ const EventCalendarPage = () => {
                             {' • '}
                             {participantCount} participants
                             {' • '}
-                            {segment.event.innhopps?.length ?? 0} innhopps
+                            {getInnhoppSequenceCount(segment.event.innhopps)} innhopps
                           </span>
                         </Link>
                       );
