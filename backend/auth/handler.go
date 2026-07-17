@@ -65,6 +65,31 @@ type Handler struct {
 
 const defaultPostLoginPath = "/events"
 
+// ensureParticipantProfileSQL creates the default self-service profile that
+// accompanies a newly authenticated account. Keeping the statement in one
+// named constant makes its SQL shape directly testable.
+const ensureParticipantProfileSQL = `
+		INSERT INTO participant_profiles (
+			full_name,
+			email,
+			account_id,
+			roles,
+			account_roles
+		)
+		SELECT
+			$1,
+			$2,
+			$3,
+			ARRAY['Participant']::TEXT[],
+			COALESCE($4::TEXT[], ARRAY[]::TEXT[])
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM participant_profiles
+			WHERE account_id = $3 OR lower(email) = $2
+		)
+		ON CONFLICT DO NOTHING
+	`
+
 func sanitizePostLoginPath(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -638,27 +663,7 @@ func (h *Handler) ensureParticipantProfileForAccount(ctx context.Context, accoun
 		fullName = email
 	}
 
-	_, err := h.db.Exec(ctx, `
-		INSERT INTO participant_profiles (
-			full_name,
-			email,
-			account_id,
-			roles,
-			account_roles
-		)
-		SELECT
-			$1,
-			$2,
-			$3,
-			ARRAY['Participant']::TEXT[],
-			$4
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM participant_profiles
-			WHERE account_id = $3 OR lower(email) = $2
-		)
-		ON CONFLICT DO NOTHING
-	`, fullName, email, account.ID, account.Roles)
+	_, err := h.db.Exec(ctx, ensureParticipantProfileSQL, fullName, email, account.ID, account.Roles)
 	return err
 }
 

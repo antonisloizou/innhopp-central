@@ -1,6 +1,21 @@
 package auth
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestEnsureParticipantProfileSQLHasClosedColumnList(t *testing.T) {
+	if !strings.Contains(ensureParticipantProfileSQL, "account_roles\n\t\t)") {
+		t.Fatal("participant-profile insert must close its column list before SELECT")
+	}
+	if !strings.Contains(ensureParticipantProfileSQL, ")\n\t\tON CONFLICT DO NOTHING") {
+		t.Fatal("participant-profile insert must close the NOT EXISTS clause before ON CONFLICT")
+	}
+	if !strings.Contains(ensureParticipantProfileSQL, "COALESCE($4::TEXT[], ARRAY[]::TEXT[])") {
+		t.Fatal("participant-profile insert must store an empty account-role array when the account has no roles")
+	}
+}
 
 func TestNormalizeRoleAcceptsParticipantProfileLabels(t *testing.T) {
 	tests := []struct {
