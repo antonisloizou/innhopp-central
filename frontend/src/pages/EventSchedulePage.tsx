@@ -177,6 +177,7 @@ const EventSchedulePage = () => {
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
   const [dragHoverIndex, setDragHoverIndex] = useState<number | null>(null);
   const [savingDrag, setSavingDrag] = useState(false);
+  const [pendingDragMove, setPendingDragMove] = useState<{ entry: ScheduleEntry; newIso?: string | null } | null>(null);
   const dragGhostRef = useRef<HTMLDivElement | null>(null);
   const dragGhostTimeRef = useRef<HTMLElement | null>(null);
   const pointerDragRef = useRef<{
@@ -1441,22 +1442,18 @@ const EventSchedulePage = () => {
       if (movingIndex === -1) {
         const proposed = computeProposedMinutes(target.index, orderedEntries, day.key, dragInfo.id);
         const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
+        const sourceDay = dayBuckets.find((candidate) => candidate.key === dragInfo.dayKey);
+        const sourceEntry = sourceDay ? buildOrderedEntriesForDay(sourceDay).find((entry) => entry.id === dragInfo.id) : undefined;
         const movedEntry: ScheduleEntry = {
           id: dragInfo.id,
           type: movingType,
           hourKey: newIso ? formatTimeLabel(newIso) : 'Unscheduled',
           sortValue: proposed ?? Number.POSITIVE_INFINITY,
-          title: '',
+          title: sourceEntry?.title || '',
           scheduledAt: newIso || null
         };
         resetPointerDrag();
-        try {
-          await updateScheduledAt({ id: dragInfo.id, type: movingType }, newIso);
-          applyLocalUpdate(movedEntry, newIso);
-          setHighlightId(movedEntry.id);
-        } catch (err) {
-          setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
-        }
+        setPendingDragMove({ entry: { ...sourceEntry, ...movedEntry }, newIso });
         return;
       }
 
@@ -1468,16 +1465,22 @@ const EventSchedulePage = () => {
       const newIso = proposed != null ? buildDayIso(day.date, proposed) : undefined;
 
       resetPointerDrag();
-      try {
-        await updateScheduledAt(movingEntry, newIso);
-        applyLocalUpdate(movingEntry, newIso);
-        setHighlightId(movingEntry.id);
-      } catch (err) {
-        setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
-      }
+      setPendingDragMove({ entry: movingEntry, newIso });
     },
-    [applyLocalUpdate, buildOrderedEntriesForDay, dayBuckets, resetPointerDrag, updateScheduledAt]
+    [buildOrderedEntriesForDay, dayBuckets, resetPointerDrag]
   );
+
+  const confirmDragMove = useCallback(async () => {
+    if (!pendingDragMove) return;
+    try {
+      await updateScheduledAt(pendingDragMove.entry, pendingDragMove.newIso);
+      applyLocalUpdate(pendingDragMove.entry, pendingDragMove.newIso);
+      setHighlightId(pendingDragMove.entry.id);
+      setPendingDragMove(null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to update schedule');
+    }
+  }, [applyLocalUpdate, pendingDragMove, updateScheduledAt]);
 
   useEffect(() => {
     const dragThreshold = 8;
@@ -1621,7 +1624,7 @@ const EventSchedulePage = () => {
 
   const previewOverlayEntry = previewEntry ?? renderedPreviewEntry;
 
-  const overlayOpen = Boolean(timePicker || renderedPreviewEntry);
+  const overlayOpen = Boolean(timePicker || renderedPreviewEntry || pendingDragMove);
 
   useEffect(() => {
     if (!overlayOpen || typeof document === 'undefined') return;
@@ -2244,6 +2247,40 @@ const EventSchedulePage = () => {
                       </button>
                     </div>
                   </div>
+            </div>,
+            document.body
+          )
+        : null}
+      {pendingDragMove && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="event-schedule-move-confirmation-backdrop"
+              role="presentation"
+              onClick={() => {
+                if (!savingDrag) setPendingDragMove(null);
+              }}
+            >
+              <div
+                className="card event-schedule-move-confirmation-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="event-schedule-move-confirmation-title"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 id="event-schedule-move-confirmation-title">Confirm schedule change</h3>
+                <p>
+                  Move{pendingDragMove.entry.title ? ` ${pendingDragMove.entry.title}` : ' this item'} to{' '}
+                  <strong>{pendingDragMove.newIso ? formatEventLocal(pendingDragMove.newIso, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : 'Unscheduled'}</strong>?
+                </p>
+                <div className="event-schedule-move-confirmation-actions">
+                  <button type="button" className="ghost" disabled={savingDrag} onClick={() => setPendingDragMove(null)}>
+                    Cancel
+                  </button>
+                  <button type="button" disabled={savingDrag} onClick={() => void confirmDragMove()}>
+                    {savingDrag ? 'Saving…' : 'Confirm'}
+                  </button>
+                </div>
+              </div>
             </div>,
             document.body
           )

@@ -5225,6 +5225,35 @@ button.ghost.event-route-preview-overlay-button {
   padding: 0.35rem 0.9rem;
 }
 
+.event-schedule-move-confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(4px);
+}
+
+.event-schedule-move-confirmation-panel {
+  width: min(420px, 100%);
+  padding: 1.25rem;
+}
+
+.event-schedule-move-confirmation-panel h3,
+.event-schedule-move-confirmation-panel p {
+  margin-top: 0;
+}
+
+.event-schedule-move-confirmation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .event-schedule-preview-backdrop {
   position: fixed;
   inset: 0;
