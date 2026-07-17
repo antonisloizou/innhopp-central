@@ -29,7 +29,9 @@ const Layout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
-  const forceDocumentNavigation = !!user?.impersonator;
+  // Participant-only sessions need a document navigation so the browser picks up
+  // the session-backed view, matching the event gear menu behavior.
+  const forceDocumentNavigation = !!user?.impersonator || participantOnly;
   const navItems = participantOnly
     ? [{ to: '/events', label: 'Events' }]
       : [

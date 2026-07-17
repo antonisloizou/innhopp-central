@@ -1,6 +1,8 @@
 import { MouseEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { budgetsV1Enabled } from '../config/flags';
+import { useAuth } from '../auth/AuthProvider';
+import { isParticipantOnlySession } from '../auth/access';
 
 export type EventGearMenuPage =
   | 'schedule'
@@ -46,8 +48,19 @@ const EventGearMenu = ({
   onDelete
 }: EventGearMenuProps) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const participantOnly = isParticipantOnlySession(user);
+  const forceDocumentNavigation = !!user?.impersonator || participantOnly;
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const navigateTo = (path: string) => {
+    if (forceDocumentNavigation) {
+      window.location.assign(path);
+      return;
+    }
+    navigate(path);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -88,6 +101,7 @@ const EventGearMenu = ({
       {open && (
         <div className="event-schedule-menu" id={menuId} role="menu">
           {eventMenuPages
+            .filter((item) => !participantOnly || item.key === 'schedule' || item.key === 'route')
             .filter((item) => (budgetsV1Enabled ? true : item.key !== 'budget' && item.key !== 'accounting'))
             .filter((item) => item.key !== currentPage)
             .map((item) => (
@@ -98,7 +112,7 @@ const EventGearMenu = ({
                 role="menuitem"
                 onClick={() => {
                   setOpen(false);
-                  navigate(item.path(eventId));
+                  navigateTo(item.path(eventId));
                 }}
               >
                 {item.label}
@@ -111,43 +125,51 @@ const EventGearMenu = ({
               role="menuitem"
               onClick={() => {
                 setOpen(false);
+                if (forceDocumentNavigation) {
+                  window.location.assign(`/events/${eventId}/print`);
+                  return;
+                }
                 onPrint();
               }}
             >
               Print
             </button>
           ) : null}
-          <button
-            className="event-schedule-menu-item"
-            type="button"
-            role="menuitem"
-            onClick={(event) => {
-              setOpen(false);
-              void onCopy(event);
-            }}
-            disabled={copying}
-          >
-            {copying ? 'Copying...' : 'Copy'}
-          </button>
-          <button
-            className="event-schedule-menu-item danger"
-            type="button"
-            role="menuitem"
-            onClick={(event) => {
-              setOpen(false);
-              void onDelete(event);
-            }}
-            disabled={deleting}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </button>
+          {!participantOnly ? (
+            <>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  setOpen(false);
+                  void onCopy(event);
+                }}
+                disabled={copying}
+              >
+                {copying ? 'Copying...' : 'Copy'}
+              </button>
+              <button
+                className="event-schedule-menu-item danger"
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  setOpen(false);
+                  void onDelete(event);
+                }}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </>
+          ) : null}
           <button
             className="event-schedule-menu-item"
             type="button"
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              navigate('/events');
+              navigateTo('/events');
             }}
           >
             Back

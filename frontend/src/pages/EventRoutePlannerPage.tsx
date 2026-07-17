@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Accommodation, Event, copyEvent, deleteEvent, getEvent, listAccommodations } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
 import { GroundCrew, listGroundCrews, listMeals, listOthers, listTransports, Meal, OtherLogistic, Transport } from '../api/logistics';
@@ -119,11 +119,29 @@ type FullscreenCapableDocument = Document & {
   webkitFullscreenElement?: Element | null;
 };
 
+const waitForGoogleMapsConstructor = (targetWindow: Window = window) =>
+  new Promise<any>((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const maps = (targetWindow as any).google?.maps;
+      if (typeof maps?.Map === 'function') {
+        resolve(maps);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error('Google Maps did not finish loading.'));
+        return;
+      }
+      targetWindow.setTimeout(check, 25);
+    };
+    check();
+  });
+
 const loadGoogleMapsApi = () => {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Google Maps can only load in the browser.'));
   }
-  if ((window as any).google?.maps) {
+  if ((window as any).google?.maps?.Map) {
     return Promise.resolve((window as any).google.maps);
   }
   if (!hasConfiguredGoogleMapsApiKey) {
@@ -134,9 +152,14 @@ const loadGoogleMapsApi = () => {
   googleMapsLoader = new Promise((resolve, reject) => {
     const callbackName = '__innhoppInitGoogleMapsRoutePreview';
     (window as any)[callbackName] = () => {
-      resolve((window as any).google.maps);
+      void waitForGoogleMapsConstructor().then(resolve, reject);
       delete (window as any)[callbackName];
     };
+
+    if ((window as any).google?.maps) {
+      void waitForGoogleMapsConstructor().then(resolve, reject);
+      return;
+    }
 
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsApiKey)}&v=weekly&libraries=marker&loading=async&callback=${callbackName}`;
@@ -197,15 +220,15 @@ const waitForMaterialSymbols = async () => {
 
 const renderPreviewIcon = (type: StopVisualType) => <span className="material-symbols-outlined">{iconNameByType[type]}</span>;
 
-const buildAdvancedMarkerContent = (type: StopVisualType) => {
+const buildAdvancedMarkerContent = (type: StopVisualType, sequence: number) => {
   const wrapper = document.createElement('div');
   wrapper.className = `event-route-preview-marker event-route-preview-marker--${type}`;
   wrapper.style.backgroundColor = markerColorByType[type];
 
-  const icon = document.createElement('span');
-  icon.className = 'material-symbols-outlined event-route-preview-marker-icon';
-  icon.textContent = iconNameByType[type];
-  wrapper.appendChild(icon);
+  const label = document.createElement('span');
+  label.className = 'event-route-preview-marker-index';
+  label.textContent = String(sequence);
+  wrapper.appendChild(label);
 
   return wrapper;
 };
@@ -213,6 +236,11 @@ const buildAdvancedMarkerContent = (type: StopVisualType) => {
 const EventRoutePlannerPage = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const fullscreenRouteLaunch = routeSearchParams.get('fullscreen') === '1';
+  const embeddedRoute = routeSearchParams.get('embedded') === '1';
+  const returnTo = routeSearchParams.get('returnTo');
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
   const canOpenMapsActions = canUseStaffMapsActions(user);
@@ -248,6 +276,15 @@ const EventRoutePlannerPage = () => {
   const [previewClosing, setPreviewClosing] = useState(false);
   const [markerFontReady, setMarkerFontReady] = useState(() => hasLoadedMaterialSymbols());
   const [markerGlyphGateOpen, setMarkerGlyphGateOpen] = useState(() => hasLoadedMaterialSymbols());
+
+  const closeFullscreenRoute = useCallback(() => {
+    setManualPreviewFullscreen(false);
+    if (embeddedRoute && window.parent !== window) {
+      window.parent.postMessage({ type: 'innhopp-close-route-map' }, window.location.origin);
+      return;
+    }
+    navigate(returnTo && returnTo.startsWith('/') ? returnTo : `/events/${eventId}`);
+  }, [embeddedRoute, eventId, navigate, returnTo]);
 
   useEffect(() => {
     if (markerFontReady) {
@@ -783,6 +820,11 @@ const EventRoutePlannerPage = () => {
     allEntries.forEach((entry) => next.set(entry.id, entry));
     return next;
   }, [allEntries]);
+  const entryByIdRef = useRef(entryById);
+
+  useEffect(() => {
+    entryByIdRef.current = entryById;
+  }, [entryById]);
   const routableEntries = useMemo(() => allEntries.filter((entry) => !entry.disabled), [allEntries]);
 
   useEffect(() => {
@@ -837,23 +879,34 @@ const EventRoutePlannerPage = () => {
       y: height - padding - ((stop.lat - minLat) / latRange) * (height - padding * 2)
     }));
   }, [previewStops]);
+  const previewGeometrySignature = useMemo(
+    () => previewGeometry.map((stop) => `${stop.entryId}:${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}:${stop.visualType}`).join('|'),
+    [previewGeometry]
+  );
+  const stablePreviewGeometry = useMemo(() => previewGeometry, [previewGeometrySignature]);
+
+  useEffect(() => {
+    if (!fullscreenRouteLaunch || stablePreviewGeometry.length === 0) return;
+    setManualPreviewFullscreen(true);
+  }, [fullscreenRouteLaunch, stablePreviewGeometry.length]);
 
   const fitPreviewRouteToMap = useCallback(
     (maps?: any, mapArg?: any) => {
       const map = mapArg || mapInstanceRef.current;
-      if (!map || previewGeometry.length === 0) return;
-      if (previewGeometry.length === 1) {
-        map.setCenter({ lat: previewGeometry[0].lat, lng: previewGeometry[0].lng });
-        map.setZoom(previewFullscreen ? 14 : 12);
+      if (!map || stablePreviewGeometry.length === 0) return;
+      if (stablePreviewGeometry.length === 1) {
+        map.setCenter({ lat: stablePreviewGeometry[0].lat, lng: stablePreviewGeometry[0].lng });
+        const targetZoom = previewFullscreen ? 14 : 12;
+        map.setZoom(Math.min(targetZoom, participantOnly ? 15 : targetZoom));
         return;
       }
       const api = maps || (window as any).google?.maps;
       if (!api) return;
       const bounds = new api.LatLngBounds();
-      previewGeometry.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
+      stablePreviewGeometry.forEach((stop) => bounds.extend({ lat: stop.lat, lng: stop.lng }));
       map.fitBounds(bounds, previewFullscreen ? 20 : 56);
     },
-    [previewGeometry, previewFullscreen]
+    [participantOnly, previewFullscreen, stablePreviewGeometry]
   );
 
   useEffect(() => {
@@ -934,7 +987,7 @@ const EventRoutePlannerPage = () => {
   }, []);
 
   useEffect(() => {
-    if (previewGeometry.length === 0) {
+    if (stablePreviewGeometry.length === 0) {
       setMapError(null);
       mapMarkersRef.current.forEach((marker) => {
         if ('setMap' in marker && typeof marker.setMap === 'function') {
@@ -972,8 +1025,9 @@ const EventRoutePlannerPage = () => {
             mapTypeControl: false,
             streetViewControl: false,
             fullscreenControl: false,
-            gestureHandling: 'cooperative',
-            clickableIcons: false
+            gestureHandling: 'greedy',
+            clickableIcons: false,
+            ...(participantOnly ? { maxZoom: 12 } : {})
           });
           mapContainerRef.current = mapRef.current;
         }
@@ -990,7 +1044,7 @@ const EventRoutePlannerPage = () => {
         mapPolylineRef.current?.setMap?.(null);
         mapPolylineRef.current = null;
 
-        const path = previewGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng }));
+        const path = stablePreviewGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng }));
 
         mapPolylineRef.current = new maps.Polyline({
           path,
@@ -1001,23 +1055,24 @@ const EventRoutePlannerPage = () => {
           map
         });
 
-        if (maps.marker?.AdvancedMarkerElement && !markerGlyphGateOpen) {
+        const useAdvancedMarkers = !participantOnly && !!maps.marker?.AdvancedMarkerElement && markerGlyphGateOpen && markerFontReady;
+        if (!participantOnly && maps.marker?.AdvancedMarkerElement && !markerGlyphGateOpen) {
           fitPreviewRouteToMap(maps, map);
           return;
         }
 
-        mapMarkersRef.current = previewGeometry.map((stop) => {
+        mapMarkersRef.current = stablePreviewGeometry.map((stop, markerIndex) => {
           const handleMarkerClick = () => {
-            const entry = entryById.get(stop.entryId);
+            const entry = entryByIdRef.current.get(stop.entryId);
             if (entry) setPreviewEntry(entry);
           };
-          if (maps.marker?.AdvancedMarkerElement) {
+          if (useAdvancedMarkers) {
             const advancedMarker = new maps.marker.AdvancedMarkerElement({
               position: { lat: stop.lat, lng: stop.lng },
               map,
               title: stop.label,
               gmpClickable: true,
-              content: buildAdvancedMarkerContent(stop.visualType)
+              content: buildAdvancedMarkerContent(stop.visualType, markerIndex + 1)
             });
             advancedMarker.addListener?.('click', handleMarkerClick);
             return advancedMarker;
@@ -1027,7 +1082,7 @@ const EventRoutePlannerPage = () => {
             map,
             title: stop.label,
             label: {
-              text: iconNameByType[stop.visualType].slice(0, 1).toUpperCase(),
+              text: String(markerIndex + 1),
               color: '#ffffff',
               fontSize: '13px',
               fontWeight: '700'
@@ -1056,10 +1111,10 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [entryById, fitPreviewRouteToMap, markerGlyphGateOpen, markerFontReady, previewGeometry]);
+  }, [fitPreviewRouteToMap, markerGlyphGateOpen, markerFontReady, stablePreviewGeometry]);
 
   useEffect(() => {
-    if (!previewFullscreen || !mapInstanceRef.current || previewGeometry.length === 0) return;
+    if (!previewFullscreen || !mapInstanceRef.current || stablePreviewGeometry.length === 0) return;
     const map = mapInstanceRef.current;
     const api = (window as any).google?.maps;
     const triggerResize = () => {
@@ -1072,7 +1127,7 @@ const EventRoutePlannerPage = () => {
       window.cancelAnimationFrame(rafId);
       window.clearTimeout(timer);
     };
-  }, [fitPreviewRouteToMap, previewFullscreen, previewGeometry.length]);
+  }, [fitPreviewRouteToMap, previewFullscreen, stablePreviewGeometry.length]);
 
   const toggleEntry = (entry: RoutePlannerEntry) => {
     if (entry.disabled) return;
@@ -1263,6 +1318,15 @@ const EventRoutePlannerPage = () => {
                       </svg>
                     </span>
                   </button>
+                  {fullscreenRouteLaunch ? (
+                    <button
+                      type="button"
+                      className="ghost event-route-preview-fullscreen-button"
+                      onClick={closeFullscreenRoute}
+                    >
+                      Close
+                    </button>
+                  ) : null}
                 </div>
                 {mapError ? (
                   <div className="event-route-preview-map-error muted">{mapError}</div>
@@ -1283,29 +1347,31 @@ const EventRoutePlannerPage = () => {
               <button type="button" className="ghost" onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0}>
                 Clear
               </button>
-              <button
-                type="button"
-                className="ghost"
-                disabled={!mapsUrl}
-                onClick={() => {
-                  if (!mapsUrl) return;
-                  window.open(mapsUrl, '_blank', 'noopener,noreferrer');
-                }}
-              >
-                <span className="event-route-planner-button-label">
-                  <span>Google Maps</span>
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M14 5.75h4.25V10M18 6l-8.5 8.5M10.75 5H8.6C7.16 5 6 6.16 6 7.6v7.8C6 16.84 7.16 18 8.6 18h7.8c1.44 0 2.6-1.16 2.6-2.6v-2.15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-              </button>
+              {canOpenMapsActions ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={!mapsUrl}
+                  onClick={() => {
+                    if (!mapsUrl) return;
+                    window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  <span className="event-route-planner-button-label">
+                    <span>Google Maps</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        d="M14 5.75h4.25V10M18 6l-8.5 8.5M10.75 5H8.6C7.16 5 6 6.16 6 7.6v7.8C6 16.84 7.16 18 8.6 18h7.8c1.44 0 2.6-1.16 2.6-2.6v-2.15"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </button>
+              ) : null}
             </div>
           </>
         )}

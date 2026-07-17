@@ -3420,6 +3420,41 @@ button.ghost {
   margin-top: 0.5rem;
 }
 
+.event-detail-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.event-overview-pdf-render {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1123px;
+  min-height: 794px;
+  padding: 30px 23px 23px;
+  background: #fff;
+  color: #0f172a;
+  pointer-events: none;
+}
+
+.schedule-route-map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: #fff;
+}
+
+.schedule-route-map-overlay-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+
 .event-schedule-headline-text {
   display: grid;
   justify-items: center;
@@ -4710,6 +4745,14 @@ iframe {
   font-weight: 600;
 }
 
+.event-schedule-mobile-time-stack {
+  display: contents;
+}
+
+.event-schedule-mobile-badges {
+  display: none;
+}
+
 .event-schedule-drag-cell {
   display: flex;
   justify-content: center;
@@ -4774,6 +4817,78 @@ iframe {
   flex: 1;
   padding: 0.5rem 0.8rem;
   margin: -0.25rem -1.6rem;
+}
+
+@media (max-width: 720px) {
+  .schedule-list li.event-schedule-row {
+    padding-top: 0;
+  }
+
+  .event-schedule-entry-link {
+    padding-top: 0.25rem;
+  }
+
+  .status-list .schedule-entry.event-schedule-entry-shell {
+    grid-template-columns: 4.75rem minmax(0, 1fr) 2rem;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .event-schedule-mobile-time-stack {
+    display: flex;
+    flex-direction: column;
+    justify-items: center;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding-block: 0.25rem;
+    min-width: 0;
+    text-align: center;
+    transform: translateX(-0.35rem);
+  }
+
+  .event-schedule-mobile-badges {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    width: 100%;
+  }
+
+  .event-schedule-mobile-badges > .schedule-status-badge,
+  .event-schedule-mobile-badges > .event-schedule-mobile-type-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: 1.45rem;
+    width: 1.45rem;
+    height: 1.45rem;
+    padding: 0;
+    border-radius: 999px;
+  }
+
+  .event-schedule-mobile-time-stack .event-schedule-time-button {
+    font-size: 0.9rem;
+    line-height: 1.1;
+  }
+
+  .event-schedule-mobile-type-badge .material-symbols-outlined {
+    font-size: 0.9rem;
+  }
+
+  .event-schedule-route-meta {
+    column-gap: 0.5rem;
+    row-gap: 0.2rem;
+  }
+
+  .event-schedule-entry-main-badges {
+    display: none !important;
+  }
+
+  .event-schedule-drag-handle {
+    padding-inline: 0.2rem;
+  }
 }
 
 .event-route-planner-summary-grid {
@@ -5088,9 +5203,10 @@ button.ghost.event-route-preview-overlay-button {
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
 }
 
-.event-route-preview-marker-icon.material-symbols-outlined {
-  font-size: 18px;
+.event-route-preview-marker-index {
+  font-size: 15px;
   line-height: 1;
+  font-weight: 700;
 }
 
 .event-route-preview-icon--innhopp {

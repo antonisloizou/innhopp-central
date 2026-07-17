@@ -86,6 +86,31 @@ const formatVehiclesLabel = (vehicles?: { name: string; driver?: string; passeng
 
 type Entry = ScheduleEntry;
 
+const mobileTypeGlyphs: Record<EntryType, string> = {
+  Innhopp: 'paragliding',
+  Transport: 'airport_shuttle',
+  'Ground Crew': 'location_on',
+  Accommodation: 'bed',
+  Meal: 'restaurant',
+  Other: 'monitor_heart'
+};
+
+const getEntryReadiness = (entry: Entry) => {
+  switch (entry.type) {
+    case 'Accommodation':
+      return entry.booked && !entry.missingCoordinates;
+    case 'Innhopp':
+      return entry.ready;
+    case 'Meal':
+      return entry.mealComplete;
+    case 'Other':
+      return entry.otherComplete;
+    case 'Transport':
+    case 'Ground Crew':
+      return entry.transportComplete;
+  }
+};
+
 const formatDayLabel = (date: Date) =>
   formatEventLocal(date.toISOString(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -171,6 +196,8 @@ const EventSchedulePage = () => {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
+  const [routeMapOverlayOpen, setRouteMapOverlayOpen] = useState(false);
+  const routeMapFrameRef = useRef<HTMLIFrameElement | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [dragging, setDragging] = useState<{ id: string; dayKey: string } | null>(null);
@@ -544,6 +571,16 @@ const EventSchedulePage = () => {
     setPendingLiveRefresh(false);
     void reload({ preserveLoading: true });
   };
+
+  useEffect(() => {
+    if (!routeMapOverlayOpen) return;
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.source !== routeMapFrameRef.current?.contentWindow) return;
+      if (event.data?.type === 'innhopp-close-route-map') setRouteMapOverlayOpen(false);
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [routeMapOverlayOpen]);
 
   const dayBuckets: DayBucket[] = useMemo(() => {
     if (!eventData) return [];
@@ -1273,12 +1310,21 @@ const EventSchedulePage = () => {
     today.setHours(0, 0, 0, 0);
     setExpandedDays((prev) => {
       const next = { ...prev };
+      const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches;
       dayBuckets.forEach((day) => {
-        if (expandAllDaysRef.current || allDatedBucketsArePast) {
+        if (expandAllDaysRef.current) {
           next[day.key] = true;
           return;
         }
         if (typeof next[day.key] === 'boolean') return;
+        if (isMobile) {
+          next[day.key] = false;
+          return;
+        }
+        if (allDatedBucketsArePast) {
+          next[day.key] = true;
+          return;
+        }
         const isPast = day.date < today;
         next[day.key] = !isPast;
       });
@@ -1744,20 +1790,53 @@ const EventSchedulePage = () => {
   return (
     <section className="stack">
       <header className="page-header">
-        <EventPageTitle event={eventData} section="Schedule" showSlotsBadge={!pastEvent} />
-        {!participantOnly && (
-          <EventGearMenu
-            eventId={eventData.id}
-            currentPage="schedule"
-            copying={copying}
-            deleting={deleting}
-            menuId="event-schedule-actions-menu"
-            onPrint={() => navigate(`/events/${eventData.id}/print`)}
-            onCopy={handleCopy}
-            onDelete={handleDelete}
-          />
-        )}
+        <EventPageTitle
+          event={eventData}
+          section="Schedule"
+          showSlotsBadge={!pastEvent}
+          actions={
+            <>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => setRouteMapOverlayOpen(true)}
+              >
+                Map
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => window.open(`/events/${eventData.id}/print?pdf=event-overview`, '_blank', 'noopener,noreferrer')}
+              >
+                Event Overview
+              </button>
+            </>
+          }
+        />
+        <EventGearMenu
+          eventId={eventData.id}
+          currentPage="schedule"
+          copying={copying}
+          deleting={deleting}
+          menuId="event-schedule-actions-menu"
+          onPrint={() => navigate(`/events/${eventData.id}/print`)}
+          onCopy={handleCopy}
+          onDelete={handleDelete}
+        />
       </header>
+      {routeMapOverlayOpen
+        ? createPortal(
+            <section className="schedule-route-map-overlay" aria-label="Route map">
+              <iframe
+                ref={routeMapFrameRef}
+                className="schedule-route-map-overlay-frame"
+                title={`${eventData.name} route map`}
+                src={`/events/${eventData.id}/route?fullscreen=1&embedded=1`}
+              />
+            </section>,
+            document.body
+          )
+        : null}
       {message && <p className="error-text">{message}</p>}
       {pendingLiveRefresh ? (
         <div className="card">
@@ -2016,7 +2095,7 @@ const EventSchedulePage = () => {
                   <div className="schedule-entry-body">
                     <div className="schedule-entry-header">
                       <strong className="schedule-entry-title">{entry.title}</strong>
-                      <div className="schedule-entry-badges">
+                      <div className="schedule-entry-badges event-schedule-entry-main-badges">
                         {!participantOnly &&
                           (statusBadge || <span className="badge schedule-status-badge schedule-status-badge-placeholder">!</span>)}
                         <span
@@ -2107,6 +2186,7 @@ const EventSchedulePage = () => {
                   {orderedEntries.map((item, idx) => {
                     const isHighlighted = item.id === highlightId;
                     const isTimeEditing = timePicker?.entry.id === item.id;
+                    const isReady = getEntryReadiness(item);
                     const isDragTarget = dragOverDay === day.key && dragHoverIndex === idx;
                     const isDropAfterLast =
                       dragOverDay === day.key && dragHoverIndex === orderedEntries.length && idx === orderedEntries.length - 1;
@@ -2123,25 +2203,14 @@ const EventSchedulePage = () => {
                           isHighlighted || isTimeEditing ? ' event-schedule-entry-shell--highlighted' : ''
                         }${dragging?.id === item.id ? ' event-schedule-entry-shell--dragging' : ''}`}
                       >
-                        <div
-                          className="muted schedule-time event-schedule-time-button"
-                          data-ghost-time="time"
-                          role={participantOnly ? undefined : 'button'}
-                          tabIndex={participantOnly ? undefined : 0}
-                          onClick={(e) => {
-                            if (participantOnly) return;
-                            e.stopPropagation();
-                            setTimePicker({
-                              entry: item,
-                              day,
-                              anchor: e.currentTarget,
-                              anchorRect: snapshotAnchorRect(e.currentTarget)
-                            });
-                          }}
-                          onKeyDown={(e) => {
-                            if (participantOnly) return;
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
+                        <div className="event-schedule-mobile-time-stack">
+                          <div
+                            className="muted schedule-time event-schedule-time-button"
+                            data-ghost-time="time"
+                            role={participantOnly ? undefined : 'button'}
+                            tabIndex={participantOnly ? undefined : 0}
+                            onClick={(e) => {
+                              if (participantOnly) return;
                               e.stopPropagation();
                               setTimePicker({
                                 entry: item,
@@ -2149,11 +2218,41 @@ const EventSchedulePage = () => {
                                 anchor: e.currentTarget,
                                 anchorRect: snapshotAnchorRect(e.currentTarget)
                               });
-                            }
-                          }}
-                          title={participantOnly ? undefined : 'Edit time'}
-                        >
-                          {item.hourKey}
+                            }}
+                            onKeyDown={(e) => {
+                              if (participantOnly) return;
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setTimePicker({
+                                  entry: item,
+                                  day,
+                                  anchor: e.currentTarget,
+                                  anchorRect: snapshotAnchorRect(e.currentTarget)
+                                });
+                              }
+                            }}
+                            title={participantOnly ? undefined : 'Edit time'}
+                          >
+                            {item.hourKey}
+                          </div>
+                          <div className="event-schedule-mobile-badges">
+                            <span
+                              className={`badge ${typeBadgeClassNames[item.type]} event-schedule-mobile-type-badge`}
+                              aria-label={item.type}
+                              title={item.type}
+                            >
+                              <span className="material-symbols-outlined" aria-hidden="true">{mobileTypeGlyphs[item.type]}</span>
+                            </span>
+                            {!participantOnly ? (
+                              <span
+                                className={`badge ${isReady ? 'success' : 'danger'} schedule-status-badge`}
+                                aria-label={isReady ? 'Ready' : 'Needs attention'}
+                              >
+                                {isReady ? '✓' : '!'}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="schedule-entry-content">{renderEntry(item)}</div>
                         <div className="event-schedule-drag-cell">

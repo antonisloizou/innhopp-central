@@ -14,6 +14,7 @@ type Props = {
   showSlotsBadge?: boolean;
   showStatusBadge?: boolean;
   titleWrapper?: (title: ReactNode) => ReactNode;
+  actions?: ReactNode;
 };
 
 const EventPageTitle = ({
@@ -21,7 +22,8 @@ const EventPageTitle = ({
   section,
   showSlotsBadge = false,
   showStatusBadge = true,
-  titleWrapper
+  titleWrapper,
+  actions
 }: Props) => {
   const title = <h2 className="event-detail-title">{`${event.name}: ${section}`}</h2>;
   const remaining = Math.max(event.remaining_slots ?? 0, 0);
@@ -38,6 +40,7 @@ const EventPageTitle = ({
           {showSlots ? <span className={`badge ${isFull ? 'danger' : 'success'}`}>{isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}</span> : null}
         </div>
       ) : null}
+      {actions ? <div className="event-detail-header-actions">{actions}</div> : null}
     </div>
   );
 };

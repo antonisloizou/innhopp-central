@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
 import logo from '../assets/logo.webp';
@@ -41,6 +41,7 @@ import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
+import { createEventOverviewPdfUrl } from '../utils/eventOverviewPdf';
 
 type DayBucket = {
   date: Date;
@@ -106,11 +107,29 @@ const markerColorByType: Record<StopVisualType, string> = {
 
 let googleMapsLoader: Promise<any> | null = null;
 
+const waitForGoogleMapsConstructor = (targetWindow: Window = window) =>
+  new Promise<any>((resolve, reject) => {
+    const deadline = Date.now() + 10000;
+    const check = () => {
+      const maps = (targetWindow as any).google?.maps;
+      if (typeof maps?.Map === 'function') {
+        resolve(maps);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error('Google Maps did not finish loading.'));
+        return;
+      }
+      targetWindow.setTimeout(check, 25);
+    };
+    check();
+  });
+
 const loadGoogleMapsApi = (targetWindow: Window = window, targetDocument: Document = document) => {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Google Maps can only load in the browser.'));
   }
-  if ((targetWindow as any).google?.maps) {
+  if ((targetWindow as any).google?.maps?.Map) {
     return Promise.resolve((targetWindow as any).google.maps);
   }
   if (!hasConfiguredGoogleMapsApiKey) {
@@ -121,9 +140,14 @@ const loadGoogleMapsApi = (targetWindow: Window = window, targetDocument: Docume
   const loader = new Promise((resolve, reject) => {
     const callbackName = '__innhoppInitGoogleMapsPrintPreview';
     (targetWindow as any)[callbackName] = () => {
-      resolve((targetWindow as any).google.maps);
+      void waitForGoogleMapsConstructor(targetWindow).then(resolve, reject);
       delete (targetWindow as any)[callbackName];
     };
+
+    if ((targetWindow as any).google?.maps) {
+      void waitForGoogleMapsConstructor(targetWindow).then(resolve, reject);
+      return;
+    }
 
     const script = targetDocument.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsApiKey)}&v=weekly&libraries=marker&loading=async&callback=${callbackName}`;
@@ -277,6 +301,11 @@ const getScheduleStatusMeta = (
 const EventPrintPage = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const eventOverviewPdf = useMemo(
+    () => new URLSearchParams(location.search).get('pdf') === 'event-overview',
+    [location.search]
+  );
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
   const [eventData, setEventData] = useState<Event | null>(null);
@@ -297,12 +326,16 @@ const EventPrintPage = () => {
   const [routeMapReady, setRouteMapReady] = useState(false);
   const [routeMapError, setRouteMapError] = useState<string | null>(null);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
-  const [printOptions, setPrintOptions] = useState<PrintOptions>(() => createDefaultPrintOptions());
+  const [generatingEventOverviewPdf, setGeneratingEventOverviewPdf] = useState(false);
+  const [printOptions, setPrintOptions] = useState<PrintOptions>(() =>
+    eventOverviewPdf ? { route: false, weekOverview: true, schedule: false } : createDefaultPrintOptions()
+  );
   const [schedulePrintOptions, setSchedulePrintOptions] = useState<SchedulePrintOptions>(() =>
     createDefaultSchedulePrintOptions()
   );
   const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>(() => createDefaultTypeFilters());
   const printPreviewHostRef = useRef<HTMLDivElement | null>(null);
+  const eventOverviewPdfStartedRef = useRef(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
   const mapPolylineRef = useRef<any>(null);
@@ -1173,6 +1206,11 @@ const EventPrintPage = () => {
     [buildPrintDocument, printOptions]
   );
 
+  const eventOverviewPdfHtml = useMemo(
+    () => extractPrintContentHtml(buildPrintDocument({ route: false, weekOverview: true, schedule: false })),
+    [buildPrintDocument]
+  );
+
   const fitRouteMap = useCallback(
     (maps: any, map: any) => {
       if (printableRouteGeometry.length === 0) return;
@@ -1386,6 +1424,25 @@ const EventPrintPage = () => {
   }, [validatePrintRequest]);
 
   useEffect(() => {
+    if (!eventOverviewPdf || !eventData || eventOverviewPdfStartedRef.current) return;
+    eventOverviewPdfStartedRef.current = true;
+    setGeneratingEventOverviewPdf(true);
+
+    void createEventOverviewPdfUrl({
+      html: eventOverviewPdfHtml,
+      css: printDocumentCss,
+      filename: `${eventData.name} - Event Overview.pdf`
+    })
+      .then((pdfUrl) => {
+        window.location.replace(pdfUrl);
+      })
+      .catch((err) => {
+        setMessage(err instanceof Error ? err.message : 'Failed to generate Event Overview PDF');
+        setGeneratingEventOverviewPdf(false);
+      });
+  }, [eventData, eventOverviewPdf, eventOverviewPdfHtml]);
+
+  useEffect(() => {
     if (!printing || !printPreviewOpen) return;
     if (printOptions.route && routeMapError) {
       setMessage(routeMapError);
@@ -1439,6 +1496,7 @@ const EventPrintPage = () => {
       </header>
 
       {message ? <p className="error-text">{message}</p> : null}
+      {generatingEventOverviewPdf ? <p className="muted">Generating Event Overview PDF…</p> : null}
 
       {printPreviewOpen && printPreviewHostRef.current
         ? createPortal(

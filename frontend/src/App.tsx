@@ -72,8 +72,8 @@ const App = () => (
           <Route path="communications" element={<ParticipantRouteGuard><CommunicationsPage /></ParticipantRouteGuard>} />
           <Route path="events/new" element={<ParticipantRouteGuard><EventCreatePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId" element={<EventSchedulePage />} />
-          <Route path="events/:eventId/print" element={<ParticipantRouteGuard eventParam="eventId"><EventPrintPage /></ParticipantRouteGuard>} />
-          <Route path="events/:eventId/route" element={<ParticipantRouteGuard eventParam="eventId"><EventRoutePlannerPage /></ParticipantRouteGuard>} />
+          <Route path="events/:eventId/print" element={<EventPrintPage />} />
+          <Route path="events/:eventId/route" element={<EventRoutePlannerPage />} />
           <Route path="events/airfields" element={<ParticipantRouteGuard><EventAirfieldsUsagePage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/details" element={<ParticipantRouteGuard eventParam="eventId"><EventDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/registrations" element={<ParticipantRouteGuard eventParam="eventId"><EventRegistrationsPage /></ParticipantRouteGuard>} />
