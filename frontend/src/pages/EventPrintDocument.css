@@ -69,8 +69,17 @@ body { padding: 0; }
 
 .print-overview-page {
   page: overview-landscape;
+  width: 100%;
+  height: 196mm;
+  max-height: 196mm;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.print-overview-page-content {
+  width: 100%;
+  transform-origin: top left;
 }
 
 .print-overview-hero {
@@ -103,7 +112,6 @@ body { padding: 0; }
 
 .print-overview-board-wrap {
   margin-top: 4mm;
-  flex: 1;
 }
 
 .print-overview-badges {

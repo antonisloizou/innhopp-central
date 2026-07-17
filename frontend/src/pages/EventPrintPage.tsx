@@ -41,7 +41,7 @@ import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
-import { createEventOverviewPdfUrl } from '../utils/eventOverviewPdf';
+import { createEventOverviewPdfUrl, fitEventOverviewPages } from '../utils/eventOverviewPdf';
 import { mergeOverviewInnhoppEntries, truncateEventOverviewTitle } from '../utils/eventOverviewInnhopps';
 
 type DayBucket = {
@@ -910,7 +910,8 @@ const EventPrintPage = () => {
       const weekOverviewSection = hasOverview
         ? `
           <section class="print-overview-page${overviewNeedsPageBreak ? ' print-overview-page--page-break' : ''}">
-            <header class="print-overview-hero">
+            <div class="print-overview-page-content">
+              <header class="print-overview-hero">
               <div class="print-schedule-header">
                 <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
                 <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
@@ -948,8 +949,8 @@ const EventPrintPage = () => {
                   <p class="print-location">${escapeHtml(eventData.location || 'Location TBD')}</p>
                 </div>
               </div>
-            </header>
-            <div class="print-overview-board-wrap">
+              </header>
+              <div class="print-overview-board-wrap">
               <table class="print-overview-board">
                 <thead>
                   <tr>
@@ -996,8 +997,8 @@ const EventPrintPage = () => {
                   </tr>
                 </tbody>
               </table>
-            </div>
-            ${
+              </div>
+              ${
               printableOverviewDays.some((day) => day.unscheduledEntries.length > 0)
                 ? `
                     <section class="print-overview-notes">
@@ -1014,7 +1015,8 @@ const EventPrintPage = () => {
                     </section>
                   `
                 : ''
-            }
+              }
+            </div>
           </section>
         `
         : '';
@@ -1462,6 +1464,7 @@ const EventPrintPage = () => {
 
     const run = async () => {
       await waitForPrintAssets(document);
+      fitEventOverviewPages(document);
       if (printOptions.route) {
         const mapElement = document.getElementById('print-route-google-map') as HTMLDivElement | null;
         if (mapElement) {

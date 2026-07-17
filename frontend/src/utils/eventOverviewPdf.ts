@@ -19,6 +19,29 @@ const waitForImages = async (container: HTMLElement) => {
   );
 };
 
+/** Scale each overview into its printable page without leaving unused width. */
+export const fitEventOverviewPages = (root: ParentNode) => {
+  root.querySelectorAll<HTMLElement>('.print-overview-page').forEach((page) => {
+    const content = page.querySelector<HTMLElement>('.print-overview-page-content');
+    if (!content || !page.clientWidth || !page.clientHeight) return;
+
+    content.style.width = '100%';
+    content.style.transform = 'none';
+
+    let scale = Math.min(1, page.clientWidth / content.scrollWidth, page.clientHeight / content.scrollHeight);
+
+    // Increasing the unscaled width lets the scaled result retain the full page width
+    // and often reduces wrapped text, so recalculate once after reflow.
+    for (let pass = 0; pass < 2; pass += 1) {
+      content.style.width = `${100 / scale}%`;
+      scale = Math.min(1, page.clientWidth / content.scrollWidth, page.clientHeight / content.scrollHeight);
+    }
+
+    content.style.width = `${100 / scale}%`;
+    content.style.transform = `scale(${scale})`;
+  });
+};
+
 export const createEventOverviewPdfUrl = async ({ html, css, filename }: EventOverviewPdfOptions) => {
   const container = document.createElement('div');
   container.className = 'event-overview-pdf-render';
@@ -28,6 +51,7 @@ export const createEventOverviewPdfUrl = async ({ html, css, filename }: EventOv
   try {
     await waitForImages(container);
     if ('fonts' in document) await document.fonts.ready;
+    fitEventOverviewPages(container);
 
     const canvas = await html2canvas(container, {
       backgroundColor: '#ffffff',

@@ -3432,9 +3432,11 @@ button.ghost {
   position: fixed;
   left: -10000px;
   top: 0;
-  width: 1123px;
-  min-height: 794px;
-  padding: 30px 23px 23px;
+  /* A4 landscape: preserve the page aspect ratio so the PDF renderer can
+     use its full width without shrinking a tall overview. */
+  width: 297mm;
+  height: 210mm;
+  padding: 8mm 6mm 6mm;
   background: #fff;
   color: #0f172a;
   pointer-events: none;
