@@ -135,6 +135,7 @@ const EventBudgetPage = () => {
   const [savingLineItem, setSavingLineItem] = useState(false);
   const [addingLineItem, setAddingLineItem] = useState(false);
   const [editingLineItemID, setEditingLineItemID] = useState<number | null>(null);
+  const [highlightedLineItemID, setHighlightedLineItemID] = useState<number | null>(null);
   const [openLineItemActionsFor, setOpenLineItemActionsFor] = useState<number | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
   const [approvingBudget, setApprovingBudget] = useState(false);
@@ -761,11 +762,9 @@ const EventBudgetPage = () => {
         cost_currency: newLineItem.cost_currency || baseCurrency,
         notes: newLineItem.notes || undefined
       };
-      if (editingLineItemID) {
-        await updateBudgetLineItem(budget.id, editingLineItemID, payload);
-      } else {
-        await createBudgetLineItem(budget.id, payload);
-      }
+      const savedLineItem = editingLineItemID
+        ? await updateBudgetLineItem(budget.id, editingLineItemID, payload)
+        : await createBudgetLineItem(budget.id, payload);
       setNewLineItem((prev) => ({
         ...prev,
         name: '',
@@ -778,7 +777,10 @@ const EventBudgetPage = () => {
       }));
       setAddingLineItem(false);
       setEditingLineItemID(null);
+      setOpenSections((prev) => ({ ...prev, lineItems: true }));
+      setLineItemsSectionFilter('all');
       await loadBudgetData(activeEventID);
+      setHighlightedLineItemID(savedLineItem.id);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : editingLineItemID ? 'Failed to update line item' : 'Failed to add line item');
     } finally {
@@ -1320,6 +1322,23 @@ const EventBudgetPage = () => {
       isEstimateOrHybridMode
     ]
   );
+  useEffect(() => {
+    if (!highlightedLineItemID) return;
+    const timeoutID = window.setTimeout(() => setHighlightedLineItemID(null), 1800);
+    return () => window.clearTimeout(timeoutID);
+  }, [highlightedLineItemID]);
+
+  useEffect(() => {
+    if (!highlightedLineItemID || !scenarioLineItems.some((item) => item.id === highlightedLineItemID)) return;
+    const timeoutID = window.setTimeout(() => {
+      document.getElementById(`budget-line-item-${highlightedLineItemID}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    }, 0);
+    return () => window.clearTimeout(timeoutID);
+  }, [highlightedLineItemID, scenarioLineItems]);
+
   const scenarioForCard = (card: OverviewScenarioCardKey) =>
     summary?.scenarios?.[scenarioSummaryKeyByLabel[overviewScenarios[card]]] || null;
   const expectedCostScenario = scenarioForCard('expectedCost');
@@ -2906,6 +2925,8 @@ const EventBudgetPage = () => {
                     return (
                       <Fragment key={item.id}>
                         <tr
+                          id={`budget-line-item-${item.id}`}
+                          className={highlightedLineItemID === item.id ? 'budget-line-item--highlighted' : undefined}
                           onClick={() => setOpenLineItemActionsFor((prev) => (prev === item.id ? null : item.id))}
                           style={{ cursor: 'pointer' }}
                         >
