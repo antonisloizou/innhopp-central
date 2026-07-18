@@ -461,8 +461,11 @@ const EventBudgetPage = () => {
         });
         return next;
       });
-      setDisplayCurrency((prev) =>
-        currenciesResp.currencies?.includes(prev) ? prev : currenciesResp.base_currency || 'EUR'
+      const savedDisplayCurrency = evtBudget.display_currency || currenciesResp.base_currency || 'EUR';
+      setDisplayCurrency(
+        currenciesResp.currencies?.includes(savedDisplayCurrency)
+          ? savedDisplayCurrency
+          : currenciesResp.base_currency || 'EUR'
       );
       if (sectionResp.length > 0) {
         setNewLineItem((prev) => ({
@@ -682,7 +685,8 @@ const EventBudgetPage = () => {
       const resolvedBaseCurrency = normalizeBudgetCurrency(pendingBaseCurrency || baseCurrency);
       const payload = dedupeCurrencies([resolvedBaseCurrency, ...selectedCurrencies]);
       const updatedBudget = await updateBudget(budget.id, {
-        base_currency: resolvedBaseCurrency
+        base_currency: resolvedBaseCurrency,
+        display_currency: effectiveDisplayCurrency
       });
       const currenciesResp = await updateBudgetCurrencies(budget.id, payload);
       const assumptionsPayload = { ...parameters };

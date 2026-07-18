@@ -16,6 +16,7 @@ const makeSummary = (overrides?: Partial<BudgetSummary>): BudgetSummary => ({
     event_id: 1,
     name: 'Event budget',
     base_currency: 'EUR',
+    display_currency: 'EUR',
     status: 'draft',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()

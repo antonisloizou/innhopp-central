@@ -5,6 +5,7 @@ export type Budget = {
   event_id: number;
   name: string;
   base_currency: string;
+  display_currency: string;
   status: string;
   notes?: string;
   created_at: string;
@@ -120,6 +121,7 @@ export const updateBudget = (
   payload: {
     name?: string;
     base_currency?: string;
+    display_currency?: string;
     status?: string;
     notes?: string;
   }

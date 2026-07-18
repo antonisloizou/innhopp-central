@@ -1026,11 +1026,13 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             event_id INTEGER NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             base_currency TEXT NOT NULL DEFAULT 'EUR',
+            display_currency TEXT NOT NULL DEFAULT 'EUR',
             status TEXT NOT NULL DEFAULT 'draft',
             notes TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
+		`ALTER TABLE event_budgets ADD COLUMN IF NOT EXISTS display_currency TEXT NOT NULL DEFAULT 'EUR'`,
 		`CREATE TABLE IF NOT EXISTS budget_sections (
             id SERIAL PRIMARY KEY,
             budget_id INTEGER NOT NULL REFERENCES event_budgets(id) ON DELETE CASCADE,

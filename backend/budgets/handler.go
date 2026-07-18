@@ -38,14 +38,15 @@ func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
 }
 
 type Budget struct {
-	ID           int64     `json:"id"`
-	EventID      int64     `json:"event_id"`
-	Name         string    `json:"name"`
-	BaseCurrency string    `json:"base_currency"`
-	Status       string    `json:"status"`
-	Notes        string    `json:"notes,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              int64     `json:"id"`
+	EventID         int64     `json:"event_id"`
+	Name            string    `json:"name"`
+	BaseCurrency    string    `json:"base_currency"`
+	DisplayCurrency string    `json:"display_currency"`
+	Status          string    `json:"status"`
+	Notes           string    `json:"notes,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type BudgetSection struct {
@@ -807,14 +808,14 @@ func (h *Handler) createBudgetForEvent(w http.ResponseWriter, r *http.Request) {
 	var budget Budget
 	insertErr := tx.QueryRow(
 		r.Context(),
-		`INSERT INTO event_budgets (event_id, name, base_currency, status, notes)
-         VALUES ($1, $2, $3, 'draft', $4)
-         RETURNING id, event_id, name, base_currency, status, notes, created_at, updated_at`,
+		`INSERT INTO event_budgets (event_id, name, base_currency, display_currency, status, notes)
+		 VALUES ($1, $2, $3, $3, 'draft', $4)
+		 RETURNING id, event_id, name, base_currency, display_currency, status, notes, created_at, updated_at`,
 		eventID,
 		strings.TrimSpace(payload.Name),
 		baseCurrency,
 		strings.TrimSpace(payload.Notes),
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.DisplayCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	if insertErr != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(insertErr, &pgErr) && pgErr.Code == "23505" {
@@ -909,10 +910,11 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload struct {
-		Name         *string `json:"name"`
-		BaseCurrency *string `json:"base_currency"`
-		Status       *string `json:"status"`
-		Notes        *string `json:"notes"`
+		Name            *string `json:"name"`
+		BaseCurrency    *string `json:"base_currency"`
+		DisplayCurrency *string `json:"display_currency"`
+		Status          *string `json:"status"`
+		Notes           *string `json:"notes"`
 	}
 	if err := httpx.DecodeJSON(r, &payload); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
@@ -928,6 +930,14 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 		baseCurrency = normalizeCurrency(*payload.BaseCurrency)
 		if !isValidCurrencyCode(baseCurrency) {
 			httpx.Error(w, http.StatusBadRequest, "base_currency must be a 3-letter ISO code")
+			return
+		}
+	}
+	displayCurrency := current.DisplayCurrency
+	if payload.DisplayCurrency != nil {
+		displayCurrency = normalizeCurrency(*payload.DisplayCurrency)
+		if !isValidCurrencyCode(displayCurrency) {
+			httpx.Error(w, http.StatusBadRequest, "display_currency must be a 3-letter ISO code")
 			return
 		}
 	}
@@ -965,11 +975,11 @@ func (h *Handler) updateBudget(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRow(
 		r.Context(),
 		`UPDATE event_budgets
-         SET name = $1, base_currency = $2, status = $3, notes = $4, updated_at = NOW()
-         WHERE id = $5
-         RETURNING id, event_id, name, base_currency, status, notes, created_at, updated_at`,
-		name, baseCurrency, status, notes, budgetID,
-	).Scan(&updated.ID, &updated.EventID, &updated.Name, &updated.BaseCurrency, &updated.Status, &updated.Notes, &updated.CreatedAt, &updated.UpdatedAt); err != nil {
+         SET name = $1, base_currency = $2, display_currency = $3, status = $4, notes = $5, updated_at = NOW()
+         WHERE id = $6
+         RETURNING id, event_id, name, base_currency, display_currency, status, notes, created_at, updated_at`,
+		name, baseCurrency, displayCurrency, status, notes, budgetID,
+	).Scan(&updated.ID, &updated.EventID, &updated.Name, &updated.BaseCurrency, &updated.DisplayCurrency, &updated.Status, &updated.Notes, &updated.CreatedAt, &updated.UpdatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "budget not found")
 			return
@@ -1845,11 +1855,11 @@ func (h *Handler) fetchBudgetByEvent(ctx context.Context, eventID int64) (Budget
 	var budget Budget
 	err := h.db.QueryRow(
 		ctx,
-		`SELECT id, event_id, name, base_currency, status, notes, created_at, updated_at
+		`SELECT id, event_id, name, base_currency, display_currency, status, notes, created_at, updated_at
          FROM event_budgets
          WHERE event_id = $1`,
 		eventID,
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.DisplayCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	return budget, err
 }
 
@@ -1857,11 +1867,11 @@ func (h *Handler) fetchBudget(ctx context.Context, budgetID int64) (Budget, erro
 	var budget Budget
 	err := h.db.QueryRow(
 		ctx,
-		`SELECT id, event_id, name, base_currency, status, notes, created_at, updated_at
+		`SELECT id, event_id, name, base_currency, display_currency, status, notes, created_at, updated_at
          FROM event_budgets
          WHERE id = $1`,
 		budgetID,
-	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
+	).Scan(&budget.ID, &budget.EventID, &budget.Name, &budget.BaseCurrency, &budget.DisplayCurrency, &budget.Status, &budget.Notes, &budget.CreatedAt, &budget.UpdatedAt)
 	return budget, err
 }
 
