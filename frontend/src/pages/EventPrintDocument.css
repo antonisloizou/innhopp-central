@@ -574,6 +574,72 @@ body { padding: 0; }
   padding: 18px 0 0;
 }
 
+.print-pilot-brief-section {
+  margin-top: 10mm;
+}
+
+.print-pilot-brief-section.print-section--new-page {
+  margin-top: 0;
+}
+
+.print-pilot-brief-page--page-break {
+  break-before: page;
+  page-break-before: always;
+}
+
+.print-pilot-brief-header {
+  display: grid;
+  gap: 8mm;
+  margin-bottom: 8mm;
+}
+
+.print-pilot-brief-header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.print-pilot-brief-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.print-pilot-brief-table th,
+.print-pilot-brief-table td {
+  border: 1px solid var(--border);
+  padding: 9px 10px;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.print-pilot-brief-table th {
+  background: #f8fafc;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.print-pilot-brief-table th:first-child,
+.print-pilot-brief-table td:first-child {
+  width: 23%;
+}
+
+.print-pilot-brief-table th:nth-child(2),
+.print-pilot-brief-table td:nth-child(2) {
+  width: 22%;
+}
+
+.print-pilot-brief-table th:nth-child(3),
+.print-pilot-brief-table td:nth-child(3) {
+  width: 27%;
+}
+
+.print-pilot-brief-empty {
+  color: var(--muted);
+  text-align: center !important;
+}
+
 .print-schedule-day-row + .print-schedule-row {
   border-top: 0;
 }

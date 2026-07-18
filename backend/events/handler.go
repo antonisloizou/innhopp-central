@@ -229,6 +229,7 @@ type Innhopp struct {
 	DistanceByRoad        *float64       `json:"distance_by_road,omitempty"`
 	LandingDistanceByAir  *float64       `json:"landing_distance_by_air,omitempty"`
 	LandingDistanceByRoad *float64       `json:"landing_distance_by_road,omitempty"`
+	SingleLoadOnly        bool           `json:"single_load_only"`
 	PrimaryLandingArea    LandingArea    `json:"primary_landing_area"`
 	SecondaryLandingArea  LandingArea    `json:"secondary_landing_area"`
 	RiskAssessment        string         `json:"risk_assessment,omitempty"`
@@ -350,6 +351,7 @@ type innhoppPayload struct {
 	DistanceByRoad        *float64           `json:"distance_by_road"`
 	LandingDistanceByAir  *float64           `json:"landing_distance_by_air"`
 	LandingDistanceByRoad *float64           `json:"landing_distance_by_road"`
+	SingleLoadOnly        bool               `json:"single_load_only"`
 	PrimaryLandingArea    landingAreaPayload `json:"primary_landing_area"`
 	SecondaryLandingArea  landingAreaPayload `json:"secondary_landing_area"`
 	RiskAssessment        string             `json:"risk_assessment"`
@@ -382,6 +384,7 @@ type innhoppInput struct {
 	DistanceByRoad        *float64
 	LandingDistanceByAir  *float64
 	LandingDistanceByRoad *float64
+	SingleLoadOnly        bool
 	PrimaryLandingArea    LandingArea
 	SecondaryLandingArea  LandingArea
 	RiskAssessment        string
@@ -1183,6 +1186,7 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 			Notam:                strings.TrimSpace(inn.Notam),
 			DistanceByAir:        inn.DistanceByAir,
 			DistanceByRoad:       inn.DistanceByRoad,
+			SingleLoadOnly:       inn.SingleLoadOnly,
 			PrimaryLandingArea:   inn.PrimaryLandingArea,
 			SecondaryLandingArea: inn.SecondaryLandingArea,
 			RiskAssessment:       strings.TrimSpace(inn.RiskAssessment),
@@ -3213,6 +3217,7 @@ func scanInnhopp(row pgx.Row, includeImages bool) (Innhopp, error) {
 		&distanceByRoad,
 		&innhopp.LandingDistanceByAir,
 		&innhopp.LandingDistanceByRoad,
+		&innhopp.SingleLoadOnly,
 		&primaryName,
 		&primaryDescription,
 		&primarySize,
@@ -3311,7 +3316,7 @@ func (h *Handler) fetchInnhoppsForEvents(ctx context.Context, eventIDs []int64, 
 	result := make(map[int64][]Innhopp, len(eventIDs))
 	rows, err := h.db.Query(ctx,
 		`SELECT id, event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
+                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
@@ -3661,26 +3666,26 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	row := h.db.QueryRow(r.Context(),
 		`INSERT INTO event_innhopps (
             event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-            reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
+            reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
             primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
             secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
             risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13, $14, $15, $16, $17,
-            $18, $19, $20, $21,
-            $22, $23, $24, $25,
-            $26, $27, $28, $29, $30, $31, $32::jsonb, $33::jsonb, $34
+            $11, $12, $13, $14, $15, $16, $17, $18,
+            $19, $20, $21, $22,
+            $23, $24, $25, $26,
+            $27, $28, $29, $30, $31, $32, $33::jsonb, $34::jsonb, $35
         )
         RETURNING id, event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                  reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
+                  reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
                   primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                   secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                   risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                   created_at`,
 		eventID, in.Sequence, in.Name, in.Coordinates, in.AircraftID, in.TakeoffAirfieldID, in.LandingAirfieldID, in.Elevation, in.ScheduledAt, strings.TrimSpace(payload.Notes),
-		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad, in.LandingDistanceByAir, in.LandingDistanceByRoad,
+		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad, in.LandingDistanceByAir, in.LandingDistanceByRoad, in.SingleLoadOnly,
 		in.PrimaryLandingArea.Name, in.PrimaryLandingArea.Description, in.PrimaryLandingArea.Size, in.PrimaryLandingArea.Obstacles,
 		in.SecondaryLandingArea.Name, in.SecondaryLandingArea.Description, in.SecondaryLandingArea.Size, in.SecondaryLandingArea.Obstacles,
 		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, string(imageFilesJSON), string(ownersJSON), in.LandOwnerPermission,
@@ -3995,6 +4000,7 @@ func normalizeInnhopps(raw []innhoppPayload) ([]innhoppInput, error) {
 			DistanceByRoad:        distanceByRoad,
 			LandingDistanceByAir:  landingDistanceByAir,
 			LandingDistanceByRoad: landingDistanceByRoad,
+			SingleLoadOnly:        payload.SingleLoadOnly,
 			PrimaryLandingArea:    normalizeLandingAreaPayload(payload.PrimaryLandingArea),
 			SecondaryLandingArea:  normalizeLandingAreaPayload(payload.SecondaryLandingArea),
 			RiskAssessment:        strings.TrimSpace(payload.RiskAssessment),
@@ -4478,16 +4484,16 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 
 		if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
                 event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road,
+                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17,
-                $18, $19, $20, $21,
-                $22, $23, $24, $25,
-                $26, $27, $28, $29, $30, $31, $32::jsonb, $33::jsonb, $34
+                $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22,
+                $23, $24, $25, $26,
+                $27, $28, $29, $30, $31, $32, $33::jsonb, $34::jsonb, $35
             )`,
 			eventID,
 			innhopp.Sequence,
@@ -4506,6 +4512,7 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			innhopp.DistanceByRoad,
 			innhopp.LandingDistanceByAir,
 			innhopp.LandingDistanceByRoad,
+			innhopp.SingleLoadOnly,
 			innhopp.PrimaryLandingArea.Name,
 			innhopp.PrimaryLandingArea.Description,
 			innhopp.PrimaryLandingArea.Size,

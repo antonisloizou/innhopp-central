@@ -345,6 +345,7 @@ type eventAircraftInnhopp struct {
 	TakeoffAirfieldID      int64
 	LandingAirfieldID      int64
 	LandingDistanceByAirKm *float64
+	SingleLoadOnly         bool
 	AircraftID             *int64
 	AircraftName           string
 	PricingModel           string
@@ -463,7 +464,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 	rows, err := h.db.Query(
 		ctx,
 		`SELECT i.id, COALESCE(i.sequence, 0), COALESCE(i.name, ''), i.scheduled_at,
-                i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air,
+		        i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air, i.single_load_only,
                 i.aircraft_id, COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
                 COALESCE(a.capacity, 14), COALESCE(a.crew_on_load_count, 2), a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
          FROM event_innhopps i
@@ -500,6 +501,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 			&item.TakeoffAirfieldID,
 			&item.LandingAirfieldID,
 			&landingDistanceByAir,
+			&item.SingleLoadOnly,
 			&aircraftID,
 			&item.AircraftName,
 			&item.PricingModel,
@@ -592,6 +594,9 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 
 func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
 	loadCount := aircraftLoadCount(item, participantCount)
+	if item.SingleLoadOnly && loadCount > 0 {
+		loadCount = 1
+	}
 	if loadCount <= 0 {
 		return aircraftComputedMetric{}
 	}
@@ -714,7 +719,11 @@ func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int
 		cost += metric.BaseCost
 		minutes += metric.AirMinutes
 		distance += metric.AirDistanceKm
-		crewForInnhopp := aircraftLoadCount(item, participantCount) * max(item.CrewOnLoadCount, 0)
+		crewLoads := aircraftLoadCount(item, participantCount)
+		if item.SingleLoadOnly && crewLoads > 0 {
+			crewLoads = 1
+		}
+		crewForInnhopp := crewLoads * max(item.CrewOnLoadCount, 0)
 		if item.ServiceDate != nil {
 			dayKey := item.ServiceDate.UTC().Format("2006-01-02")
 			if crewForInnhopp > crewCountByDay[dayKey] {

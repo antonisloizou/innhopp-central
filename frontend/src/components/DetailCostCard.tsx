@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   ScheduleItemCost,
   ScheduleItemCostSuggestion,
+  ScheduleItemCostsResponse,
   createScheduleItemCost,
   deleteScheduleItemCost,
   listScheduleItemCosts,
@@ -13,6 +14,22 @@ type Props = {
   scheduleType: string;
   scheduleId: number;
   defaultName: string;
+};
+
+const inFlightCostRequests = new Map<string, Promise<ScheduleItemCostsResponse>>();
+
+const loadScheduleItemCostsOnce = (eventId: number, scheduleType: string, scheduleId: number) => {
+  const key = `${eventId}:${scheduleType}:${scheduleId}`;
+  const existing = inFlightCostRequests.get(key);
+  if (existing) return existing;
+
+  const request = listScheduleItemCosts(eventId, scheduleType, scheduleId);
+  inFlightCostRequests.set(key, request);
+  void request.then(
+    () => inFlightCostRequests.delete(key),
+    () => inFlightCostRequests.delete(key)
+  );
+  return request;
 };
 
 const formatMoney = (amount: number, currency = 'EUR') =>
@@ -77,7 +94,7 @@ const DetailCostCard = ({ eventId, scheduleType, scheduleId, defaultName }: Prop
   const loadCosts = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await listScheduleItemCosts(eventId, scheduleType, scheduleId);
+      const response = await loadScheduleItemCostsOnce(eventId, scheduleType, scheduleId);
       const nextCosts = Array.isArray(response?.costs) ? response.costs : [];
       const nextSuggestion = response?.suggested_expected || null;
       setCosts(nextCosts);
@@ -94,20 +111,31 @@ const DetailCostCard = ({ eventId, scheduleType, scheduleId, defaultName }: Prop
         setStatus('expected');
         setNotes('');
       } else if (!editingCostId || !nextCosts.some((cost) => cost.id === editingCostId)) {
-        resetForm(nextCosts[0]);
+        const firstCost = nextCosts[0];
+        setEditingCostId(firstCost.id);
+        setName(firstCost.name || '');
+        setAmount(String(firstCost.estimated_amount ?? ''));
+        setCurrency(firstCost.currency || 'EUR');
+        setStatus(normalizeEditableStatus(firstCost.status));
+        setNotes(firstCost.notes || '');
       }
     } catch (err) {
       const statusCode = (err as Error & { status?: number }).status;
       if (statusCode === 404) {
         setCosts([]);
-        resetForm(null);
+        setEditingCostId(null);
+        setName('');
+        setAmount('');
+        setCurrency('EUR');
+        setStatus('expected');
+        setNotes('');
       } else {
         setMessage(err instanceof Error ? err.message : 'Failed to load costs');
       }
     } finally {
       setLoading(false);
     }
-  }, [editingCostId, eventId, resetForm, scheduleId, scheduleType]);
+  }, [editingCostId, eventId, scheduleId, scheduleType]);
 
   useEffect(() => {
     void loadCosts();

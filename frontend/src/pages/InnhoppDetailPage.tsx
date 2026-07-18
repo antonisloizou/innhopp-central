@@ -206,6 +206,7 @@ const InnhoppDetailPage = () => {
       distance_by_road: undefined,
       landing_distance_by_air: undefined,
       landing_distance_by_road: undefined,
+      single_load_only: false,
       primary_landing_area: emptyLandingArea(),
       secondary_landing_area: emptyLandingArea(),
       risk_assessment: '',
@@ -427,6 +428,7 @@ const InnhoppDetailPage = () => {
       distance_by_road: target.distance_by_road ?? undefined,
       landing_distance_by_air: target.landing_distance_by_air ?? undefined,
       landing_distance_by_road: target.landing_distance_by_road ?? undefined,
+      single_load_only: target.single_load_only ?? false,
       primary_landing_area: toLandingAreaForm(target.primary_landing_area),
       secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
       risk_assessment: target.risk_assessment || '',
@@ -619,6 +621,7 @@ const InnhoppDetailPage = () => {
       landing_distance_by_road: sameLandingAsTakeoff
         ? state.distance_by_road
         : state.landing_distance_by_road,
+      single_load_only: state.single_load_only ?? false,
       primary_landing_area: toLandingAreaPayload(state.primary_landing_area),
       secondary_landing_area: toLandingAreaPayload(state.secondary_landing_area),
       risk_assessment: state.risk_assessment?.trim() || '',
@@ -1524,6 +1527,16 @@ const InnhoppDetailPage = () => {
                 </div>
               ) : null}
             </div>
+            <label className="form-field form-field-full-span innhopp-detail-checkbox-field">
+              <span className="innhopp-detail-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.single_load_only ?? false}
+                  onChange={(e) => setForm((prev) => ({ ...prev, single_load_only: e.target.checked }))}
+                />{' '}
+                <span className="innhopp-detail-checkbox-label">Single Load Only</span>
+              </span>
+            </label>
           </div>
         <div className="form-actions innhopp-detail-save-actions">
           <button type="submit" className={saveButtonClass} disabled={saving}>

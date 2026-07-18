@@ -140,6 +140,7 @@ func ensureInnhoppTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool
 			distance_by_road NUMERIC,
 			landing_distance_by_air NUMERIC,
 			landing_distance_by_road NUMERIC,
+			single_load_only BOOLEAN NOT NULL DEFAULT FALSE,
 			primary_landing_area_name TEXT NOT NULL DEFAULT '',
 			primary_landing_area_description TEXT NOT NULL DEFAULT '',
 			primary_landing_area_size TEXT NOT NULL DEFAULT '',

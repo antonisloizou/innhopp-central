@@ -2829,6 +2829,11 @@ button.ghost {
   margin-left: 2.5rem;
 }
 
+.event-print-pilot-brief-aircraft {
+  display: grid;
+  gap: 0.65rem;
+}
+
 .event-print-option input[type='checkbox'] {
   width: 1.1rem;
   height: 1.1rem;

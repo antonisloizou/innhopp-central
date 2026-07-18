@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
-import { isParticipantOnlySession } from '../auth/access';
+import { canManageEvents, isParticipantOnlySession } from '../auth/access';
 import logo from '../assets/logo.webp';
 import materialSymbolsOutlinedTtf from '../assets/fonts/MaterialSymbolsOutlined.ttf';
 import printDocumentCss from './EventPrintDocument.css?raw';
@@ -42,7 +42,7 @@ import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
 import { createEventOverviewPdfUrl, fitEventOverviewPages } from '../utils/eventOverviewPdf';
-import { mergeOverviewInnhoppEntries, truncateEventOverviewTitle } from '../utils/eventOverviewInnhopps';
+import { getLongestCommonPrefix, mergeOverviewInnhoppEntries, truncateEventOverviewTitle } from '../utils/eventOverviewInnhopps';
 
 type DayBucket = {
   date: Date;
@@ -56,7 +56,7 @@ type DayBucket = {
   meals: Meal[];
 };
 
-type PrintSectionKey = 'route' | 'weekOverview' | 'schedule';
+type PrintSectionKey = 'route' | 'weekOverview' | 'schedule' | 'pilotBrief';
 type PrintOptions = Record<PrintSectionKey, boolean>;
 type SchedulePrintOptions = {
   newPagePerDay: boolean;
@@ -67,7 +67,8 @@ const typeFilterOrder: EntryType[] = ['Innhopp', 'Transport', 'Ground Crew', 'Ac
 const DEFAULT_PRINT_OPTIONS: PrintOptions = {
   route: true,
   weekOverview: true,
-  schedule: true
+  schedule: true,
+  pilotBrief: false
 };
 
 const createDefaultPrintOptions = (): PrintOptions => ({
@@ -309,6 +310,7 @@ const EventPrintPage = () => {
   );
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
+  const canPrintPilotBrief = canManageEvents(user);
   const [eventData, setEventData] = useState<Event | null>(null);
   const [transports, setTransports] = useState<Transport[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
@@ -329,13 +331,15 @@ const EventPrintPage = () => {
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [generatingEventOverviewPdf, setGeneratingEventOverviewPdf] = useState(false);
   const [printOptions, setPrintOptions] = useState<PrintOptions>(() =>
-    eventOverviewPdf ? { route: false, weekOverview: true, schedule: false } : createDefaultPrintOptions()
+    eventOverviewPdf ? { route: false, weekOverview: true, schedule: false, pilotBrief: false } : createDefaultPrintOptions()
   );
   const [schedulePrintOptions, setSchedulePrintOptions] = useState<SchedulePrintOptions>(() =>
     createDefaultSchedulePrintOptions()
   );
   const [typeFilters, setTypeFilters] = useState<Record<EntryType, boolean>>(() => createDefaultTypeFilters());
+  const [pilotBriefAircraftIDs, setPilotBriefAircraftIDs] = useState<number[]>([]);
   const printPreviewHostRef = useRef<HTMLDivElement | null>(null);
+  const documentTitleBeforePrintRef = useRef<string | null>(null);
   const eventOverviewPdfStartedRef = useRef(false);
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -380,6 +384,7 @@ const EventPrintPage = () => {
     setPrintOptions(createDefaultPrintOptions());
     setSchedulePrintOptions(createDefaultSchedulePrintOptions());
     setTypeFilters(createDefaultTypeFilters());
+    setPilotBriefAircraftIDs([]);
   }, [eventId]);
 
   const handleDelete = async () => {
@@ -758,7 +763,26 @@ const EventPrintPage = () => {
   const nonStaffCount = eventData
     ? countVisibleParticipants(eventData.participant_ids, participantLookup, eventData.participant_count)
     : 0;
-  const printSectionCount = Object.values(printOptions).filter(Boolean).length;
+  const printSectionCount = Object.entries(printOptions).filter(
+    ([key, selected]) => selected && (key !== 'pilotBrief' || canPrintPilotBrief)
+  ).length;
+  const selectedPilotBriefAircraft = useMemo(
+    () =>
+      (eventData?.aircraft || []).filter((aircraft) =>
+        pilotBriefAircraftIDs.includes(aircraft.id)
+      ),
+    [eventData?.aircraft, pilotBriefAircraftIDs]
+  );
+  const printDocumentTitle = useMemo(() => {
+    if (!eventData) return 'Innhopp Central';
+    const sections = [
+      printOptions.weekOverview ? 'Event Overview' : null,
+      printOptions.route ? 'Route' : null,
+      printOptions.schedule ? 'Schedule' : null,
+      canPrintPilotBrief && printOptions.pilotBrief && selectedPilotBriefAircraft.length > 0 ? 'Pilot Brief' : null
+    ].filter((section): section is string => Boolean(section));
+    return sections.length > 0 ? `${eventData.name} - ${sections.join(', ')}` : eventData.name;
+  }, [canPrintPilotBrief, eventData, printOptions, selectedPilotBriefAircraft.length]);
   const printableRouteStops = useMemo(
     () =>
       dayBuckets.flatMap((day) =>
@@ -839,8 +863,10 @@ const EventPrintPage = () => {
       const hasOverview = options.weekOverview;
       const hasRoute = options.route;
       const hasSchedule = options.schedule;
+      const hasPilotBrief = canPrintPilotBrief && options.pilotBrief && selectedPilotBriefAircraft.length > 0;
       const overviewNeedsPageBreak = hasOverview && (hasRoute || hasSchedule);
       const scheduleNeedsPageBreak = hasOverview || hasRoute;
+      const pilotBriefNeedsPageBreak = hasPilotBrief && (hasOverview || hasRoute || hasSchedule);
       const scheduleTypeFilterSet = new Set(
         visibleTypeFilterOrder.filter((type) => typeFilters[type])
       );
@@ -1163,6 +1189,97 @@ const EventPrintPage = () => {
         `
         : '';
 
+      const pilotBriefSection = hasPilotBrief
+        ? `
+          <section class="print-pilot-brief-section${pilotBriefNeedsPageBreak ? ' print-section--new-page' : ''}">
+            ${selectedPilotBriefAircraft
+              .map((aircraft, aircraftIndex) => {
+                const innhopps = (eventData.innhopps || [])
+                  .filter((innhopp) => innhopp.aircraft_id === aircraft.id)
+                  .sort((a, b) => {
+                    const aDate = a.scheduled_at || '9999-12-31T23:59:59Z';
+                    const bDate = b.scheduled_at || '9999-12-31T23:59:59Z';
+                    if (aDate !== bDate) return aDate.localeCompare(bDate);
+                    if (a.sequence !== b.sequence) return a.sequence - b.sequence;
+                    return a.name.localeCompare(b.name);
+                  });
+                const mergedInnhopps = Array.from(
+                  innhopps.reduce((groups, innhopp) => {
+                    const coordinates = innhopp.coordinates?.trim() || '';
+                    const groupKey = `${innhopp.sequence}\u0000${coordinates}`;
+                    const group = groups.get(groupKey) || [];
+                    group.push(innhopp);
+                    groups.set(groupKey, group);
+                    return groups;
+                  }, new Map<string, typeof innhopps>()).values()
+                );
+                const renderMergedValues = (values: Array<string | null | undefined>) =>
+                  [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))]
+                    .map((value) => escapeHtml(value))
+                    .join('<br />') || '—';
+                return `
+                  <article class="print-pilot-brief-page${aircraftIndex > 0 ? ' print-pilot-brief-page--page-break' : ''}">
+                    <header class="print-pilot-brief-header">
+                      <div class="print-schedule-header">
+                        <img src="${logo}" alt="The Innhopp Project logo" class="print-schedule-header-logo" />
+                        <h1 class="print-schedule-header-title">${escapeHtml(eventData.name)}</h1>
+                        <div class="print-schedule-header-spacer" aria-hidden="true"></div>
+                      </div>
+                      <div>
+                        <div class="print-section-kicker">Pilot Brief</div>
+                        <h2>${escapeHtml(aircraft.name)}</h2>
+                      </div>
+                    </header>
+                    <table class="print-pilot-brief-table">
+                      <thead>
+                        <tr>
+                          <th>Scheduled At</th>
+                          <th>Name</th>
+                          <th>Coordinates</th>
+                          <th>Jumprun</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${
+                          mergedInnhopps.length > 0
+                            ? mergedInnhopps
+                                .map(
+                                  (group) => {
+                                    const first = group[0];
+                                    const name = group.length > 1
+                                      ? getLongestCommonPrefix(group.map((innhopp) => innhopp.name || 'Untitled innhopp'))
+                                      : first.name || 'Untitled innhopp';
+                                    const displayName = `Innhopp ${first.sequence || '—'}${name ? `: ${name}` : ''}`;
+                                    return `
+                                    <tr>
+                                      <td>${escapeHtml(formatEventLocal(first.scheduled_at, {
+                                        year: 'numeric',
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                        hourCycle: 'h23'
+                                      }) || '—')}</td>
+                                      <td>${escapeHtml(truncateEventOverviewTitle(displayName))}</td>
+                                      <td>${escapeHtml(first.coordinates?.trim() || '—')}</td>
+                                      <td>${renderMergedValues(group.map((innhopp) => innhopp.jumprun))}</td>
+                                    </tr>
+                                  `;
+                                  }
+                                )
+                                .join('')
+                            : '<tr><td colspan="4" class="print-pilot-brief-empty">No innhopps assigned to this aircraft.</td></tr>'
+                        }
+                      </tbody>
+                    </table>
+                  </article>
+                `;
+              })
+              .join('')}
+          </section>
+        `
+        : '';
+
       return `<!doctype html>
 <html lang="en">
   <head>
@@ -1183,6 +1300,7 @@ const EventPrintPage = () => {
       ${weekOverviewSection}
       ${routeSection}
       ${scheduleSection}
+      ${pilotBriefSection}
     </main>
   </body>
 </html>`;
@@ -1193,6 +1311,8 @@ const EventPrintPage = () => {
       eventData,
       nonStaffCount,
       printableOverviewDays,
+      canPrintPilotBrief,
+      selectedPilotBriefAircraft,
       schedulePrintOptions.newPagePerDay,
       totalSlots,
       typeFilters,
@@ -1214,7 +1334,7 @@ const EventPrintPage = () => {
   );
 
   const eventOverviewPdfHtml = useMemo(
-    () => extractPrintContentHtml(buildPrintDocument({ route: false, weekOverview: true, schedule: false })),
+    () => extractPrintContentHtml(buildPrintDocument({ route: false, weekOverview: true, schedule: false, pilotBrief: false })),
     [buildPrintDocument]
   );
 
@@ -1343,6 +1463,10 @@ const EventPrintPage = () => {
 
   useEffect(() => {
     const handleAfterPrint = () => {
+      if (documentTitleBeforePrintRef.current !== null) {
+        document.title = documentTitleBeforePrintRef.current;
+        documentTitleBeforePrintRef.current = null;
+      }
       if (!debugPreviewOpen) {
         setPrintPreviewOpen(false);
       }
@@ -1424,11 +1548,15 @@ const EventPrintPage = () => {
   const handleCreatePdf = useCallback(() => {
     if (!validatePrintRequest()) return;
 
+    if (documentTitleBeforePrintRef.current === null) {
+      documentTitleBeforePrintRef.current = document.title;
+    }
+    document.title = printDocumentTitle;
     setMessage(null);
     setPrinting(true);
     setDebugPreviewOpen(false);
     setPrintPreviewOpen(true);
-  }, [validatePrintRequest]);
+  }, [printDocumentTitle, validatePrintRequest]);
 
   useEffect(() => {
     if (!eventOverviewPdf || !eventData || eventOverviewPdfStartedRef.current) return;
@@ -1454,6 +1582,10 @@ const EventPrintPage = () => {
     if (printOptions.route && routeMapError) {
       setMessage(routeMapError);
       setPrinting(false);
+      if (documentTitleBeforePrintRef.current !== null) {
+        document.title = documentTitleBeforePrintRef.current;
+        documentTitleBeforePrintRef.current = null;
+      }
       return;
     }
     if (printOptions.route && !routeMapReady) return;
@@ -1481,6 +1613,10 @@ const EventPrintPage = () => {
     void run().catch((err) => {
       setPrinting(false);
       setMessage(err instanceof Error ? err.message : 'Failed to open print dialog');
+      if (documentTitleBeforePrintRef.current !== null) {
+        document.title = documentTitleBeforePrintRef.current;
+        documentTitleBeforePrintRef.current = null;
+      }
     });
   }, [debugPreviewOpen, printOptions.route, printPreviewOpen, printing, routeMapError, routeMapReady]);
 
@@ -1618,6 +1754,47 @@ const EventPrintPage = () => {
               </>
             ) : null}
           </div>
+          {canPrintPilotBrief ? (
+            <div className="event-print-option-group">
+              <label className="event-print-option">
+                <input
+                  type="checkbox"
+                  checked={printOptions.pilotBrief}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setPrintOptions((prev) => ({ ...prev, pilotBrief: checked }));
+                    if (checked && pilotBriefAircraftIDs.length === 0) {
+                      setPilotBriefAircraftIDs((eventData.aircraft || []).map((aircraft) => aircraft.id));
+                    }
+                  }}
+                  disabled={printing}
+                />
+                <span>Pilot Brief</span>
+              </label>
+              {printOptions.pilotBrief ? (
+                <div className="event-print-pilot-brief-aircraft">
+                  {(eventData.aircraft || []).map((aircraft) => (
+                    <label key={aircraft.id} className="event-print-option event-print-option--sub">
+                      <input
+                        type="checkbox"
+                        checked={pilotBriefAircraftIDs.includes(aircraft.id)}
+                        onChange={(event) =>
+                          setPilotBriefAircraftIDs((prev) =>
+                            event.target.checked
+                              ? [...prev, aircraft.id]
+                              : prev.filter((id) => id !== aircraft.id)
+                          )
+                        }
+                        disabled={printing}
+                      />
+                      <span>{aircraft.name}</span>
+                    </label>
+                  ))}
+                  {eventData.aircraft.length === 0 ? <p className="muted">No aircraft are attached to this event.</p> : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="event-print-panel-actions">
           <button

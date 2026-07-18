@@ -987,7 +987,8 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             takeoff_airfield_id INTEGER,
             landing_airfield_id INTEGER,
             distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
-            landing_distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0
+            landing_distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
+            single_load_only BOOLEAN NOT NULL DEFAULT FALSE
         )`,
 		`CREATE TABLE IF NOT EXISTS aircraft (
             id SERIAL PRIMARY KEY,
