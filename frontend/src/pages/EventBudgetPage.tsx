@@ -947,7 +947,10 @@ const EventBudgetPage = () => {
     participantScale,
     isLoadBasedCrewMode,
     isEstimateOrHybridMode,
-    scenarioDriftScale
+    scenarioDriftScale,
+    baseCurrency,
+    effectiveDisplayCurrency,
+    liveRates
   ]);
   const targetMarkupPercent =
     parameters.target_markup_percent ??
