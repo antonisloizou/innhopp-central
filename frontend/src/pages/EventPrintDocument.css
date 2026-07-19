@@ -587,6 +587,11 @@ body { padding: 0; }
   page-break-before: always;
 }
 
+/* Six detailed columns need the full width of an A4 landscape page. */
+.print-pilot-brief-page--airfields {
+  page: pilot-brief-landscape;
+}
+
 .print-pilot-brief-header {
   display: grid;
   gap: 8mm;
@@ -633,6 +638,54 @@ body { padding: 0; }
 .print-pilot-brief-table th:nth-child(3),
 .print-pilot-brief-table td:nth-child(3) {
   width: 27%;
+}
+
+/* The airfield variant has six content-heavy columns, so explicitly reserve
+   room for coordinates and briefing notes instead of leaving the last columns
+   to share the remaining width. */
+.print-pilot-brief-table--airfields th:nth-child(1),
+.print-pilot-brief-table--airfields td:nth-child(1) {
+  width: 16%;
+}
+
+.print-pilot-brief-table--airfields th:nth-child(2),
+.print-pilot-brief-table--airfields td:nth-child(2) {
+  width: 13%;
+}
+
+.print-pilot-brief-table--airfields th:nth-child(3),
+.print-pilot-brief-table--airfields td:nth-child(3) {
+  width: 20%;
+}
+
+.print-pilot-brief-table--airfields th:nth-child(4),
+.print-pilot-brief-table--airfields td:nth-child(4) {
+  width: 18%;
+}
+
+.print-pilot-brief-table--airfields th:nth-child(5),
+.print-pilot-brief-table--airfields td:nth-child(5) {
+  width: 20%;
+}
+
+.print-pilot-brief-table--airfields th:nth-child(6),
+.print-pilot-brief-table--airfields td:nth-child(6) {
+  width: 13%;
+}
+
+.print-pilot-brief-table--airfields th,
+.print-pilot-brief-table--airfields td {
+  padding: 6px 7px;
+}
+
+.print-pilot-brief-table--airfields td {
+  font-size: 12px;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.print-pilot-brief-table--airfields th {
+  font-size: 10px;
 }
 
 .print-pilot-brief-empty {
@@ -775,6 +828,7 @@ body { padding: 0; }
 
 @page { size: A4; margin: 10mm 8mm 4mm 8mm; }
 @page overview-landscape { size: A4 landscape; margin: 8mm 6mm 6mm 6mm; }
+@page pilot-brief-landscape { size: A4 landscape; margin: 10mm 8mm 6mm 8mm; }
 
 @media print {
   body { padding: 0; }
