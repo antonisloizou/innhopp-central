@@ -1210,7 +1210,7 @@ const EventPrintPage = () => {
                   innhopps.reduce((groups, innhopp) => {
                     const coordinates = innhopp.coordinates?.trim() || '';
                     const airfieldKey = pilotBriefIncludeAirfields
-                      ? `\u0000${innhopp.takeoff_airfield_id ?? ''}\u0000${innhopp.landing_airfield_id ?? ''}`
+                      ? `\u0000${innhopp.takeoff_airfield_id ?? ''}\u0000${innhopp.landing_airfield_id ?? innhopp.takeoff_airfield_id ?? ''}`
                       : '';
                     const groupKey = `${innhopp.sequence}\u0000${coordinates}${airfieldKey}`;
                     const group = groups.get(groupKey) || [];
@@ -1276,7 +1276,7 @@ const EventPrintPage = () => {
                                       }) || '—')}</td>
                                       <td>${escapeHtml(truncateEventOverviewTitle(displayName))}</td>
                                       ${pilotBriefIncludeAirfields
-                                        ? `<td>${renderAirfield(first.takeoff_airfield_id)}</td><td>${escapeHtml(first.coordinates?.trim() || '—')}</td><td>${renderAirfield(first.landing_airfield_id)}</td>`
+                                        ? `<td>${renderAirfield(first.takeoff_airfield_id)}</td><td>${escapeHtml(first.coordinates?.trim() || '—')}</td><td>${renderAirfield(first.landing_airfield_id ?? first.takeoff_airfield_id)}</td>`
                                         : `<td>${escapeHtml(first.coordinates?.trim() || '—')}</td>`}
                                       <td>${renderMergedValues(group.map((innhopp) => innhopp.jumprun))}</td>
                                     </tr>
