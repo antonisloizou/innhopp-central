@@ -58,6 +58,10 @@ export const buildScheduleEntryRouteStops = (entry: ScheduleEntry): RouteStop[] 
         ? [buildStop('point', entry.innhoppCoordinates || entry.coordinates || '', entry.title, 'innhopp')]
         : [];
     case 'Accommodation':
+      // An accommodation is a single physical stop. Its check-in is the plotted
+      // event; check-out remains visible in the schedule but must not create a
+      // second marker (or route point) on any map view.
+      if (entry.id.startsWith('acc-out-')) return [];
       return hasText(entry.coordinates) ? [buildStop('point', entry.coordinates || '', entry.title, 'accommodation')] : [];
     case 'Meal':
       return hasText(entry.coordinates) ? [buildStop('point', entry.coordinates || '', entry.title, 'meal')] : [];

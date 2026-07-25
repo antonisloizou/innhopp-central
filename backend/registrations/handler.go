@@ -593,6 +593,26 @@ func activeRegistrationExists(ctx context.Context, q interface {
 	return existingID > 0, nil
 }
 
+func registrationExists(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, eventID, participantID int64) (bool, error) {
+	var existingID int64
+	err := q.QueryRow(ctx, `
+		SELECT id
+		FROM event_registrations
+		WHERE event_id = $1
+		  AND participant_id = $2
+		LIMIT 1
+	`, eventID, participantID).Scan(&existingID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return existingID > 0, nil
+}
+
 func loadRegistrationEventSettings(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, eventID int64) (*registrationEventSettings, error) {
@@ -752,18 +772,29 @@ func ensureStaffRegistrationCompletedTx(ctx context.Context, tx pgx.Tx, registra
 	if err := ensureStaffPaymentRowsWaivedTx(ctx, tx, registrationID, event, depositDueAt, mainInvoiceDueAt, note); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
+	var updatedRegistrationID int64
+	err := tx.QueryRow(ctx, `
 		UPDATE event_registrations
 		SET status = 'completed',
 			cancelled_at = NULL,
 			expired_at = NULL,
 			updated_at = NOW()
 		WHERE id = $1
-	`, registrationID); err != nil {
+		  AND (
+			status IS DISTINCT FROM 'completed'
+			OR cancelled_at IS NOT NULL
+			OR expired_at IS NOT NULL
+		  )
+		RETURNING id
+	`, registrationID).Scan(&updatedRegistrationID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	if err := syncRegistrationPaymentMarkersTx(ctx, tx, registrationID); err != nil {
 		return err
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
 	}
 	return createActivityTx(ctx, tx, registrationID, "status_change", strings.TrimSpace(note), map[string]any{
 		"status": "completed",
@@ -784,7 +815,7 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 			return err
 		}
 	}
-	exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID)
+	exists, err := registrationExists(ctx, tx, event.ID, participantID)
 	if err != nil || exists {
 		return err
 	}

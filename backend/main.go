@@ -1194,6 +1194,24 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb`,
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
 		`ALTER TABLE registration_activity ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		`WITH ranked_staff_normalizations AS (
+			SELECT id,
+			       ROW_NUMBER() OVER (
+					PARTITION BY registration_id, type, summary, payload
+					ORDER BY created_at ASC, id ASC
+				) AS row_number
+			FROM registration_activity
+			WHERE type = 'status_change'
+			  AND summary IN (
+					'Registration normalized for staff participant',
+					'Registration normalized from staff role assignment'
+				  )
+			  AND payload = '{"status":"completed","staff":true}'::jsonb
+		)
+		DELETE FROM registration_activity activity
+		USING ranked_staff_normalizations ranked
+		WHERE activity.id = ranked.id
+		  AND ranked.row_number > 1`,
 		`CREATE TABLE IF NOT EXISTS email_templates (
             id SERIAL PRIMARY KEY,
             key TEXT NOT NULL UNIQUE,
@@ -1254,6 +1272,51 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ`,
 		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ`,
 		`ALTER TABLE email_deliveries ADD COLUMN IF NOT EXISTS error_message TEXT`,
+		`WITH ranked_registrations AS (
+			SELECT id,
+			       FIRST_VALUE(id) OVER (
+					PARTITION BY event_id, participant_id
+					ORDER BY
+						CASE WHEN cancelled_at IS NULL AND expired_at IS NULL THEN 0 ELSE 1 END,
+						created_at ASC,
+						id ASC
+				) AS keep_id
+			FROM event_registrations
+		)
+		UPDATE email_deliveries d
+		SET registration_id = ranked_registrations.keep_id
+		FROM ranked_registrations
+		WHERE d.registration_id = ranked_registrations.id
+		  AND ranked_registrations.id <> ranked_registrations.keep_id`,
+		`WITH ranked_registrations AS (
+			SELECT id,
+			       ROW_NUMBER() OVER (
+					PARTITION BY event_id, participant_id
+					ORDER BY
+						CASE WHEN cancelled_at IS NULL AND expired_at IS NULL THEN 0 ELSE 1 END,
+						created_at ASC,
+						id ASC
+				) AS row_number
+			FROM event_registrations
+		)
+		DELETE FROM event_registrations r
+		USING ranked_registrations ranked
+		WHERE r.id = ranked.id
+		  AND ranked.row_number > 1`,
+		`DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conname = 'event_registrations_event_participant_key'
+				  AND conrelid = 'event_registrations'::regclass
+			) THEN
+				ALTER TABLE event_registrations
+				ADD CONSTRAINT event_registrations_event_participant_key
+				UNIQUE (event_id, participant_id);
+			END IF;
+		END $$`,
+		`DROP INDEX IF EXISTS event_registrations_active_participant_idx`,
 	}
 
 	for _, stmt := range stmts {
