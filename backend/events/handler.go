@@ -621,10 +621,12 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	events, err = h.attachEventRelations(r.Context(), events)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to load event relations")
-		return
+	if r.URL.Query().Get("summary") != "true" {
+		events, err = h.attachEventRelations(r.Context(), events)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load event relations")
+			return
+		}
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, events)
@@ -2409,7 +2411,7 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 		ids[i] = event.ID
 	}
 
-	participantMap, err := h.fetchParticipantsForEvents(ctx, ids)
+	participantMap, participantCountMap, err := h.fetchParticipantsForEvents(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -2432,11 +2434,6 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 	if err != nil {
 		return nil, err
 	}
-	participantCountMap, err := h.fetchParticipantCountsForEvents(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-
 	attached := make([]Event, len(events))
 	copy(attached, events)
 	for i := range attached {
@@ -2448,42 +2445,6 @@ func (h *Handler) attachEventRelations(ctx context.Context, events []Event) ([]E
 		attached[i].ParticipantCount = participantCountMap[attached[i].ID]
 	}
 	return attached, nil
-}
-
-// fetchParticipantCountsForEvents returns roster members who are not staff.
-// Keeping this derived value in the event response lets participant-only
-// sessions display the same count without access to the participant directory.
-func (h *Handler) fetchParticipantCountsForEvents(ctx context.Context, eventIDs []int64) (map[int64]int, error) {
-	result := make(map[int64]int, len(eventIDs))
-	for _, eventID := range eventIDs {
-		result[eventID] = 0
-	}
-
-	rows, err := h.db.Query(ctx, `
-		SELECT ep.event_id, COUNT(*)
-		FROM event_participants ep
-		JOIN participant_profiles p ON p.id = ep.participant_id
-		WHERE ep.event_id = ANY($1)
-		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
-		GROUP BY ep.event_id
-	`, eventIDs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var eventID int64
-		var participantCount int
-		if err := rows.Scan(&eventID, &participantCount); err != nil {
-			return nil, err
-		}
-		result[eventID] = participantCount
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 func (h *Handler) fetchRemainingSlotsForEvents(ctx context.Context, eventIDs []int64) (map[int64]int, error) {
@@ -2528,33 +2489,46 @@ func (h *Handler) fetchRemainingSlotsForEvents(ctx context.Context, eventIDs []i
 	return result, nil
 }
 
-func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]int64, error) {
+func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]int64, map[int64]int, error) {
 	result := make(map[int64][]int64, len(eventIDs))
+	participantCounts := make(map[int64]int, len(eventIDs))
 	rows, err := h.db.Query(ctx,
-		`SELECT event_id, participant_id
-         FROM event_participants
-         WHERE event_id = ANY($1)
-         ORDER BY event_id, participant_id`,
+		`SELECT ep.event_id, ep.participant_id, p.roles
+		 FROM event_participants ep
+		 JOIN participant_profiles p ON p.id = ep.participant_id
+		 WHERE ep.event_id = ANY($1)
+		 ORDER BY ep.event_id, ep.participant_id`,
 		eventIDs,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var eventID, participantID int64
-		if err := rows.Scan(&eventID, &participantID); err != nil {
-			return nil, err
+		var roles []string
+		if err := rows.Scan(&eventID, &participantID, &roles); err != nil {
+			return nil, nil, err
 		}
 		result[eventID] = append(result[eventID], participantID)
+		isStaff := false
+		for _, role := range roles {
+			if role == "Staff" {
+				isStaff = true
+				break
+			}
+		}
+		if !isStaff {
+			participantCounts[eventID]++
+		}
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return result, nil
+	return result, participantCounts, nil
 }
 
 func (h *Handler) fetchAirfieldsForEvents(ctx context.Context, eventIDs []int64) (map[int64][]int64, error) {
@@ -3703,6 +3677,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 	var landing sql.NullInt64
 	var landingAir sql.NullFloat64
 	var landingRoad sql.NullFloat64
+	var singleLoadOnly bool
 	var primaryName sql.NullString
 	var primaryDescription sql.NullString
 	var primarySize sql.NullString
@@ -3740,6 +3715,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		&dRoad,
 		&landingAir,
 		&landingRoad,
+		&singleLoadOnly,
 		&primaryName,
 		&primaryDescription,
 		&primarySize,
@@ -3807,6 +3783,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		val := landingRoad.Float64
 		created.LandingDistanceByRoad = &val
 	}
+	created.SingleLoadOnly = singleLoadOnly
 	created.PrimaryLandingArea = LandingArea{
 		Name:        primaryName.String,
 		Description: primaryDescription.String,

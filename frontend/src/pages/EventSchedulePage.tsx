@@ -11,7 +11,10 @@ import {
   getEvent,
   listAccommodations,
   getAccommodation,
-  updateAccommodation
+  updateAccommodation,
+  listEvents,
+  createAccommodation,
+  createInnhopp
 } from '../api/events';
 import {
   Transport,
@@ -29,7 +32,11 @@ import {
   updateOther,
   getOther,
   updateMeal,
-  getMeal
+  getMeal,
+  createTransport,
+  createGroundCrew,
+  createOther,
+  createMeal
 } from '../api/logistics';
 import { listAirfields, Airfield } from '../api/airfields';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
@@ -179,6 +186,11 @@ const buildDayIso = (day: Date, minutes: number) => {
   return fromEventLocalPickerDate(localDay);
 };
 
+const placeOnDay = (sourceIso: string | null | undefined, dayKey: string, fallbackHour = 9) => {
+  const time = getEventLocalTimeParts(sourceIso);
+  return dayKeyToScheduledAt(dayKey, time?.hour ?? fallbackHour, time?.minute ?? 0);
+};
+
 const EventSchedulePage = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -257,6 +269,21 @@ const EventSchedulePage = () => {
   const [previewClosing, setPreviewClosing] = useState(false);
   const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
   const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
+  const [importDayKey, setImportDayKey] = useState<string | null>(null);
+  const [importType, setImportType] = useState<EntryType>('Innhopp');
+  const [importEvents, setImportEvents] = useState<Event[]>([]);
+  const [importSourceEventId, setImportSourceEventId] = useState('');
+  const [importSourceEvent, setImportSourceEvent] = useState<Event | null>(null);
+  const [importSourceItems, setImportSourceItems] = useState<{
+    transports: Transport[];
+    groundCrews: GroundCrew[];
+    accommodations: Accommodation[];
+    others: OtherLogistic[];
+    meals: Meal[];
+  }>({ transports: [], groundCrews: [], accommodations: [], others: [], meals: [] });
+  const [importItemId, setImportItemId] = useState('');
+  const [loadingImportSource, setLoadingImportSource] = useState(false);
+  const [savingImport, setSavingImport] = useState(false);
 
   useEffect(() => {
     if (previewEntry) {
@@ -301,6 +328,13 @@ const EventSchedulePage = () => {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [dayAddMenuOpenKey]);
+
+  useEffect(() => {
+    if (!importDayKey || importEvents.length > 0) return;
+    listEvents()
+      .then((events) => setImportEvents(events.filter((event) => event.id !== Number(eventId))))
+      .catch((err) => setMessage(err instanceof Error ? err.message : 'Failed to load events for import'));
+  }, [eventId, importDayKey, importEvents.length]);
 
   useEffect(() => {
     if (!timePicker || !pickerPanelRef.current) return;
@@ -1792,6 +1826,94 @@ const EventSchedulePage = () => {
     }
   };
 
+  const loadImportSource = async (sourceEventId: string) => {
+    setImportSourceEventId(sourceEventId);
+    setImportSourceEvent(null);
+    setImportItemId('');
+    if (!sourceEventId) return;
+    setLoadingImportSource(true);
+    try {
+      const sourceId = Number(sourceEventId);
+      const [sourceEvent, transportList, groundCrewList, accommodationList, otherList, mealList] = await Promise.all([
+        getEvent(sourceId), listTransports(), listGroundCrews(), listAccommodations(sourceId), listOthers(), listMeals()
+      ]);
+      setImportSourceEvent(sourceEvent);
+      setImportSourceItems({
+        transports: transportList.filter((item) => item.event_id === sourceId),
+        groundCrews: groundCrewList.filter((item) => item.event_id === sourceId),
+        accommodations: accommodationList,
+        others: otherList.filter((item) => item.event_id === sourceId),
+        meals: mealList.filter((item) => item.event_id === sourceId)
+      });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to load the source schedule');
+    } finally {
+      setLoadingImportSource(false);
+    }
+  };
+
+  const importChoices = (() => {
+    switch (importType) {
+      case 'Innhopp': return importSourceEvent?.innhopps ?? [];
+      case 'Transport': return importSourceItems.transports;
+      case 'Ground Crew': return importSourceItems.groundCrews;
+      case 'Accommodation': return importSourceItems.accommodations;
+      case 'Meal': return importSourceItems.meals;
+      case 'Other': return importSourceItems.others;
+    }
+  })();
+
+  const importChoiceLabel = (item: any) => {
+    if (importType === 'Innhopp') return `#${item.sequence} ${item.name || 'Untitled innhopp'}`;
+    if (importType === 'Transport' || importType === 'Ground Crew') return `${item.pickup_location} → ${item.destination}`;
+    if (importType === 'Meal') return `${item.name}${item.location ? ` — ${item.location}` : ''}`;
+    return item.name || 'Untitled item';
+  };
+
+  const confirmImport = async () => {
+    if (!eventData || !eventId || !importDayKey || !importItemId) return;
+    const item = importChoices.find((choice: any) => choice.id === Number(importItemId)) as any;
+    if (!item) return;
+    setSavingImport(true);
+    try {
+      const targetEventId = Number(eventId);
+      if (importType === 'Innhopp') {
+        const { id, event_id, created_at, aircraft_id, takeoff_airfield_id, landing_airfield_id, sequence, scheduled_at, ...payload } = item;
+        await createInnhopp(targetEventId, {
+          ...payload,
+          name: item.name,
+          sequence: getInnhoppSequenceCount(eventData.innhopps) + 1,
+          scheduled_at: placeOnDay(scheduled_at, importDayKey),
+          aircraft_id: null
+        });
+      } else if (importType === 'Accommodation') {
+        const checkIn = placeOnDay(item.check_in_at, importDayKey, 15);
+        const sourceIn = toEventLocalPickerDate(item.check_in_at);
+        const sourceOut = toEventLocalPickerDate(item.check_out_at);
+        const days = sourceIn && sourceOut ? Math.max(0, Math.round((Date.UTC(sourceOut.getFullYear(), sourceOut.getMonth(), sourceOut.getDate()) - Date.UTC(sourceIn.getFullYear(), sourceIn.getMonth(), sourceIn.getDate())) / 86400000)) : 1;
+        const outTime = getEventLocalTimeParts(item.check_out_at);
+        await createAccommodation(targetEventId, {
+          name: item.name, capacity: item.capacity, coordinates: item.coordinates || undefined, booked: item.booked ?? undefined,
+          check_in_at: checkIn, check_out_at: dayKeyToScheduledAtWithOffset(importDayKey, days, outTime?.hour ?? 11, outTime?.minute ?? 0), notes: item.notes || undefined
+        });
+      } else if (importType === 'Transport' || importType === 'Ground Crew') {
+        const payload = { pickup_location: item.pickup_location, destination: item.destination, passenger_count: item.passenger_count, duration_minutes: item.duration_minutes || undefined, scheduled_at: placeOnDay(item.scheduled_at, importDayKey), notes: item.notes || undefined, event_id: targetEventId, vehicle_ids: [] };
+        if (importType === 'Transport') await createTransport(payload); else await createGroundCrew(payload);
+      } else if (importType === 'Meal') {
+        await createMeal({ name: item.name, location: item.location || undefined, scheduled_at: placeOnDay(item.scheduled_at, importDayKey), notes: item.notes || undefined, event_id: targetEventId });
+      } else {
+        await createOther({ name: item.name, coordinates: item.coordinates || undefined, scheduled_at: placeOnDay(item.scheduled_at, importDayKey), description: item.description || undefined, notes: item.notes || undefined, event_id: targetEventId });
+      }
+      setImportDayKey(null);
+      setMessage(`${importType} imported to this event.`);
+      await reload({ preserveLoading: true });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : `Failed to import ${importType}`);
+    } finally {
+      setSavingImport(false);
+    }
+  };
+
   return (
     <section className="stack">
       <header className="page-header">
@@ -1991,6 +2113,22 @@ const EventSchedulePage = () => {
                           {`Add ${type}`}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        className="event-schedule-menu-item"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDayAddMenuOpenKey(null);
+                          setImportDayKey(day.key);
+                          setImportType('Innhopp');
+                          setImportSourceEventId('');
+                          setImportSourceEvent(null);
+                          setImportItemId('');
+                        }}
+                      >
+                        Import from another event…
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -2383,6 +2521,42 @@ const EventSchedulePage = () => {
                   <button type="button" disabled={savingDrag} onClick={() => void confirmDragMove()}>
                     {savingDrag ? 'Saving…' : 'Confirm'}
                   </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
+      {importDayKey && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="event-schedule-move-confirmation-backdrop" role="presentation" onClick={() => !savingImport && setImportDayKey(null)}>
+              <div className="card event-schedule-import-panel" role="dialog" aria-modal="true" aria-labelledby="event-schedule-import-title" onClick={(e) => e.stopPropagation()}>
+                <h3 id="event-schedule-import-title">Import schedule item</h3>
+                <p className="muted">The copy will be added to this day. Its source-event links, such as aircraft and vehicles, are left unassigned.</p>
+                <label>
+                  Item type
+                  <select value={importType} onChange={(e) => { setImportType(e.target.value as EntryType); setImportItemId(''); }}>
+                    {(['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'] as EntryType[]).map((type) => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Source event
+                  <select value={importSourceEventId} onChange={(e) => void loadImportSource(e.target.value)} disabled={savingImport}>
+                    <option value="">Select an event…</option>
+                    {importEvents.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
+                  </select>
+                </label>
+                {loadingImportSource ? <p className="muted">Loading source schedule…</p> : importSourceEvent ? <label>
+                  Item to copy
+                  <select value={importItemId} onChange={(e) => setImportItemId(e.target.value)} disabled={savingImport}>
+                    <option value="">Select a {importType.toLowerCase()}…</option>
+                    {importChoices.map((item: any) => <option key={item.id} value={item.id}>{importChoiceLabel(item)}</option>)}
+                  </select>
+                </label> : null}
+                {importSourceEvent && importChoices.length === 0 ? <p className="muted">No {importType.toLowerCase()} items are scheduled for that event.</p> : null}
+                <div className="event-schedule-move-confirmation-actions">
+                  <button type="button" className="ghost" disabled={savingImport} onClick={() => setImportDayKey(null)}>Cancel</button>
+                  <button type="button" disabled={!importItemId || savingImport} onClick={() => void confirmImport()}>{savingImport ? 'Importing…' : 'Import copy'}</button>
                 </div>
               </div>
             </div>,

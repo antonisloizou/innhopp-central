@@ -21,7 +21,7 @@ import {
   updateBudgetCurrencies
 } from '../api/budgets';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
-import { Event, Season, copyEvent, deleteEvent, listEvents, listSeasons, updateEvent } from '../api/events';
+import { Event, Season, copyEvent, deleteEvent, getEvent, listEventSummaries, listSeasons, updateEvent } from '../api/events';
 import { Airfield, listAirfields } from '../api/airfields';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
@@ -487,10 +487,20 @@ const EventBudgetPage = () => {
     const loadFilters = async () => {
       setLoadingFilters(true);
       try {
-        const [seasonResp, eventResp, airfieldResp] = await Promise.all([listSeasons(), listEvents(), listAirfields()]);
+        const [seasonResp, eventResp, airfieldResp, activeEventResp] = await Promise.all([
+          listSeasons(),
+          listEventSummaries(),
+          listAirfields(),
+          hasValidEventID ? getEvent(activeEventID) : Promise.resolve(null)
+        ]);
         if (cancelled) return;
         setSeasons(Array.isArray(seasonResp) ? seasonResp : []);
-        setEvents(Array.isArray(eventResp) ? eventResp : []);
+        const eventSummaries = Array.isArray(eventResp) ? eventResp : [];
+        setEvents(
+          activeEventResp
+            ? eventSummaries.map((event) => (event.id === activeEventResp.id ? activeEventResp : event))
+            : eventSummaries
+        );
         setAirfields(Array.isArray(airfieldResp) ? airfieldResp : []);
       } catch (err) {
         if (!cancelled) {
@@ -504,7 +514,7 @@ const EventBudgetPage = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [activeEventID, hasValidEventID]);
 
   useEffect(() => {
     if (routeHasEventID) {

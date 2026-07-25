@@ -5365,6 +5365,28 @@ button.ghost.event-route-preview-overlay-button {
   padding: 1.25rem;
 }
 
+.event-schedule-import-panel {
+  width: min(520px, 100%);
+  padding: 1.25rem;
+}
+
+.event-schedule-import-panel h3,
+.event-schedule-import-panel p {
+  margin-top: 0;
+}
+
+.event-schedule-import-panel label {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  font-weight: 600;
+}
+
+.event-schedule-import-panel select {
+  width: 100%;
+  font: inherit;
+}
+
 .event-schedule-move-confirmation-panel h3,
 .event-schedule-move-confirmation-panel p {
   margin-top: 0;

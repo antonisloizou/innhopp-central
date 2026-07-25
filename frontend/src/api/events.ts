@@ -178,6 +178,10 @@ export const deleteSeason = (id: number) =>
 
 export const listEvents = () => apiRequest<Event[]>('/events');
 
+// Use this for selectors that only need top-level event fields. It avoids
+// loading each event's participants, innhopps, aircraft, and airfields.
+export const listEventSummaries = () => apiRequest<Event[]>('/events?summary=true');
+
 export const createEvent = (payload: CreateEventPayload) =>
   apiRequest<Event>('/events', { method: 'POST', body: JSON.stringify(payload) });
 

@@ -710,6 +710,10 @@ func (h *Handler) computeAircraftScenarioTotals(ctx context.Context, eventID int
 	if err != nil {
 		return 0, 0, 0, 0, nil, nil, err
 	}
+	return computeAircraftScenarioTotalsFromItems(items, participantCount, liveRates, fallbackRates)
+}
+
+func computeAircraftScenarioTotalsFromItems(items []eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) (cost float64, minutes float64, distance float64, crewCount int, crewCountByDay map[string]int, currencies []string, err error) {
 	currencySet := map[string]struct{}{}
 	crewCountByDay = map[string]int{}
 	for _, item := range items {
@@ -2073,6 +2077,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		liveRates = map[string]float64{}
 	}
 	liveRates[budget.BaseCurrency] = 1
+	aircraftInnhopps, err := h.fetchAircraftInnhopps(ctx, budget.EventID)
+	if err != nil {
+		return BudgetSummary{}, err
+	}
 	toBaseAmountFromCurrency := func(amount float64, sourceCurrency string) float64 {
 		rate := liveRates[normalizeCurrency(sourceCurrency)]
 		if rate <= 0 {
@@ -2099,9 +2107,8 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		fullParticipantsInput,
 	)
 
-	confirmAircraftDerivedCost, confirmAircraftMinutes, confirmAircraftDistance, confirmCrewCount, confirmCrewCountByDay, _, aircraftErr := h.computeAircraftScenarioTotals(
-		ctx,
-		budget.EventID,
+	confirmAircraftDerivedCost, confirmAircraftMinutes, confirmAircraftDistance, confirmCrewCount, confirmCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
+		aircraftInnhopps,
 		confirmParticipants,
 		liveRates,
 		fallbackRates,
@@ -2109,9 +2116,8 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	worstAircraftDerivedCost, worstAircraftMinutes, worstAircraftDistance, worstCrewCount, worstCrewCountByDay, _, aircraftErr := h.computeAircraftScenarioTotals(
-		ctx,
-		budget.EventID,
+	worstAircraftDerivedCost, worstAircraftMinutes, worstAircraftDistance, worstCrewCount, worstCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
+		aircraftInnhopps,
 		worstParticipants,
 		liveRates,
 		fallbackRates,
@@ -2119,9 +2125,8 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
-	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullCrewCount, fullCrewCountByDay, _, aircraftErr := h.computeAircraftScenarioTotals(
-		ctx,
-		budget.EventID,
+	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullCrewCount, fullCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
+		aircraftInnhopps,
 		fullParticipants,
 		liveRates,
 		fallbackRates,
