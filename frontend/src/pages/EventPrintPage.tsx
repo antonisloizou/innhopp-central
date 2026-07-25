@@ -802,8 +802,16 @@ const EventPrintPage = () => {
   );
 
   const printableOverviewDays = useMemo(
-    () =>
-      dayBuckets
+    () => {
+      // A checkout day normally has no overnight stay. Keep the final
+      // accommodation visible through its checkout date so the overview's
+      // night row does not finish with an empty cell.
+      const finalAccommodationCheckoutKey = accommodations.reduce<string | null>((latest, item) => {
+        const checkOutKey = extractDateKey(item.check_out_at || undefined);
+        return checkOutKey && (!latest || checkOutKey > latest) ? checkOutKey : latest;
+      }, null);
+
+      return dayBuckets
         .filter((day) => day.key !== 'unscheduled')
         .map((day) => {
           const entries = mergeOverviewInnhoppEntries(
@@ -833,7 +841,11 @@ const EventPrintPage = () => {
               const checkOutKey = extractDateKey(item.check_out_at || undefined);
 
               if (checkInKey && checkOutKey) {
-                return day.key >= checkInKey && day.key < checkOutKey;
+                return (
+                  day.key >= checkInKey &&
+                  (day.key < checkOutKey ||
+                    (checkOutKey === finalAccommodationCheckoutKey && day.key === checkOutKey))
+                );
               }
               if (checkInKey) {
                 return day.key === checkInKey;
@@ -854,7 +866,8 @@ const EventPrintPage = () => {
             unscheduledEntries,
             nightAccommodationName
           };
-        }),
+        });
+    },
     [accommodations, buildOrderedEntriesForDay, dayBuckets]
   );
 
