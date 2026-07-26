@@ -9,6 +9,8 @@ export type RouteStop = {
   label: string;
   coordinates: string;
   visualType: StopVisualType;
+  dayKey?: string;
+  dayLabel?: string;
 };
 
 export type NormalizedRouteStop<T extends { coordinates: string }> = T & {

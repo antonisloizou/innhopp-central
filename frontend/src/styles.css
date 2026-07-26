@@ -5216,6 +5216,32 @@ button.ghost.event-route-preview-overlay-button {
   font-weight: 700;
 }
 
+.event-route-day-zone-label {
+  transform: rotate(var(--route-day-zone-angle, 0deg));
+  display: grid;
+  gap: 0.08rem;
+  padding: 0.32rem 0.48rem;
+  border: 2px solid #f8fafc;
+  border-radius: 0.4rem;
+  background: var(--route-day-zone-color, #334155);
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.42);
+}
+
+.event-route-day-zone-label strong {
+  font-size: 0.78rem;
+}
+
+.event-route-day-zone-label span {
+  color: #cbd5e1;
+  font-size: 0.62rem;
+  font-weight: 600;
+}
+
 .event-route-preview-icon--innhopp {
   background: #2b8a3e;
 }

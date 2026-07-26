@@ -30,6 +30,7 @@ import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { EntryType, ScheduleEntry } from '../components/schedulePreviewTypes';
 import { googleMapsApiKey, hasConfiguredGoogleMapsApiKey } from '../config/google';
+import { parseCoordinates } from '../utils/coordinates';
 import {
   formatEventLocal,
   getEventLocalDateKey,
@@ -41,6 +42,7 @@ import { computeDisplayFlightTimeMinutes } from '../utils/innhoppFlightTime';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, normalizeRouteStops } from '../utils/routeStops';
+import { buildRouteDayZones } from '../utils/routeDayZones';
 import { createEventOverviewPdfUrl, fitEventOverviewPages } from '../utils/eventOverviewPdf';
 import { getLongestCommonPrefix, mergeOverviewInnhoppEntries, truncateEventOverviewTitle } from '../utils/eventOverviewInnhopps';
 
@@ -346,6 +348,8 @@ const EventPrintPage = () => {
   const mapInstanceRef = useRef<any>(null);
   const mapPolylineRef = useRef<any>(null);
   const mapMarkersRef = useRef<any[]>([]);
+  const mapDayZonesRef = useRef<any[]>([]);
+  const mapDayZoneLabelsRef = useRef<any[]>([]);
   const load = useCallback(async () => {
     if (!eventId) return;
     setLoading(true);
@@ -787,8 +791,14 @@ const EventPrintPage = () => {
   }, [canPrintPilotBrief, eventData, printOptions, selectedPilotBriefAircraft.length]);
   const printableRouteStops = useMemo(
     () =>
-      dayBuckets.flatMap((day) =>
-        buildOrderedEntriesForDay(day).flatMap((entry) => buildScheduleEntryRouteStops(entry))
+      dayBuckets.flatMap((day, index) =>
+        buildOrderedEntriesForDay(day).flatMap((entry) =>
+          buildScheduleEntryRouteStops(entry).map((stop) => ({
+            ...stop,
+            dayKey: day.key,
+            dayLabel: day.key === 'unscheduled' ? day.label : `Day ${index + 1} · ${day.label}`
+          }))
+        )
       ),
     [buildOrderedEntriesForDay, dayBuckets]
   );
@@ -799,6 +809,18 @@ const EventPrintPage = () => {
         color: markerColorByType[stop.visualType]
       })),
     [printableRouteStops]
+  );
+  const printableRouteDayZonePoints = useMemo(
+    () =>
+      printableRouteStops.flatMap((stop) => {
+        const coordinates = parseCoordinates(stop.coordinates);
+        return coordinates ? [{ ...stop, ...coordinates }] : [];
+      }),
+    [printableRouteStops]
+  );
+  const printableRouteDayZones = useMemo(
+    () => buildRouteDayZones(printableRouteDayZonePoints),
+    [printableRouteDayZonePoints]
   );
 
   const printableOverviewDays = useMemo(
@@ -1434,15 +1456,48 @@ const EventPrintPage = () => {
         mapMarkersRef.current = [];
         mapPolylineRef.current?.setMap?.(null);
         mapPolylineRef.current = null;
-
-        mapPolylineRef.current = new maps.Polyline({
-          path: printableRouteGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng })),
-          geodesic: true,
-          strokeColor: '#4fa3ff',
-          strokeOpacity: 0.95,
-          strokeWeight: 4,
-          map
+        mapDayZonesRef.current.forEach((zone) => zone.setMap?.(null));
+        mapDayZonesRef.current = [];
+        mapDayZoneLabelsRef.current.forEach((label) => {
+          if ('setMap' in label && typeof label.setMap === 'function') label.setMap(null);
+          else label.map = null;
         });
+        mapDayZoneLabelsRef.current = [];
+
+        mapDayZonesRef.current = printableRouteDayZones.flatMap((zone) => [
+          new maps.Polygon({
+            paths: zone.path,
+            strokeColor: '#f8fafc',
+            strokeOpacity: 0.96,
+            strokeWeight: 9,
+            fillOpacity: 0,
+            clickable: false,
+            zIndex: 1,
+            map
+          }),
+          new maps.Polygon({
+            paths: zone.path,
+            strokeColor: zone.color,
+            strokeOpacity: 0.98,
+            strokeWeight: 4,
+            fillColor: zone.color,
+            fillOpacity: 0.18,
+            clickable: false,
+            zIndex: 2,
+            map
+          })
+        ]);
+        if (maps.marker?.AdvancedMarkerElement) {
+          mapDayZoneLabelsRef.current = printableRouteDayZones.map((zone) => {
+            const label = document.createElement('div');
+            label.className = 'event-route-day-zone-label';
+            const [day, date] = zone.label.split(' · ');
+            label.innerHTML = `<strong>${day}</strong>${date ? `<span>${date}</span>` : ''}`;
+            label.style.setProperty('--route-day-zone-angle', `${zone.labelRotation}deg`);
+            label.style.setProperty('--route-day-zone-color', zone.color);
+            return new maps.marker.AdvancedMarkerElement({ position: zone.labelPosition, map, content: label });
+          });
+        }
 
         mapMarkersRef.current = printableRouteGeometry.map(
           (stop, index) =>
@@ -1490,7 +1545,7 @@ const EventPrintPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [fitRouteMap, printOptions.route, printPreviewOpen, printableRouteGeometry]);
+  }, [fitRouteMap, printOptions.route, printPreviewOpen, printableRouteDayZones, printableRouteGeometry]);
 
   useEffect(() => {
     const handleAfterPrint = () => {

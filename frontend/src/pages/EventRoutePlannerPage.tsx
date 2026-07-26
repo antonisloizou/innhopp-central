@@ -11,6 +11,7 @@ import { parseCoordinates } from '../utils/coordinates';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { RouteStop, StopVisualType, buildScheduleEntryRouteStops, dedupeConsecutiveRouteStops } from '../utils/routeStops';
+import { buildRouteDayZones } from '../utils/routeDayZones';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
@@ -32,6 +33,14 @@ type DayBucket = {
 type RoutePlannerEntry = ScheduleEntry & {
   routePoints: RouteStop[];
   disabled: boolean;
+};
+
+type RoutePreviewStop = RouteStop & {
+  index: number;
+  lat: number;
+  lng: number;
+  dayKey: string;
+  dayLabel: string;
 };
 
 const OVERLAY_EXIT_MS = 180;
@@ -266,6 +275,8 @@ const EventRoutePlannerPage = () => {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapMarkersRef = useRef<any[]>([]);
   const mapPolylineRef = useRef<any | null>(null);
+  const mapDayZonesRef = useRef<any[]>([]);
+  const mapDayZoneLabelsRef = useRef<any[]>([]);
   const [mapError, setMapError] = useState<string | null>(null);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [manualPreviewFullscreen, setManualPreviewFullscreen] = useState(false);
@@ -807,9 +818,16 @@ const EventRoutePlannerPage = () => {
 
   const entriesByDay = useMemo(
     () =>
-      dayBuckets.map((day) => ({
+      dayBuckets.map((day, index) => ({
         day,
-        entries: buildEntriesForDay(day)
+        entries: buildEntriesForDay(day).map((entry) => ({
+          ...entry,
+          routePoints: entry.routePoints.map((point) => ({
+            ...point,
+            dayKey: day.key,
+            dayLabel: day.key === 'unscheduled' ? day.label : `Day ${index + 1} · ${day.label}`
+          }))
+        }))
       })),
     [buildEntriesForDay, dayBuckets]
   );
@@ -857,7 +875,7 @@ const EventRoutePlannerPage = () => {
           ...parsed
         };
       })
-      .filter((stop): stop is RouteStop & { index: number; lat: number; lng: number } => !!stop);
+      .filter((stop): stop is RoutePreviewStop => !!stop);
   }, [selectedPoints]);
 
   const previewGeometry = useMemo(() => {
@@ -880,10 +898,19 @@ const EventRoutePlannerPage = () => {
     }));
   }, [previewStops]);
   const previewGeometrySignature = useMemo(
-    () => previewGeometry.map((stop) => `${stop.entryId}:${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}:${stop.visualType}`).join('|'),
+    () => previewGeometry.map((stop) => `${stop.entryId}:${stop.dayKey}:${stop.lat.toFixed(6)},${stop.lng.toFixed(6)}:${stop.visualType}`).join('|'),
     [previewGeometry]
   );
   const stablePreviewGeometry = useMemo(() => previewGeometry, [previewGeometrySignature]);
+  const previewDayZonePoints = useMemo(
+    () =>
+      selectedPoints.flatMap((stop) => {
+        const coordinates = parseCoordinates(stop.coordinates);
+        return coordinates ? [{ ...stop, ...coordinates }] : [];
+      }),
+    [selectedPoints]
+  );
+  const previewDayZones = useMemo(() => buildRouteDayZones(previewDayZonePoints), [previewDayZonePoints]);
 
   useEffect(() => {
     if (!fullscreenRouteLaunch || stablePreviewGeometry.length === 0) return;
@@ -999,6 +1026,13 @@ const EventRoutePlannerPage = () => {
       mapMarkersRef.current = [];
       mapPolylineRef.current?.setMap?.(null);
       mapPolylineRef.current = null;
+      mapDayZonesRef.current.forEach((zone) => zone.setMap?.(null));
+      mapDayZonesRef.current = [];
+      mapDayZoneLabelsRef.current.forEach((label) => {
+        if ('setMap' in label && typeof label.setMap === 'function') label.setMap(null);
+        else label.map = null;
+      });
+      mapDayZoneLabelsRef.current = [];
       mapInstanceRef.current = null;
       mapContainerRef.current = null;
       return;
@@ -1043,17 +1077,48 @@ const EventRoutePlannerPage = () => {
         mapMarkersRef.current = [];
         mapPolylineRef.current?.setMap?.(null);
         mapPolylineRef.current = null;
-
-        const path = stablePreviewGeometry.map((stop) => ({ lat: stop.lat, lng: stop.lng }));
-
-        mapPolylineRef.current = new maps.Polyline({
-          path,
-          geodesic: true,
-          strokeColor: '#4fa3ff',
-          strokeOpacity: 0.95,
-          strokeWeight: 4,
-          map
+        mapDayZonesRef.current.forEach((zone) => zone.setMap?.(null));
+        mapDayZonesRef.current = [];
+        mapDayZoneLabelsRef.current.forEach((label) => {
+          if ('setMap' in label && typeof label.setMap === 'function') label.setMap(null);
+          else label.map = null;
         });
+        mapDayZoneLabelsRef.current = [];
+
+        mapDayZonesRef.current = previewDayZones.flatMap((zone) => [
+          new maps.Polygon({
+            paths: zone.path,
+            strokeColor: '#f8fafc',
+            strokeOpacity: 0.96,
+            strokeWeight: 9,
+            fillOpacity: 0,
+            clickable: false,
+            zIndex: 1,
+            map
+          }),
+          new maps.Polygon({
+            paths: zone.path,
+            strokeColor: zone.color,
+            strokeOpacity: 0.98,
+            strokeWeight: 4,
+            fillColor: zone.color,
+            fillOpacity: 0.18,
+            clickable: false,
+            zIndex: 2,
+            map
+          })
+        ]);
+        if (maps.marker?.AdvancedMarkerElement) {
+          mapDayZoneLabelsRef.current = previewDayZones.map((zone) => {
+            const label = document.createElement('div');
+            label.className = 'event-route-day-zone-label';
+            const [day, date] = zone.label.split(' · ');
+            label.innerHTML = `<strong>${day}</strong>${date ? `<span>${date}</span>` : ''}`;
+            label.style.setProperty('--route-day-zone-angle', `${zone.labelRotation}deg`);
+            label.style.setProperty('--route-day-zone-color', zone.color);
+            return new maps.marker.AdvancedMarkerElement({ position: zone.labelPosition, map, content: label });
+          });
+        }
 
         const useAdvancedMarkers = !participantOnly && !!maps.marker?.AdvancedMarkerElement && markerGlyphGateOpen && markerFontReady;
         if (!participantOnly && maps.marker?.AdvancedMarkerElement && !markerGlyphGateOpen) {
@@ -1111,7 +1176,7 @@ const EventRoutePlannerPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [fitPreviewRouteToMap, markerGlyphGateOpen, markerFontReady, stablePreviewGeometry]);
+  }, [fitPreviewRouteToMap, markerGlyphGateOpen, markerFontReady, previewDayZones, stablePreviewGeometry]);
 
   useEffect(() => {
     if (!previewFullscreen || !mapInstanceRef.current || stablePreviewGeometry.length === 0) return;
