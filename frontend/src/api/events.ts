@@ -326,6 +326,19 @@ export const updateEvent = (id: number, payload: UpdateEventPayload) =>
   apiRequest<Event>(`/events/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
 
 export const getInnhopp = (id: number) => apiRequest<Innhopp>(`/innhopps/${id}`);
+export const exportInnhopp = async (id: number, localMap: string, areaMap: string) => {
+  const response = await fetch(`/api/innhopps/${id}/export`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ local_map: localMap, area_map: areaMap })
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error || 'Failed to export innhopp');
+  }
+  return response.blob();
+};
 
 export const createInnhopp = (eventId: number, payload: InnhoppInput) =>
   apiRequest<Innhopp>(`/events/${eventId}/innhopps`, {

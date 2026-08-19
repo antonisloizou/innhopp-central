@@ -14,6 +14,7 @@ import {
   createInnhopp,
   getEvent,
   getInnhopp,
+  exportInnhopp,
   listEvents,
   updateInnhopp,
   deleteInnhopp
@@ -29,6 +30,7 @@ import {
   toEventLocalPickerDate
 } from '../utils/eventDate';
 import Flatpickr from 'react-flatpickr';
+import html2canvas from 'html2canvas';
 import 'flatpickr/dist/flatpickr.css';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
 import DetailCostCard from '../components/DetailCostCard';
@@ -87,6 +89,41 @@ const loadGoogleMapsApi = () => {
   });
 
   return googleMapsLoader;
+};
+
+const renderSatelliteMapForExport = async (
+  coordinates: { lat: number; lng: number },
+  halfWidthMeters: number
+): Promise<string> => {
+  const maps = await loadGoogleMapsApi();
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText =
+    'position:fixed;left:-660px;top:0;width:640px;height:640px;z-index:1;pointer-events:none;background:#fff;';
+  document.body.appendChild(host);
+
+  try {
+    const map = new maps.Map(host, {
+      mapTypeId: 'satellite',
+      disableDefaultUI: true,
+      gestureHandling: 'none',
+      clickableIcons: false,
+      keyboardShortcuts: false
+    });
+    const latDelta = halfWidthMeters / 111320;
+    const lngDelta = halfWidthMeters / (111320 * Math.cos((coordinates.lat * Math.PI) / 180));
+    const bounds = new maps.LatLngBounds(
+      { lat: coordinates.lat - latDelta, lng: coordinates.lng - lngDelta },
+      { lat: coordinates.lat + latDelta, lng: coordinates.lng + lngDelta }
+    );
+    map.fitBounds(bounds, 0);
+    new maps.Marker({ map, position: coordinates });
+    await new Promise<void>((resolve) => maps.event.addListenerOnce(map, 'tilesloaded', resolve));
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    return (await html2canvas(host, { backgroundColor: '#ffffff', useCORS: true, logging: false })).toDataURL('image/png');
+  } finally {
+    host.remove();
+  }
 };
 
 const formatDurationMinutes = (minutes?: number | null) => {
@@ -238,6 +275,7 @@ const InnhoppDetailPage = () => {
   const [pendingLiveRefresh, setPendingLiveRefresh] = useState(false);
   const [imagesDirty, setImagesDirty] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -1155,6 +1193,36 @@ const InnhoppDetailPage = () => {
     }
   };
 
+  const handleExport = async () => {
+    if (!innhopp || exporting) return;
+    const coordinates = parseCoordinates(innhopp.coordinates || form.coordinates);
+    if (!coordinates) {
+      setMessage('A valid coordinate is required to export an innhopp.');
+      return;
+    }
+    setExporting(true);
+    setMessage(null);
+    try {
+      const [localMap, areaMap] = await Promise.all([
+        renderSatelliteMapForExport(coordinates, 250),
+        renderSatelliteMapForExport(coordinates, 1852)
+      ]);
+      const file = await exportInnhopp(innhopp.id, localMap, areaMap);
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${String(innhopp.sequence).padStart(2, '0')}-${innhopp.name || 'innhopp'}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to export innhopp');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleCreateAirfield = async () => {
     setSaving(true);
     setMessage(null);
@@ -1288,6 +1356,20 @@ const InnhoppDetailPage = () => {
           </button>
           {actionMenuOpen && (
             <div className="event-schedule-menu" id="innhopp-detail-actions-menu" role="menu">
+              {!isCreateMode && (
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setActionMenuOpen(false);
+                    void handleExport();
+                  }}
+                  disabled={exporting}
+                >
+                  {exporting ? 'Exporting…' : 'Export'}
+                </button>
+              )}
               {!isCreateMode && (
                 <button
                   className="event-schedule-menu-item"

@@ -247,6 +247,7 @@ func logUpdateFailure(innhoppID int64, p payload, err error, stage string) {
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{innhoppID}", h.getInnhopp)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Post("/{innhoppID}/export", h.exportInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{innhoppID}", h.updateInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{innhoppID}", h.deleteInnhopp)
 	return r
