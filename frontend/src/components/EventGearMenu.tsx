@@ -17,7 +17,8 @@ export type EventGearMenuPage =
   | 'accounting'
   | 'registrations'
   | 'manifest'
-  | 'communications';
+  | 'communications'
+  | 'checklists';
 
 type EventGearMenuProps = {
   eventId: number;
@@ -26,13 +27,14 @@ type EventGearMenuProps = {
   deleting?: boolean;
   menuId?: string;
   onPrint?: () => void;
-  onCopy: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
-  onDelete: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
+  onCopy?: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
+  onDelete?: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
 };
 
 const eventMenuPages: Array<{ key: EventGearMenuPage; label: string; path: (eventId: number) => string }> = [
   { key: 'schedule', label: 'Schedule', path: (eventId) => `/events/${eventId}` },
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
+  { key: 'checklists', label: 'Operational Checklists', path: (eventId) => `/events/${eventId}/checklists` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
   { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
   { key: 'accounting', label: 'Accounting', path: (eventId) => `/events/${eventId}/accounting` },
@@ -205,7 +207,7 @@ const EventGearMenu = ({
               >
                 Export all Innhopps
               </button>
-              <button
+              {onCopy ? <button
                 className="event-schedule-menu-item"
                 type="button"
                 role="menuitem"
@@ -216,8 +218,8 @@ const EventGearMenu = ({
                 disabled={copying}
               >
                 {copying ? 'Copying...' : 'Copy'}
-              </button>
-              <button
+              </button> : null}
+              {onDelete ? <button
                 className="event-schedule-menu-item danger"
                 type="button"
                 role="menuitem"
@@ -228,7 +230,7 @@ const EventGearMenu = ({
                 disabled={deleting}
               >
                 {deleting ? 'Deleting...' : 'Delete'}
-              </button>
+              </button> : null}
             </>
           ) : null}
           <button

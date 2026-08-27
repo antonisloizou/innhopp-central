@@ -9,6 +9,9 @@ export type ScheduleEntry = {
   type: EntryType;
   passengers?: number;
   ready?: boolean;
+  checklistReady?: boolean;
+  checklistOverridden?: boolean;
+  operationalStatus?: 'planned' | 'proceeding' | 'completed' | 'cancelled';
   booked?: boolean;
   missingCoordinates?: boolean;
   otherComplete?: boolean;

@@ -38,6 +38,7 @@ import { loadGoogleMapsApi, renderSatelliteMapForExport } from '../utils/innhopp
 import { parseCoordinates } from '../utils/coordinates';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { InnhoppChecklist, getChecklist } from '../api/checklists';
 
 const evtCache: { current: Record<number, Event> } = { current: {} };
 
@@ -150,6 +151,7 @@ const InnhoppDetailPage = () => {
   const isCreateMode = !innhoppId || innhoppId === 'new';
   const [eventData, setEventData] = useState<Event | null>(null);
   const [innhopp, setInnhopp] = useState<Innhopp | null>(null);
+  const [checklistStatus, setChecklistStatus] = useState<InnhoppChecklist | null>(null);
   const [airfields, setAirfields] = useState<Airfield[]>([]);
   const [allEvents, setAllEvents] = useState<Event[]>([]);
   const [takeoffSelectValue, setTakeoffSelectValue] = useState<string>('');
@@ -217,6 +219,14 @@ const InnhoppDetailPage = () => {
   const [landingDrivingDurationMinutes, setLandingDrivingDurationMinutes] = useState<number | null>(null);
   const [landingRoadRouteLoading, setLandingRoadRouteLoading] = useState(false);
   const [landingRoadRouteError, setLandingRoadRouteError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isCreateMode || !innhoppId) {
+      setChecklistStatus(null);
+      return;
+    }
+    void getChecklist(Number(innhoppId), 'jump_leader').then(setChecklistStatus).catch(() => setChecklistStatus(null));
+  }, [innhoppId, isCreateMode]);
   const selectedAircraft = useMemo<EventAircraft | null>(() => {
     if (!eventData || !Array.isArray(eventData.aircraft) || !hasNumber(form.aircraft_id)) {
       return null;
@@ -537,8 +547,9 @@ const InnhoppDetailPage = () => {
   }, [loadAirfieldContext]);
 
   const reloadLiveData = useCallback(async () => {
-    await Promise.all([loadInnhoppDetailData({ showLoading: false }), loadAirfieldContext()]);
-  }, [loadAirfieldContext, loadInnhoppDetailData]);
+    const checklistRefresh = !isCreateMode && innhoppId ? getChecklist(Number(innhoppId), 'jump_leader').then(setChecklistStatus).catch(() => setChecklistStatus(null)) : Promise.resolve();
+    await Promise.all([loadInnhoppDetailData({ showLoading: false }), loadAirfieldContext(), checklistRefresh]);
+  }, [innhoppId, isCreateMode, loadAirfieldContext, loadInnhoppDetailData]);
 
   const hasPendingLocalChanges = saving || deleting || imagesDirty || hasUnsavedChanges;
 
@@ -1267,6 +1278,11 @@ const InnhoppDetailPage = () => {
                 {ready ? 'OP READY' : '!'}
               </span>
             )}
+            {!isCreateMode && checklistStatus && (
+              <span className={`badge ${checklistStatus.overridden ? 'danger' : checklistStatus.operational_status === 'completed' || checklistStatus.operational_status === 'proceeding' || checklistStatus.ready ? 'success' : 'danger'} innhopp-detail-ready-badge`} title="Safety checklist status">
+                {checklistStatus.operational_status === 'completed' ? 'OP COMPLETE' : checklistStatus.operational_status === 'proceeding' ? 'PROCEEDING' : checklistStatus.overridden ? 'CHECKLIST OVERRIDE' : checklistStatus.ready ? 'CHECKLIST READY' : 'CHECKLIST BLOCKED'}
+              </span>
+            )}
           </div>
         </div>
         <div className="event-schedule-actions" ref={actionMenuRef}>
@@ -1343,7 +1359,9 @@ const InnhoppDetailPage = () => {
                 role="menuitem"
                 onClick={() => {
                   setActionMenuOpen(false);
-                  navigate(-1);
+                  const returnTo = (location.state as { returnTo?: unknown } | null)?.returnTo;
+                  if (typeof returnTo === 'string' && returnTo.startsWith('/')) navigate(returnTo);
+                  else navigate(-1);
                 }}
               >
                 Back

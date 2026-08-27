@@ -9,6 +9,7 @@ const (
 	RoleJumpMaster  Role = "jump_master"
 	RoleJumpLeader  Role = "jump_leader"
 	RoleGroundCrew  Role = "ground_crew"
+	RoleBoatCrew    Role = "boat_crew"
 	RoleDriver      Role = "driver"
 	RolePacker      Role = "packer"
 	RoleParticipant Role = "participant"
@@ -18,29 +19,34 @@ const (
 type Permission string
 
 const (
-	PermissionViewSeasons           Permission = "seasons:view"
-	PermissionManageSeasons         Permission = "seasons:manage"
-	PermissionViewEvents            Permission = "events:view"
-	PermissionManageEvents          Permission = "events:manage"
-	PermissionViewRegistrations     Permission = "registrations:view"
-	PermissionManageRegistrations   Permission = "registrations:manage"
-	PermissionViewComms             Permission = "comms:view"
-	PermissionManageComms           Permission = "comms:manage"
-	PermissionViewManifests         Permission = "manifests:view"
-	PermissionManageManifests       Permission = "manifests:manage"
-	PermissionViewParticipants      Permission = "participants:view"
-	PermissionManageParticipants    Permission = "participants:manage"
-	PermissionViewCrewAssignments   Permission = "crew_assignments:view"
-	PermissionManageCrewAssignments Permission = "crew_assignments:manage"
-	PermissionViewLogistics         Permission = "logistics:view"
-	PermissionManageLogistics       Permission = "logistics:manage"
-	PermissionViewBudget            Permission = "budget:view"
-	PermissionManageBudget          Permission = "budget:manage"
-	PermissionApproveBudget         Permission = "budget:approve"
-	PermissionViewAccounting        Permission = "accounting:view"
-	PermissionManageAccounting      Permission = "accounting:manage"
-	PermissionApproveAccounting     Permission = "accounting:approve"
-	PermissionViewSession           Permission = "session:view"
+	PermissionViewSeasons              Permission = "seasons:view"
+	PermissionManageSeasons            Permission = "seasons:manage"
+	PermissionViewEvents               Permission = "events:view"
+	PermissionManageEvents             Permission = "events:manage"
+	PermissionViewRegistrations        Permission = "registrations:view"
+	PermissionManageRegistrations      Permission = "registrations:manage"
+	PermissionViewComms                Permission = "comms:view"
+	PermissionManageComms              Permission = "comms:manage"
+	PermissionViewManifests            Permission = "manifests:view"
+	PermissionManageManifests          Permission = "manifests:manage"
+	PermissionViewParticipants         Permission = "participants:view"
+	PermissionManageParticipants       Permission = "participants:manage"
+	PermissionViewCrewAssignments      Permission = "crew_assignments:view"
+	PermissionManageCrewAssignments    Permission = "crew_assignments:manage"
+	PermissionViewLogistics            Permission = "logistics:view"
+	PermissionManageLogistics          Permission = "logistics:manage"
+	PermissionViewBudget               Permission = "budget:view"
+	PermissionManageBudget             Permission = "budget:manage"
+	PermissionApproveBudget            Permission = "budget:approve"
+	PermissionViewAccounting           Permission = "accounting:view"
+	PermissionManageAccounting         Permission = "accounting:manage"
+	PermissionApproveAccounting        Permission = "accounting:approve"
+	PermissionViewSession              Permission = "session:view"
+	PermissionViewChecklists           Permission = "checklists:view"
+	PermissionCompleteChecklists       Permission = "checklists:complete"
+	PermissionReverseAnyChecklist      Permission = "checklists:reverse_any"
+	PermissionOverrideChecklists       Permission = "checklists:override"
+	PermissionManageChecklistTemplates Permission = "checklists:manage_templates"
 )
 
 // RoleMatrix enumerates which roles satisfy a permission. The list is
@@ -180,4 +186,9 @@ var RoleMatrix = map[Permission][]Role{
 		RolePacker,
 		RoleParticipant,
 	},
+	PermissionViewChecklists:           {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionCompleteChecklists:       {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionReverseAnyChecklist:      {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew},
+	PermissionOverrideChecklists:       {RoleAdmin, RoleStaff, RoleJumpMaster},
+	PermissionManageChecklistTemplates: {RoleAdmin, RoleStaff},
 }

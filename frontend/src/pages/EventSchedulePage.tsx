@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef, useCallback, MouseEvent as ReactM
 import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
-import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
+import { canManageEvents, canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
 import {
   Accommodation,
   Event,
@@ -61,6 +61,7 @@ import 'flatpickr/dist/flatpickr.css';
 import { countVisibleParticipants } from '../utils/eventParticipants';
 import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { ChecklistInnhopp, listChecklistInnhopps } from '../api/checklists';
 
 const OVERLAY_EXIT_MS = 180;
 type DayBucket = {
@@ -198,7 +199,9 @@ const EventSchedulePage = () => {
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
   const canOpenMapsActions = canUseStaffMapsActions(user);
+  const canAccessOperationalChecklists = canManageEvents(user);
   const [eventData, setEventData] = useState<Event | null>(null);
+  const [checklistInnhopps, setChecklistInnhopps] = useState<Record<number, ChecklistInnhopp>>({});
   const [transports, setTransports] = useState<Transport[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
@@ -509,7 +512,8 @@ const EventSchedulePage = () => {
       setError(null);
       try {
         const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
-        const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
+        const checklistPromise = participantOnly ? Promise.resolve([] as ChecklistInnhopp[]) : listChecklistInnhopps(Number(eventId));
+        const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList] = await Promise.all([
           getEvent(Number(eventId)),
           listTransports(),
           listGroundCrews(),
@@ -517,7 +521,8 @@ const EventSchedulePage = () => {
           participantPromise,
           listOthers(),
           listMeals(),
-          listAirfields()
+          listAirfields(),
+          checklistPromise
         ]);
         if (cancelled) return;
         setEventData(evt);
@@ -528,6 +533,7 @@ const EventSchedulePage = () => {
         setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
         setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
         setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
+        setChecklistInnhopps(Object.fromEntries(checklistList.map((item) => [item.id, item])));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load schedule');
@@ -554,7 +560,8 @@ const EventSchedulePage = () => {
     setMessage(null);
     try {
       const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
-      const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList] = await Promise.all([
+      const checklistPromise = participantOnly ? Promise.resolve([] as ChecklistInnhopp[]) : listChecklistInnhopps(Number(eventId));
+      const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList] = await Promise.all([
         getEvent(Number(eventId)),
         listTransports(),
         listGroundCrews(),
@@ -562,7 +569,8 @@ const EventSchedulePage = () => {
         participantPromise,
         listOthers(),
         listMeals(),
-        listAirfields()
+        listAirfields(),
+        checklistPromise
       ]);
       setEventData(evt);
       setTransports(Array.isArray(transportList) ? transportList.filter((t) => t.event_id === Number(eventId)) : []);
@@ -572,6 +580,7 @@ const EventSchedulePage = () => {
       setOthers(Array.isArray(otherList) ? otherList.filter((o) => o.event_id === Number(eventId)) : []);
       setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
       setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
+      setChecklistInnhopps(Object.fromEntries(checklistList.map((item) => [item.id, item])));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load schedule');
     } finally {
@@ -927,6 +936,7 @@ const EventSchedulePage = () => {
         const landing = airfields.find((af) => af.id === i.landing_airfield_id);
         const aircraft = i.aircraft_id ? aircraftByID.get(i.aircraft_id) || null : null;
         const aircraftWarning = getInnhoppAircraftWarning(i, eventData?.aircraft || []);
+        const checklist = checklistInnhopps[i.id];
         const flightTimeMinutes = computeDisplayFlightTimeMinutes(
           i.distance_by_air,
           aircraft?.cruising_speed_kmh ?? null,
@@ -950,6 +960,9 @@ const EventSchedulePage = () => {
           type: 'Innhopp',
           to: participantOnly ? undefined : eventData ? `/events/${eventData.id}/innhopps/${i.id}` : undefined,
           ready: isInnhoppReady(i),
+          checklistReady: checklist?.ready,
+          checklistOverridden: checklist?.overridden,
+          operationalStatus: checklist?.operational_status,
           missingCoordinates: !hasText(i.coordinates),
           description: i.reason_for_choice || i.primary_landing_area?.description || null,
           notes: i.notes || undefined,
@@ -1167,6 +1180,7 @@ const EventSchedulePage = () => {
     [
       aircraftByID,
       airfields,
+      checklistInnhopps,
       eventData,
       eventId,
       locationCoordinates,
@@ -1971,6 +1985,15 @@ const EventSchedulePage = () => {
               >
                 Event Overview
               </button>
+              {canAccessOperationalChecklists ? (
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => navigate(`/events/${eventData.id}/checklists`)}
+                >
+                  Operational Checklists
+                </button>
+              ) : null}
             </>
           }
         />
@@ -2208,15 +2231,7 @@ const EventSchedulePage = () => {
                       </span>
                     );
                 } else if (entry.type === 'Innhopp') {
-                  statusBadge = entry.ready ? (
-                    <span className="badge success schedule-status-badge">
-                      ✓
-                    </span>
-                  ) : (
-                    <span className="badge danger schedule-status-badge">
-                      !
-                    </span>
-                  );
+                  statusBadge = entry.operationalStatus === 'completed' ? <span className="badge success schedule-status-badge" title="Operation completed">Done</span> : entry.operationalStatus === 'proceeding' ? <span className="badge success schedule-status-badge" title="Checklist gate passed">Live</span> : entry.checklistOverridden ? <span className="badge danger schedule-status-badge" title="Safety checklist override">Override</span> : entry.checklistReady ? <span className="badge success schedule-status-badge" title="Safety checklist ready">Ready</span> : <span className="badge danger schedule-status-badge" title="Safety checklist blocked">Blocked</span>;
                 } else if (entry.type === 'Meal') {
                   statusBadge = entry.mealComplete ? (
                     <span className="badge success schedule-status-badge">

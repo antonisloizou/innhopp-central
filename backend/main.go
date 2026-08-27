@@ -16,6 +16,7 @@ import (
 	"github.com/innhopp/central/backend/accounting"
 	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/budgets"
+	"github.com/innhopp/central/backend/checklists"
 	"github.com/innhopp/central/backend/comms"
 	"github.com/innhopp/central/backend/events"
 	"github.com/innhopp/central/backend/innhopps"
@@ -52,6 +53,9 @@ func main() {
 
 	if err := ensureSchema(ctx, pool); err != nil {
 		log.Fatalf("failed to ensure schema: %v", err)
+	}
+	if err := checklists.EnsureTemplates(ctx, pool); err != nil {
+		log.Fatalf("failed to seed checklist templates: %v", err)
 	}
 	backfillCtx, cancelBackfill := context.WithTimeout(ctx, 2*time.Minute)
 	if err := logistics.BackfillLegacyReferenceIDs(backfillCtx, pool); err != nil {
@@ -196,6 +200,7 @@ func main() {
 	router.Mount("/api/rbac", rbac.NewHandler(pool).Routes(enforcer))
 	router.Mount("/api/logistics", logistics.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool, streams).Routes(enforcer))
+	router.Mount("/api/checklists", checklists.NewHandler(pool, streams).Routes(enforcer))
 	if budgetsV1Enabled {
 		router.Mount("/api/budgets", budgets.NewHandler(pool, streams).Routes(enforcer))
 		router.Mount("/api/accounting", accounting.NewHandler(pool).Routes(enforcer))
@@ -532,6 +537,72 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS image_files JSONB DEFAULT '[]'::jsonb`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owners JSONB DEFAULT '[]'::jsonb`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS land_owner_permission BOOLEAN`,
+		`CREATE TABLE IF NOT EXISTS checklist_templates (
+            id SERIAL PRIMARY KEY,
+            role TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (role IN ('jump_leader','jump_master','ground_crew','boat_crew'))
+        )`,
+		`CREATE TABLE IF NOT EXISTS checklist_template_items (
+            id SERIAL PRIMARY KEY,
+            template_id INTEGER NOT NULL REFERENCES checklist_templates(id) ON DELETE CASCADE,
+            item_key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            phase TEXT NOT NULL DEFAULT 'readiness',
+            requires_rescue_boat BOOLEAN NOT NULL DEFAULT FALSE,
+            sort_order INTEGER NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE(template_id, item_key),
+            CHECK (phase IN ('readiness','execution','closeout'))
+        )`,
+		`ALTER TABLE checklist_template_items ADD COLUMN IF NOT EXISTS requires_rescue_boat BOOLEAN NOT NULL DEFAULT FALSE`,
+		`CREATE TABLE IF NOT EXISTS innhopp_checklist_item_events (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            innhopp_id INTEGER NOT NULL REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            template_item_id INTEGER NOT NULL REFERENCES checklist_template_items(id),
+            role TEXT NOT NULL,
+            action TEXT NOT NULL,
+            actor_account_id INTEGER NOT NULL,
+            actor_display_name_snapshot TEXT NOT NULL,
+            template_version INTEGER NOT NULL,
+            item_label_snapshot TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (action IN ('completed','reversed')),
+            CHECK (role IN ('jump_leader','jump_master','ground_crew','boat_crew'))
+        )`,
+		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_current_idx ON innhopp_checklist_item_events (innhopp_id, template_item_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_history_idx ON innhopp_checklist_item_events (innhopp_id, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_template_item_idx ON innhopp_checklist_item_events (template_item_id)`,
+		`CREATE TABLE IF NOT EXISTS innhopp_checklist_overrides (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            innhopp_id INTEGER NOT NULL REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            actor_account_id INTEGER NOT NULL,
+            actor_display_name_snapshot TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            revoked_at TIMESTAMPTZ,
+            revoked_by_account_id INTEGER,
+            revoked_reason TEXT NOT NULL DEFAULT ''
+        )`,
+		`CREATE INDEX IF NOT EXISTS innhopp_checklist_overrides_active_idx ON innhopp_checklist_overrides (innhopp_id, created_at DESC) WHERE revoked_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS innhopp_operational_states (
+            innhopp_id INTEGER PRIMARY KEY REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'planned',
+            changed_by_account_id INTEGER NOT NULL,
+            changed_by_display_name_snapshot TEXT NOT NULL,
+            changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK (status IN ('planned','proceeding','completed','cancelled'))
+        )`,
 		`CREATE TABLE IF NOT EXISTS manifest_participants (
     manifest_id INTEGER NOT NULL REFERENCES manifests(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
