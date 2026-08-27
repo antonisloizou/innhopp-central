@@ -277,6 +277,8 @@ const EventSchedulePage = () => {
   const [importEvents, setImportEvents] = useState<Event[]>([]);
   const [importSourceEventId, setImportSourceEventId] = useState('');
   const [importSourceEvent, setImportSourceEvent] = useState<Event | null>(null);
+  const [importInnhoppQuery, setImportInnhoppQuery] = useState('');
+  const [importSelectedSearchInnhoppId, setImportSelectedSearchInnhoppId] = useState<string | null>(null);
   const [importSourceItems, setImportSourceItems] = useState<{
     transports: Transport[];
     groundCrews: GroundCrew[];
@@ -1760,6 +1762,17 @@ const EventSchedulePage = () => {
     };
   }, [overlayOpen]);
 
+  const importInnhoppSearchResults = useMemo(() => {
+    const query = importInnhoppQuery.trim().toLocaleLowerCase();
+    if (importType !== 'Innhopp' || !query) return [];
+
+    return importEvents.flatMap((event) =>
+      (event.innhopps ?? [])
+        .filter((innhopp) => `${innhopp.sequence} ${innhopp.name || ''}`.toLocaleLowerCase().includes(query))
+        .map((innhopp) => ({ event, innhopp }))
+    ).slice(0, 20);
+  }, [importEvents, importInnhoppQuery, importType]);
+
   if (loading) return <p className="muted">Loading schedule…</p>;
   if (error) return <p className="error-text">{error}</p>;
   if (!eventData) return <p className="error-text">Event not found.</p>;
@@ -1840,7 +1853,7 @@ const EventSchedulePage = () => {
     }
   };
 
-  const loadImportSource = async (sourceEventId: string) => {
+  const loadImportSource = async (sourceEventId: string, selectedItemId?: string) => {
     setImportSourceEventId(sourceEventId);
     setImportSourceEvent(null);
     setImportItemIds([]);
@@ -1859,6 +1872,7 @@ const EventSchedulePage = () => {
         others: otherList.filter((item) => item.event_id === sourceId),
         meals: mealList.filter((item) => item.event_id === sourceId)
       });
+      setImportItemIds(selectedItemId ? [selectedItemId] : []);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Failed to load the source schedule');
     } finally {
@@ -1876,6 +1890,10 @@ const EventSchedulePage = () => {
       case 'Other': return importSourceItems.others;
     }
   })();
+
+  const visibleImportChoices = importSelectedSearchInnhoppId && importType === 'Innhopp'
+    ? importChoices.filter((item) => String(item.id) === importSelectedSearchInnhoppId)
+    : importChoices;
 
   const importChoiceLabel = (item: any) => {
     if (importType === 'Innhopp') return `#${item.sequence} ${item.name || 'Untitled innhopp'}`;
@@ -2182,6 +2200,8 @@ const EventSchedulePage = () => {
                           setImportSourceEventId('');
                           setImportSourceEvent(null);
                           setImportItemIds([]);
+                          setImportInnhoppQuery('');
+                          setImportSelectedSearchInnhoppId(null);
                         }}
                       >
                         Import from another event…
@@ -2584,21 +2604,54 @@ const EventSchedulePage = () => {
                 <p className="muted">The copy will be added to this day. Its source-event links, such as aircraft and vehicles, are left unassigned.</p>
                 <label>
                   Item type
-                  <select value={importType} onChange={(e) => { setImportType(e.target.value as EntryType); setImportItemIds([]); }}>
+                  <select value={importType} onChange={(e) => { setImportType(e.target.value as EntryType); setImportItemIds([]); setImportInnhoppQuery(''); setImportSelectedSearchInnhoppId(null); }}>
                     {(['Innhopp', 'Transport', 'Ground Crew', 'Accommodation', 'Meal', 'Other'] as EntryType[]).map((type) => <option key={type} value={type}>{type}</option>)}
                   </select>
                 </label>
+                {importType === 'Innhopp' ? (
+                  <label>
+                    Search innhopps
+                    <input
+                      type="search"
+                      value={importInnhoppQuery}
+                      onChange={(e) => { setImportInnhoppQuery(e.target.value); setImportSelectedSearchInnhoppId(null); }}
+                      placeholder="Type an innhopp name…"
+                      disabled={savingImport}
+                    />
+                  </label>
+                ) : null}
                 <label>
                   Source event
-                  <select value={importSourceEventId} onChange={(e) => void loadImportSource(e.target.value)} disabled={savingImport}>
+                  <select value={importSourceEventId} onChange={(e) => { setImportInnhoppQuery(''); setImportSelectedSearchInnhoppId(null); void loadImportSource(e.target.value); }} disabled={savingImport}>
                     <option value="">Select an event…</option>
                     {importEvents.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
                   </select>
                 </label>
+                {importInnhoppQuery.trim() ? (
+                  <div className="event-schedule-import-search-results" aria-live="polite">
+                    <span className="event-schedule-import-search-results-title">Matching innhopps</span>
+                    {importInnhoppSearchResults.length > 0 ? importInnhoppSearchResults.map(({ event, innhopp }) => (
+                      <button
+                        key={`${event.id}-${innhopp.id}`}
+                        type="button"
+                        className="event-schedule-import-search-result"
+                        disabled={savingImport}
+                        onClick={() => {
+                          setImportInnhoppQuery('');
+                          setImportSelectedSearchInnhoppId(String(innhopp.id));
+                          void loadImportSource(String(event.id), String(innhopp.id));
+                        }}
+                      >
+                        <span>{importChoiceLabel(innhopp)}</span>
+                        <small>From event: {event.name}</small>
+                      </button>
+                    )) : <p className="muted">No innhopps match that search.</p>}
+                  </div>
+                ) : null}
                 {loadingImportSource ? <p className="muted">Loading source schedule…</p> : importSourceEvent ? (
                   <fieldset className="event-schedule-import-items" disabled={savingImport}>
                     <legend>Item to copy</legend>
-                    {importChoices.map((item: any) => {
+                    {visibleImportChoices.map((item: any) => {
                       const ready = isImportChoiceReady(item);
                       const selected = importItemIds.includes(String(item.id));
                       return (
@@ -2625,7 +2678,7 @@ const EventSchedulePage = () => {
                     })}
                   </fieldset>
                 ) : null}
-                {importSourceEvent && importChoices.length === 0 ? <p className="muted">No {importType.toLowerCase()} items are scheduled for that event.</p> : null}
+                {importSourceEvent && visibleImportChoices.length === 0 ? <p className="muted">No {importType.toLowerCase()} items are scheduled for that event.</p> : null}
                 <div className="event-schedule-move-confirmation-actions">
                   <button type="button" className="ghost" disabled={savingImport} onClick={() => setImportDayKey(null)}>Cancel</button>
                   <button type="button" disabled={importItemIds.length === 0 || savingImport} onClick={() => void confirmImport()}>{savingImport ? 'Importing…' : `Import ${importItemIds.length || ''} ${importItemIds.length === 1 ? 'copy' : 'copies'}`}</button>

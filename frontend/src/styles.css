@@ -5446,6 +5446,38 @@ button.ghost.event-route-preview-overlay-button {
   font: inherit;
 }
 
+.event-schedule-import-panel input[type='search'] {
+  width: 100%;
+  font: inherit;
+}
+
+.event-schedule-import-search-results {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.event-schedule-import-search-results-title {
+  font-weight: 600;
+}
+
+.event-schedule-import-search-result {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 0.45rem;
+}
+
+.event-schedule-import-search-result small {
+  color: var(--muted-text, #6b7280);
+  font-size: 0.82rem;
+}
+
 .event-schedule-import-items {
   display: grid;
   gap: 0.5rem;
