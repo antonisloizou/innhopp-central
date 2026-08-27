@@ -1,8 +1,12 @@
 import { MouseEvent, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { budgetsV1Enabled } from '../config/flags';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
+import { exportInnhopp, getEvent, Innhopp } from '../api/events';
+import { parseCoordinates } from '../utils/coordinates';
+import { renderSatelliteMapForExport } from '../utils/innhoppExport';
 
 export type EventGearMenuPage =
   | 'schedule'
@@ -52,6 +56,7 @@ const EventGearMenu = ({
   const participantOnly = isParticipantOnlySession(user);
   const forceDocumentNavigation = !!user?.impersonator || participantOnly;
   const [open, setOpen] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const navigateTo = (path: string) => {
@@ -60,6 +65,57 @@ const EventGearMenu = ({
       return;
     }
     navigate(path);
+  };
+
+  const downloadInnhoppExport = (innhopp: Innhopp, file: Blob) => {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${String(innhopp.sequence).padStart(2, '0')}-${innhopp.name || 'innhopp'}.docx`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleExportAll = async () => {
+    if (exportProgress) return;
+    setExportProgress({ completed: 0, total: 0, current: 'Loading Innhopps…', failures: [], done: false });
+    try {
+      const event = await getEvent(eventId);
+      const innhopps = [...event.innhopps].sort((a, b) => a.sequence - b.sequence || a.name.localeCompare(b.name));
+      setExportProgress({ completed: 0, total: innhopps.length, current: 'Preparing export…', failures: [], done: false });
+
+      const failures: string[] = [];
+      for (let index = 0; index < innhopps.length; index += 1) {
+        const innhopp = innhopps[index];
+        setExportProgress({ completed: index, total: innhopps.length, current: innhopp.name || `Innhopp ${innhopp.sequence}`, failures: [...failures], done: false });
+        try {
+          const coordinates = parseCoordinates(innhopp.coordinates);
+          if (!coordinates) throw new Error('A valid coordinate is required.');
+          const [localMap, areaMap] = await Promise.all([
+            renderSatelliteMapForExport(coordinates, 250),
+            renderSatelliteMapForExport(coordinates, 1852)
+          ]);
+          downloadInnhoppExport(innhopp, await exportInnhopp(innhopp.id, localMap, areaMap));
+        } catch (error) {
+          failures.push(`${innhopp.name || `Innhopp ${innhopp.sequence}`}: ${error instanceof Error ? error.message : 'Export failed.'}`);
+        }
+        setExportProgress({ completed: index + 1, total: innhopps.length, current: innhopp.name || `Innhopp ${innhopp.sequence}`, failures: [...failures], done: index + 1 === innhopps.length });
+      }
+      if (innhopps.length === 0) {
+        setExportProgress({ completed: 0, total: 0, current: 'This event has no Innhopps to export.', failures: [], done: true });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load Innhopps.';
+      setExportProgress({
+        completed: 0,
+        total: 0,
+        current: message,
+        failures: [message],
+        done: true
+      });
+    }
   };
 
   useEffect(() => {
@@ -141,6 +197,18 @@ const EventGearMenu = ({
                 className="event-schedule-menu-item"
                 type="button"
                 role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  void handleExportAll();
+                }}
+                disabled={!!exportProgress}
+              >
+                Export all Innhopps
+              </button>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
                 onClick={(event) => {
                   setOpen(false);
                   void onCopy(event);
@@ -176,6 +244,42 @@ const EventGearMenu = ({
           </button>
         </div>
       )}
+      {exportProgress && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="innhopp-export-progress-backdrop" role="presentation">
+              <section className="card innhopp-export-progress-panel" role="dialog" aria-modal="true" aria-labelledby="innhopp-export-progress-title">
+                <h3 id="innhopp-export-progress-title">
+                  {exportProgress.done
+                    ? 'Innhopp export complete'
+                    : 'Exporting Innhopps'}
+                </h3>
+                <p className="muted" aria-live="polite">
+                  {exportProgress.total > 0
+                    ? `${exportProgress.completed} of ${exportProgress.total}: ${exportProgress.current}`
+                    : exportProgress.current}
+                </p>
+                <progress value={exportProgress.total > 0 ? exportProgress.completed : exportProgress.done ? 1 : 0} max={exportProgress.total || 1}>
+                  {exportProgress.completed} of {exportProgress.total}
+                </progress>
+                {exportProgress.done ? (
+                  <>
+                    {exportProgress.total === 0 && exportProgress.failures.length === 0 ? null : exportProgress.failures.length > 0 ? (
+                      <p className="error-text">
+                        {exportProgress.failures.length} export{exportProgress.failures.length === 1 ? '' : 's'} failed. {exportProgress.failures.join(' ')}
+                      </p>
+                    ) : (
+                      <p className="success-text">All Innhopps have been downloaded.</p>
+                    )}
+                    <div className="innhopp-export-progress-actions">
+                      <button type="button" onClick={() => setExportProgress(null)}>Done</button>
+                    </div>
+                  </>
+                ) : null}
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 };

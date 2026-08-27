@@ -3825,6 +3825,35 @@ button.ghost {
   color: #fecdd3;
 }
 
+.innhopp-export-progress-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(8, 12, 20, 0.72);
+}
+
+.innhopp-export-progress-panel {
+  width: min(30rem, 100%);
+}
+
+.innhopp-export-progress-panel h3 {
+  margin-top: 0;
+}
+
+.innhopp-export-progress-panel progress {
+  width: 100%;
+  height: 1rem;
+}
+
+.innhopp-export-progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
 .card-header h3 {
   margin: 0;
   color: var(--text-strong);
