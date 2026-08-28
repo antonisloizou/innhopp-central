@@ -2251,7 +2251,7 @@ const EventSchedulePage = () => {
                       </span>
                     );
                 } else if (entry.type === 'Innhopp') {
-                  statusBadge = entry.operationalStatus === 'completed' ? <span className="badge success schedule-status-badge" title="Operation completed">Done</span> : entry.operationalStatus === 'proceeding' ? <span className="badge success schedule-status-badge" title="Checklist gate passed">Live</span> : entry.checklistOverridden ? <span className="badge danger schedule-status-badge" title="Safety checklist override">Override</span> : entry.checklistReady ? <span className="badge success schedule-status-badge" title="Safety checklist ready">Ready</span> : <span className="badge danger schedule-status-badge" title="Safety checklist blocked">Blocked</span>;
+                  statusBadge = entry.operationalStatus === 'completed' ? <span className="badge success schedule-status-badge" title="Operation completed">Done</span> : entry.operationalStatus === 'proceeding' ? <span className="badge success schedule-status-badge" title="Checklist gate passed">Live</span> : entry.ready ? <span className="badge success schedule-status-badge" title="Innhopp is operationally ready">✓</span> : <span className="badge danger schedule-status-badge" title="Innhopp setup is incomplete">!</span>;
                 } else if (entry.type === 'Meal') {
                   statusBadge = entry.mealComplete ? (
                     <span className="badge success schedule-status-badge">
