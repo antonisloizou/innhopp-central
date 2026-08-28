@@ -22,11 +22,11 @@ const sortSeasonsDesc = (seasons: Season[]) =>
 const sortParticipantsByName = (participants: ParticipantCard[]) =>
   [...participants].sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
 
-const sortEventsByStartDateDescending = (events: Event[]) =>
+const sortEventsByStartDateAscending = (events: Event[]) =>
   [...events].sort(
     (left, right) =>
-      (parseEventLocal(right.starts_at)?.getTime() ?? 0) -
-      (parseEventLocal(left.starts_at)?.getTime() ?? 0)
+      (parseEventLocal(left.starts_at)?.getTime() ?? 0) -
+      (parseEventLocal(right.starts_at)?.getTime() ?? 0)
   );
 
 const ParticipantOnboardingPage = () => {
@@ -269,7 +269,7 @@ const ParticipantOnboardingPage = () => {
               className="participant-onboarding-event-select"
             >
               <option value="">All events</option>
-              {sortEventsByStartDateDescending(filteredEvents).map((event) => (
+              {sortEventsByStartDateAscending(filteredEvents).map((event) => (
                 <option key={event.id} value={event.id}>
                   {event.name}
                 </option>
