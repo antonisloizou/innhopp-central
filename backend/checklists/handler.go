@@ -36,6 +36,7 @@ func (h *Handler) Routes(e *rbac.Enforcer) chi.Router {
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/items/{itemID}/complete", h.complete)
 	r.With(e.Authorize(rbac.PermissionReverseAnyChecklist)).Post("/innhopps/{innhoppID}/items/{itemID}/reverse", h.reverse)
 	r.With(e.Authorize(rbac.PermissionOverrideChecklists)).Post("/innhopps/{innhoppID}/override", h.override)
+	r.With(e.Authorize(rbac.PermissionResetChecklists)).Post("/innhopps/{innhoppID}/reset", h.reset)
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/proceed", h.proceed)
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/complete-operation", h.completeOperation)
 	return r
@@ -240,7 +241,7 @@ func (h *Handler) load(ctx context.Context, innhoppID int64, role string) (check
 	}
 	out.Ready = out.Ready || out.Overridden
 	out.OperationalStatus = h.operationalStatus(ctx, innhoppID)
-	rows, err := h.db.Query(ctx, `SELECT i.id,i.item_key,i.label,i.detail,i.phase,i.sort_order, COALESCE(s.action='completed',false), COALESCE(s.actor_display_name_snapshot,''),s.created_at FROM checklist_template_items i JOIN checklist_templates t ON t.id=i.template_id LEFT JOIN LATERAL (SELECT action,actor_display_name_snapshot,created_at FROM innhopp_checklist_item_events e WHERE e.innhopp_id=$1 AND e.template_item_id=i.id ORDER BY e.created_at DESC,e.id DESC LIMIT 1) s ON TRUE WHERE t.role=$2 AND t.active AND i.active AND (NOT i.requires_rescue_boat OR $3) ORDER BY i.sort_order`, innhoppID, role, boat)
+	rows, err := h.db.Query(ctx, `SELECT i.id,i.item_key,i.label,i.detail,i.phase,i.sort_order, COALESCE(s.action='completed',false), COALESCE(s.actor_display_name_snapshot,''),s.created_at FROM checklist_template_items i JOIN checklist_templates t ON t.id=i.template_id LEFT JOIN LATERAL (SELECT action,actor_display_name_snapshot,created_at FROM innhopp_checklist_item_events e WHERE e.innhopp_id=$1 AND e.template_item_id=i.id AND e.created_at > COALESCE((SELECT max(created_at) FROM innhopp_checklist_resets WHERE innhopp_id=$1), '-infinity'::timestamptz) ORDER BY e.created_at DESC,e.id DESC LIMIT 1) s ON TRUE WHERE t.role=$2 AND t.active AND i.active AND (NOT i.requires_rescue_boat OR $3) ORDER BY i.sort_order`, innhoppID, role, boat)
 	if err != nil {
 		return out, err
 	}
@@ -300,6 +301,9 @@ func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 		UNION ALL
 		SELECT id, 'Proceeding override' AS item_label, 'jump_master' AS role, 'overridden' AS action, actor_display_name_snapshot AS actor, reason, created_at
 		FROM innhopp_checklist_overrides WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -id, 'Innhopp Operational Checks Reset' AS item_label, 'admin' AS role, 'reset' AS action, actor_display_name_snapshot AS actor, reason, created_at
+		FROM innhopp_checklist_resets WHERE innhopp_id=$1
 	) audit ORDER BY created_at DESC,id DESC`, id)
 	if err != nil {
 		httpx.Error(w, 500, "could not load checklist history")
@@ -333,7 +337,7 @@ func (h *Handler) publishUpdate(innhoppID, eventID int64, action string) {
 }
 func (h *Handler) ready(ctx context.Context, innhoppID int64, roles []string) bool {
 	var missing int
-	err := h.db.QueryRow(ctx, `SELECT count(*) FROM checklist_template_items i JOIN checklist_templates t ON t.id=i.template_id JOIN event_innhopps e ON e.id=$1 LEFT JOIN LATERAL (SELECT action FROM innhopp_checklist_item_events x WHERE x.innhopp_id=$1 AND x.template_item_id=i.id ORDER BY x.created_at DESC,x.id DESC LIMIT 1) s ON TRUE WHERE t.role=ANY($2) AND t.active AND i.active AND i.phase='readiness' AND (NOT i.requires_rescue_boat OR COALESCE(e.rescue_boat,false)) AND COALESCE(s.action,'') <> 'completed'`, innhoppID, roles).Scan(&missing)
+	err := h.db.QueryRow(ctx, `SELECT count(*) FROM checklist_template_items i JOIN checklist_templates t ON t.id=i.template_id JOIN event_innhopps e ON e.id=$1 LEFT JOIN LATERAL (SELECT action FROM innhopp_checklist_item_events x WHERE x.innhopp_id=$1 AND x.template_item_id=i.id AND x.created_at > COALESCE((SELECT max(created_at) FROM innhopp_checklist_resets WHERE innhopp_id=$1), '-infinity'::timestamptz) ORDER BY x.created_at DESC,x.id DESC LIMIT 1) s ON TRUE WHERE t.role=ANY($2) AND t.active AND i.active AND i.phase='readiness' AND (NOT i.requires_rescue_boat OR COALESCE(e.rescue_boat,false)) AND COALESCE(s.action,'') <> 'completed'`, innhoppID, roles).Scan(&missing)
 	return err == nil && missing == 0
 }
 
@@ -401,7 +405,7 @@ func (h *Handler) complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var action string
-	_ = tx.QueryRow(r.Context(), `SELECT action FROM innhopp_checklist_item_events WHERE innhopp_id=$1 AND template_item_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, innhoppID, itemID).Scan(&action)
+	_ = tx.QueryRow(r.Context(), `SELECT action FROM innhopp_checklist_item_events WHERE innhopp_id=$1 AND template_item_id=$2 AND created_at > COALESCE((SELECT max(created_at) FROM innhopp_checklist_resets WHERE innhopp_id=$1), '-infinity'::timestamptz) ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, innhoppID, itemID).Scan(&action)
 	if action != "completed" {
 		name := strings.TrimSpace(claims.FullName)
 		if name == "" {
@@ -440,12 +444,12 @@ func (h *Handler) reverse(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
-		httpx.Error(w, 400, "role and reversal reason are required")
+		httpx.Error(w, 400, "role is required")
 		return
 	}
 	req.Role, req.Reason = strings.TrimSpace(req.Role), strings.TrimSpace(req.Reason)
-	if !validRole(req.Role) || req.Reason == "" {
-		httpx.Error(w, 400, "a valid role and reversal reason are required")
+	if !validRole(req.Role) {
+		httpx.Error(w, 400, "a valid role is required")
 		return
 	}
 	var boat bool
@@ -482,7 +486,7 @@ func (h *Handler) reverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var action string
-	if err := tx.QueryRow(r.Context(), `SELECT action FROM innhopp_checklist_item_events WHERE innhopp_id=$1 AND template_item_id=$2 ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, innhoppID, itemID).Scan(&action); err != nil || action != "completed" {
+	if err := tx.QueryRow(r.Context(), `SELECT action FROM innhopp_checklist_item_events WHERE innhopp_id=$1 AND template_item_id=$2 AND created_at > COALESCE((SELECT max(created_at) FROM innhopp_checklist_resets WHERE innhopp_id=$1), '-infinity'::timestamptz) ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE`, innhoppID, itemID).Scan(&action); err != nil || action != "completed" {
 		httpx.Error(w, 409, "only a completed item can be reversed")
 		return
 	}
@@ -540,6 +544,61 @@ func (h *Handler) override(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publishUpdate(innhoppID, eventID, "overridden")
 	httpx.WriteJSON(w, 201, map[string]bool{"overridden": true})
+}
+
+// reset invalidates every checklist confirmation for an innhopp in one audited action.
+// Existing item events remain part of the historical record but no longer count toward readiness.
+func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, 400, "invalid reset request")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, 401, "authentication required")
+		return
+	}
+
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT event_id FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&eventID); err != nil {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	name := strings.TrimSpace(claims.FullName)
+	if name == "" {
+		name = claims.Email
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, 500, "could not reset operational checks")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_checklist_resets(event_id,innhopp_id,actor_account_id,actor_display_name_snapshot,reason) VALUES($1,$2,$3,$4,$5)`, eventID, innhoppID, claims.AccountID, name, strings.TrimSpace(req.Reason)); err != nil {
+		httpx.Error(w, 500, "could not reset operational checks")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE innhopp_checklist_overrides SET revoked_at=NOW(), revoked_by_account_id=$2, revoked_reason='Operational checks reset' WHERE innhopp_id=$1 AND revoked_at IS NULL`, innhoppID, claims.AccountID); err != nil {
+		httpx.Error(w, 500, "could not reset operational checks")
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_operational_states(innhopp_id,status,changed_by_account_id,changed_by_display_name_snapshot) VALUES($1,'planned',$2,$3) ON CONFLICT(innhopp_id) DO UPDATE SET status='planned',changed_by_account_id=EXCLUDED.changed_by_account_id,changed_by_display_name_snapshot=EXCLUDED.changed_by_display_name_snapshot,changed_at=NOW()`, innhoppID, claims.AccountID, name); err != nil {
+		httpx.Error(w, 500, "could not reset operational checks")
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, 500, "could not reset operational checks")
+		return
+	}
+	h.publishUpdate(innhoppID, eventID, "reset")
+	httpx.WriteJSON(w, 200, map[string]string{"operational_status": "planned"})
 }
 
 func (h *Handler) proceed(w http.ResponseWriter, r *http.Request) {

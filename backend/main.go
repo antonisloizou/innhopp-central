@@ -595,6 +595,16 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             revoked_reason TEXT NOT NULL DEFAULT ''
         )`,
 		`CREATE INDEX IF NOT EXISTS innhopp_checklist_overrides_active_idx ON innhopp_checklist_overrides (innhopp_id, created_at DESC) WHERE revoked_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS innhopp_checklist_resets (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            innhopp_id INTEGER NOT NULL REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            actor_account_id INTEGER NOT NULL,
+            actor_display_name_snapshot TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE INDEX IF NOT EXISTS innhopp_checklist_resets_history_idx ON innhopp_checklist_resets (innhopp_id, created_at DESC, id DESC)`,
 		`CREATE TABLE IF NOT EXISTS innhopp_operational_states (
             innhopp_id INTEGER PRIMARY KEY REFERENCES event_innhopps(id) ON DELETE CASCADE,
             status TEXT NOT NULL DEFAULT 'planned',

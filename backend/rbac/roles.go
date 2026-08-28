@@ -46,6 +46,7 @@ const (
 	PermissionCompleteChecklists       Permission = "checklists:complete"
 	PermissionReverseAnyChecklist      Permission = "checklists:reverse_any"
 	PermissionOverrideChecklists       Permission = "checklists:override"
+	PermissionResetChecklists          Permission = "checklists:reset"
 	PermissionManageChecklistTemplates Permission = "checklists:manage_templates"
 )
 
@@ -190,5 +191,6 @@ var RoleMatrix = map[Permission][]Role{
 	PermissionCompleteChecklists:       {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
 	PermissionReverseAnyChecklist:      {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew},
 	PermissionOverrideChecklists:       {RoleAdmin, RoleStaff, RoleJumpMaster},
+	PermissionResetChecklists:          {RoleAdmin, RoleStaff},
 	PermissionManageChecklistTemplates: {RoleAdmin, RoleStaff},
 }

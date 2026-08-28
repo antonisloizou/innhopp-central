@@ -24,6 +24,7 @@ import {
   getChecklistHistory,
   listChecklistInnhopps,
   proceedWithInnhopp,
+  resetOperationalChecks,
   reverseChecklistItem
 } from '../api/checklists';
 
@@ -49,7 +50,7 @@ const formatDate = (value: string) => {
 };
 
 const historyActionPrefix = (action: ChecklistHistoryEvent['action']) =>
-  action === 'completed' ? '' : action === 'overridden' ? 'Override created: ' : 'Reversed: ';
+  action === 'completed' ? '' : action === 'overridden' ? 'Override created: ' : action === 'reset' ? '' : 'Reversed: ';
 
 const isPastEvent = (event: Event) => {
   if (event.status === 'past') return true;
@@ -78,9 +79,14 @@ export default function ChecklistsPage() {
   const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
   const [previewEntry, setPreviewEntry] = useState<ScheduleEntry | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetReason, setResetReason] = useState('');
+  const [reverseItem, setReverseItem] = useState<{ id: number; label: string } | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
 
   const canReverse = !!user?.roles.some((item) => ['admin', 'staff', 'jump_master', 'jump_leader', 'ground_crew', 'boat_crew'].includes(item));
   const canOverride = !!user?.roles.some((item) => ['admin', 'staff', 'jump_master'].includes(item));
+  const canReset = !!user?.roles.some((item) => ['admin', 'staff'].includes(item));
   const canOpenMapsActions = canUseStaffMapsActions(user);
   const participantOnly = isParticipantOnlySession(user);
 
@@ -123,11 +129,12 @@ export default function ChecklistsPage() {
     if (selectedInnhoppId && canReverse) void getChecklistHistory(selectedInnhoppId).then(setHistory).catch(() => {});
   }, [selectedInnhoppId, checklist, canReverse]);
 
-  const perform = async (itemId: number, action: () => Promise<unknown>) => {
+  const perform = async (itemId: number, action: () => Promise<unknown>, onSuccess?: () => void) => {
     setPendingItemId(itemId);
     try {
       await action();
       await refresh();
+      onSuccess?.();
     } catch (actionError) {
       setError((actionError as Error).message);
     } finally {
@@ -190,15 +197,18 @@ export default function ChecklistsPage() {
     : ['readiness', 'execution', 'closeout'];
   const missingRoles = roleChecklists.filter((entry) => entry.items.some((item) => item.phase === 'readiness' && !item.completed));
   const missingItems = (entry: InnhoppChecklist) => entry.items.filter((item) => activePhases.includes(item.phase) && !item.completed);
+  const highlightChecklistItem = (itemID: number) => {
+    setHighlightedItemId(itemID);
+    window.setTimeout(() => document.getElementById(`checklist-item-${itemID}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+    window.setTimeout(() => setHighlightedItemId(null), 3000);
+  };
   const focusFirstMissing = (phases: ChecklistPhase[]) => {
     const entry = roleChecklists.find((candidate) => candidate.items.some((item) => phases.includes(item.phase) && !item.completed));
     if (!entry) return false;
     setRole(entry.role);
     const item = entry.items.find((candidate) => phases.includes(candidate.phase) && !candidate.completed);
     if (item) {
-      setHighlightedItemId(item.id);
-      window.setTimeout(() => document.getElementById(`checklist-item-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
-      window.setTimeout(() => setHighlightedItemId(null), 3000);
+      highlightChecklistItem(item.id);
     }
     return true;
   };
@@ -234,15 +244,48 @@ export default function ChecklistsPage() {
       <div className={`card checklist-status ${statusClass}`}>
         {statusTag}
         {statusDetail && <span>{statusDetail}</span>}
+        {canReset && <button type="button" className="ghost checklist-reset" disabled={pendingItemId !== null} onClick={() => setResetDialogOpen(true)}>Reset checks</button>}
         <button type="button" className="ghost checklist-innhopp-details" onClick={() => void openInnhoppDetails()}>Innhopp details</button>
       </div>
       <div className="checklist-role-summary">{roleChecklists.map((entry) => <button key={entry.role} className={`badge checklist-role-badge ${missingItems(entry).length ? 'danger' : 'success'}`} onClick={() => { setRole(entry.role); setSearchParams({ innhopp: String(selectedInnhoppId), role: entry.role }); }}>{roleLabels[entry.role]}: {missingItems(entry).length} missing</button>)}</div>
       {phaseOrder.map((phase) => {
         const items = checklist.items.filter((item) => item.phase === phase).sort((a, b) => Number(a.completed) - Number(b.completed));
-        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className="checklist-mark">{item.completed ? '✓' : pendingItemId === item.id ? '…' : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); const reason = window.prompt('Why is this safety confirmation being reversed?'); if (reason) void perform(item.id, () => reverseChecklistItem(selectedInnhoppId, item.id, role, reason)); }}>Reverse</button>}</article>)}</section> : null;
+        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className="checklist-mark">{item.completed ? '✓' : pendingItemId === item.id ? '…' : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
       })}
-      {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>Audit history</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
+      {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>History</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
     </>}
+    {resetDialogOpen && <div className="checklist-reset-dialog-backdrop" role="presentation" onClick={() => pendingItemId === null && setResetDialogOpen(false)}>
+      <form className="card checklist-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="checklist-reset-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => {
+        event.preventDefault();
+        void perform(-1, () => resetOperationalChecks(selectedInnhoppId, resetReason));
+        setResetDialogOpen(false);
+        setResetReason('');
+      }}>
+        <h2 id="checklist-reset-dialog-title">Reset operational checks?</h2>
+        <p>Are you sure you want to reset all checks for this Innhopp?</p>
+        <label>Reason<textarea value={resetReason} onChange={(event) => setResetReason(event.target.value)} rows={3} autoFocus /></label>
+        <div className="checklist-reset-dialog-actions">
+          <button type="button" className="ghost" disabled={pendingItemId !== null} onClick={() => { setResetDialogOpen(false); setResetReason(''); }}>Cancel</button>
+          <button type="submit" disabled={pendingItemId !== null}>{pendingItemId === -1 ? 'Resetting…' : 'Reset checks'}</button>
+        </div>
+      </form>
+    </div>}
+    {reverseItem && <div className="checklist-reset-dialog-backdrop" role="presentation" onClick={() => pendingItemId === null && setReverseItem(null)}>
+      <form className="card checklist-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="checklist-reverse-dialog-title" onClick={(event) => event.stopPropagation()} onSubmit={(event) => {
+        event.preventDefault();
+        void perform(reverseItem.id, () => reverseChecklistItem(selectedInnhoppId, reverseItem.id, role, reverseReason), () => highlightChecklistItem(reverseItem.id));
+        setReverseItem(null);
+        setReverseReason('');
+      }}>
+        <h2 id="checklist-reverse-dialog-title">Reverse check?</h2>
+        <p>Are you sure you want to reverse “{reverseItem.label}”?</p>
+        <label>Reason<textarea value={reverseReason} onChange={(event) => setReverseReason(event.target.value)} rows={3} autoFocus /></label>
+        <div className="checklist-reset-dialog-actions">
+          <button type="button" className="ghost" disabled={pendingItemId !== null} onClick={() => { setReverseItem(null); setReverseReason(''); }}>Cancel</button>
+          <button type="submit" disabled={pendingItemId !== null}>{pendingItemId === reverseItem.id ? 'Reversing…' : 'Reverse check'}</button>
+        </div>
+      </form>
+    </div>}
     {previewEntry && <ScheduleEntryPreviewOverlay
       entry={previewEntry}
       closing={false}
