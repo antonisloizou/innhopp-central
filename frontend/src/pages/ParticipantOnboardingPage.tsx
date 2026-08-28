@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { useAuth } from '../auth/AuthProvider';
+import { parseEventLocal } from '../utils/eventDate';
 import { roleOptions } from '../utils/roles';
 
 type ParticipantCard = {
@@ -20,6 +21,13 @@ const sortSeasonsDesc = (seasons: Season[]) =>
 
 const sortParticipantsByName = (participants: ParticipantCard[]) =>
   [...participants].sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
+
+const sortEventsByStartDateDescending = (events: Event[]) =>
+  [...events].sort(
+    (left, right) =>
+      (parseEventLocal(right.starts_at)?.getTime() ?? 0) -
+      (parseEventLocal(left.starts_at)?.getTime() ?? 0)
+  );
 
 const ParticipantOnboardingPage = () => {
   const { impersonateNewUser, user } = useAuth();
@@ -261,7 +269,7 @@ const ParticipantOnboardingPage = () => {
               className="participant-onboarding-event-select"
             >
               <option value="">All events</option>
-              {filteredEvents.map((event) => (
+              {sortEventsByStartDateDescending(filteredEvents).map((event) => (
                 <option key={event.id} value={event.id}>
                   {event.name}
                 </option>
