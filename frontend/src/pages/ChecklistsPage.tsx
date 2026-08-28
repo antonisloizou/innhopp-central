@@ -57,6 +57,9 @@ const isPastEvent = (event: Event) => {
   return endsAt ? endsAt.getTime() < Date.now() : false;
 };
 
+const compareEventsByStartDateDescending = (left: Event, right: Event) =>
+  (parseEventLocal(right.starts_at)?.getTime() ?? 0) - (parseEventLocal(left.starts_at)?.getTime() ?? 0);
+
 export default function ChecklistsPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -223,7 +226,7 @@ export default function ChecklistsPage() {
     </header>
     {error && <p className="form-error">{error}</p>}
     <div className="card checklist-selectors">
-      <label>Event<select value={selectedEventId} onChange={(event) => { const id = Number(event.target.value); setSelectedInnhoppId(0); setSearchParams({}); setSelectedEventId(id); if (id) navigate(`/events/${id}/checklists`); }}><option value={0}>Select event</option>{events.filter((event) => !isPastEvent(event)).map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label>
+      <label>Event<select value={selectedEventId} onChange={(event) => { const id = Number(event.target.value); setSelectedInnhoppId(0); setSearchParams({}); setSelectedEventId(id); if (id) navigate(`/events/${id}/checklists`); }}><option value={0}>Select event</option>{events.filter((event) => !isPastEvent(event)).sort(compareEventsByStartDateDescending).map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label>
       <label>Innhopp<select value={selectedInnhoppId} onChange={(event) => { const id = Number(event.target.value); const innhopp = innhopps.find((item) => item.id === id); const nextRole = innhopp?.required_roles[0] || role; setSelectedInnhoppId(id); setRole(nextRole); setSearchParams(id ? { innhopp: String(id), role: nextRole } : {}); }}><option value={0}>Select innhopp</option>{innhopps.map((innhopp) => <option key={innhopp.id} value={innhopp.id}>#{innhopp.sequence} {innhopp.name}</option>)}</select></label>
       <label>Role<select value={role} disabled={!selectedInnhoppId} onChange={(event) => { const nextRole = event.target.value as ChecklistRole; setRole(nextRole); if (selectedInnhoppId) setSearchParams({ innhopp: String(selectedInnhoppId), role: nextRole }); }}>{checklist?.required_roles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select></label>
     </div>

@@ -85,6 +85,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Readiness | Location is selected and authorised | Confirm landowner permission and any required local/DZ approval are in place. |
 | Readiness | Operational Plan is complete and shared | Confirm landing areas, access, hazards, terrain/elevation, emergency/hospital information, and coordinates are current. |
 | Readiness | Operational team is appointed and briefed | Confirm Jump Master and Ground Crew; when the innhopp requires a safety boat, also confirm Boat Crew. Establish communication/reporting method. |
+| Readiness | Ground crew departure is on time | Ensure the Ground Crew departs in good time and is in place 10 minutes before the agreed briefing time. |
 | Readiness | Conditions and go/no-go decision are confirmed | Use current weather, wind, NOTAM/airspace information, and local conditions; record any material limitations. |
 | Readiness | Pilot and Jump Master plan is agreed | Confirm location, coordinates, altitude, jump run/exit point, number of runs/loads, timing, and abort/hold arrangements. |
 | Readiness | Manifest | Load sheets are ready and participants are briefed on boarding procedures. |

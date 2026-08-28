@@ -6,7 +6,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 	want := map[string]struct {
 		readiness, execution, closeout int
 	}{
-		"jump_leader": {6, 0, 2},
+		"jump_leader": {7, 0, 2},
 		"jump_master": {5, 1, 1},
 		"ground_crew": {8, 1, 2},
 		"boat_crew":   {3, 1, 1},
