@@ -8,7 +8,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 	}{
 		"jump_leader": {6, 0, 2},
 		"jump_master": {5, 1, 1},
-		"ground_crew": {7, 1, 2},
+		"ground_crew": {8, 1, 2},
 		"boat_crew":   {3, 1, 1},
 	}
 
@@ -40,7 +40,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 		}
 	}
 
-	boatCoordination := seedTemplates["ground_crew"][6]
+	boatCoordination := seedTemplates["ground_crew"][7]
 	if boatCoordination.Key != "boat_coordination" || !boatCoordination.RequiresRescueBoat {
 		t.Fatal("ground crew boat coordination must be required only for rescue-boat innhopps")
 	}

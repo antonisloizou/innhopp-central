@@ -108,6 +108,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Phase | Proposed item | Purpose / supporting detail |
 |---|---|---|
 | Readiness | Current operational plan | Location, route, access and communication contact are confirmed. |
+| Readiness | Arrive at the landing location on time | Be at the landing location 10 minutes before the agreed briefing time. |
 | Readiness | Ground crew kit is complete | T, wind indicators, Radio and approved medical kit are present. |
 | Readiness | Transport and emergency support are ready | Confirm crew transport and access/egress plan; confirm emergency contacts, hospital route, and pickup capability for off-landings. |
 | Readiness | Landing area prepared | T and windblades placed, current conditions assessed. |
