@@ -36,7 +36,7 @@ const Layout = () => {
     ? [{ to: '/events', label: 'Events' }]
       : [
         { to: '/events', label: 'Events' },
-        { to: '/checklists', label: 'Operational Checklists' },
+        { to: '/checklists', label: 'Operational Checks' },
         { to: '/participants', label: 'Participants' },
         { to: '/logistics', label: 'Logistics' },
         ...(budgetsV1Enabled ? [{ to: '/finance', label: 'Finance' }] : []),

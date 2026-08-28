@@ -34,7 +34,7 @@ type EventGearMenuProps = {
 const eventMenuPages: Array<{ key: EventGearMenuPage; label: string; path: (eventId: number) => string }> = [
   { key: 'schedule', label: 'Schedule', path: (eventId) => `/events/${eventId}` },
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
-  { key: 'checklists', label: 'Operational Checklists', path: (eventId) => `/events/${eventId}/checklists` },
+  { key: 'checklists', label: 'Operational Checks', path: (eventId) => `/events/${eventId}/checklists` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
   { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
   { key: 'accounting', label: 'Accounting', path: (eventId) => `/events/${eventId}/accounting` },

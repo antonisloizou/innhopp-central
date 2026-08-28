@@ -227,7 +227,7 @@ export default function ChecklistsPage() {
 
   return <section className="checklists-page">
     <header className="page-header">
-      <h1>Operational checklists</h1>
+      <h1>Operational Checks</h1>
       {selectedEventId > 0 && <EventGearMenu
         eventId={selectedEventId}
         currentPage="checklists"

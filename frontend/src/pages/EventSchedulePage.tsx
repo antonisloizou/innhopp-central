@@ -2009,7 +2009,7 @@ const EventSchedulePage = () => {
                   className="primary"
                   onClick={() => navigate(`/events/${eventData.id}/checklists`)}
                 >
-                  Operational Checklists
+                  Operational Checks
                 </button>
               ) : null}
             </>
