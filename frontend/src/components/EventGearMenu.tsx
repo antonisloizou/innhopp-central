@@ -4,8 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { budgetsV1Enabled } from '../config/flags';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
-import { exportInnhopp, getEvent, Innhopp } from '../api/events';
+import { exportInnhopp, getEvent, Innhopp, listAccommodations } from '../api/events';
+import { listAirfields } from '../api/airfields';
+import { listGroundCrews, listOthers, listTransports } from '../api/logistics';
 import { parseCoordinates } from '../utils/coordinates';
+import { createDriverSummaryXlsx } from '../utils/driverSummaryExport';
 import { renderSatelliteMapForExport } from '../utils/innhoppExport';
 
 export type EventGearMenuPage =
@@ -59,6 +62,7 @@ const EventGearMenu = ({
   const forceDocumentNavigation = !!user?.impersonator || participantOnly;
   const [open, setOpen] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
+  const [driverSummaryExporting, setDriverSummaryExporting] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const navigateTo = (path: string) => {
@@ -117,6 +121,34 @@ const EventGearMenu = ({
         failures: [message],
         done: true
       });
+    }
+  };
+
+  const handleDriverSummaryExport = async () => {
+    if (driverSummaryExporting) return;
+    setDriverSummaryExporting(true);
+    try {
+      const [event, transports, groundCrews, accommodations, others, airfields] = await Promise.all([
+        getEvent(eventId),
+        listTransports(),
+        listGroundCrews(),
+        listAccommodations(eventId),
+        listOthers(),
+        listAirfields()
+      ]);
+      const file = await createDriverSummaryXlsx({ event, transports, groundCrews, accommodations, others, airfields });
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${event.name.replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '') || `event-${event.id}`}-driver-summary.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to export driver summary.');
+    } finally {
+      setDriverSummaryExporting(false);
     }
   };
 
@@ -206,6 +238,18 @@ const EventGearMenu = ({
                 disabled={!!exportProgress}
               >
                 Export all Innhopps
+              </button>
+              <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  void handleDriverSummaryExport();
+                }}
+                disabled={driverSummaryExporting}
+              >
+                {driverSummaryExporting ? 'Exporting Driver Summary...' : 'Export Driver Summary'}
               </button>
               {onCopy ? <button
                 className="event-schedule-menu-item"
