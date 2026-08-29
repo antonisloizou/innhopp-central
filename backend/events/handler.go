@@ -4484,7 +4484,19 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			if tag.RowsAffected() != 1 {
 				return fmt.Errorf("innhopp %d (%s): id %d does not belong to event %d", index+1, innhopp.Name, *innhopp.ID, eventID)
 			}
-		} else if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
+		} else {
+			// The event details screen always includes IDs for existing innhopps.
+			// Reject a no-ID row that collides with one already stored instead of
+			// silently creating a duplicate if an older client omits its ID.
+			var collision bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE event_id=$1 AND sequence=$2 AND name=$3)`, eventID, innhopp.Sequence, innhopp.Name).Scan(&collision); err != nil {
+				return fmt.Errorf("innhopp %d (%s): check existing innhopp: %w", index+1, innhopp.Name, err)
+			}
+			if collision {
+				return fmt.Errorf("innhopp %d (%s): missing id for existing innhopp", index+1, innhopp.Name)
+			}
+
+			if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
                 event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
@@ -4497,43 +4509,44 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
                 $23, $24, $25, $26,
                 $27, $28, $29, $30, $31, $32, $33::jsonb, $34::jsonb, $35
             )`,
-			eventID,
-			innhopp.Sequence,
-			innhopp.Name,
-			innhopp.Coordinates,
-			innhopp.AircraftID,
-			innhopp.TakeoffAirfieldID,
-			innhopp.LandingAirfieldID,
-			innhopp.Elevation,
-			innhopp.ScheduledAt,
-			innhopp.Notes,
-			innhopp.ReasonForChoice,
-			innhopp.AdjustAltimeterAAD,
-			innhopp.Notam,
-			innhopp.DistanceByAir,
-			innhopp.DistanceByRoad,
-			innhopp.LandingDistanceByAir,
-			innhopp.LandingDistanceByRoad,
-			innhopp.SingleLoadOnly,
-			innhopp.PrimaryLandingArea.Name,
-			innhopp.PrimaryLandingArea.Description,
-			innhopp.PrimaryLandingArea.Size,
-			innhopp.PrimaryLandingArea.Obstacles,
-			innhopp.SecondaryLandingArea.Name,
-			innhopp.SecondaryLandingArea.Description,
-			innhopp.SecondaryLandingArea.Size,
-			innhopp.SecondaryLandingArea.Obstacles,
-			innhopp.RiskAssessment,
-			innhopp.SafetyPrecautions,
-			innhopp.Jumprun,
-			innhopp.Hospital,
-			innhopp.RescueBoat,
-			innhopp.MinimumRequirements,
-			string(imageFilesJSON),
-			string(landOwnersJSON),
-			innhopp.LandOwnerPermission,
-		); err != nil {
-			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
+				eventID,
+				innhopp.Sequence,
+				innhopp.Name,
+				innhopp.Coordinates,
+				innhopp.AircraftID,
+				innhopp.TakeoffAirfieldID,
+				innhopp.LandingAirfieldID,
+				innhopp.Elevation,
+				innhopp.ScheduledAt,
+				innhopp.Notes,
+				innhopp.ReasonForChoice,
+				innhopp.AdjustAltimeterAAD,
+				innhopp.Notam,
+				innhopp.DistanceByAir,
+				innhopp.DistanceByRoad,
+				innhopp.LandingDistanceByAir,
+				innhopp.LandingDistanceByRoad,
+				innhopp.SingleLoadOnly,
+				innhopp.PrimaryLandingArea.Name,
+				innhopp.PrimaryLandingArea.Description,
+				innhopp.PrimaryLandingArea.Size,
+				innhopp.PrimaryLandingArea.Obstacles,
+				innhopp.SecondaryLandingArea.Name,
+				innhopp.SecondaryLandingArea.Description,
+				innhopp.SecondaryLandingArea.Size,
+				innhopp.SecondaryLandingArea.Obstacles,
+				innhopp.RiskAssessment,
+				innhopp.SafetyPrecautions,
+				innhopp.Jumprun,
+				innhopp.Hospital,
+				innhopp.RescueBoat,
+				innhopp.MinimumRequirements,
+				string(imageFilesJSON),
+				string(landOwnersJSON),
+				innhopp.LandOwnerPermission,
+			); err != nil {
+				return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
+			}
 		}
 
 		if innhopp.TakeoffAirfieldID != nil {

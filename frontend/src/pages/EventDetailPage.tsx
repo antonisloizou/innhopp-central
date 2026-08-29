@@ -1239,6 +1239,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         innhopps: (nextInnhopps ?? innhopps)
           .filter((row) => row.name.trim() !== '')
           .map<InnhoppInput>((row, idx) => ({
+            id: row.id,
             sequence: row.sequence || idx + 1,
             name: row.name.trim(),
             aircraft_id: row.aircraft_id,

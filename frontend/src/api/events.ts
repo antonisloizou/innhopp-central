@@ -224,6 +224,7 @@ export const deleteAccommodation = (eventId: number, accId: number) =>
   apiRequest<void>(`/events/${eventId}/accommodations/${accId}`, { method: 'DELETE' });
 
 export interface InnhoppInput {
+  id?: number;
   sequence?: number;
   name: string;
   aircraft_id?: number | null;
