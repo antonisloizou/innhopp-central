@@ -4440,15 +4440,19 @@ func ensureNoDetachedAircraftInUseTx(ctx context.Context, tx pgx.Tx, eventID int
 	return rows.Err()
 }
 
+// replaceEventInnhoppsTx keeps the historic name because event updates submit a
+// complete innhopp collection. Existing innhopps are deliberately updated in
+// place: their IDs are the anchor for operational records such as checklist
+// audit events, manifests, and budgets.
 func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innhopps []innhoppInput) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1`, eventID); err != nil {
+	var hadExisting bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE event_id = $1)`, eventID).Scan(&hadExisting); err != nil {
 		return err
-	}
-	if len(innhopps) == 0 {
-		return nil
 	}
 
 	airfieldIDsFromInnhopps := make(map[int64]struct{})
+	keptIDs := make([]int64, 0, len(innhopps))
+	seenIDs := make(map[int64]struct{}, len(innhopps))
 	for index, innhopp := range innhopps {
 		landOwnersJSON, err := encodeLandOwners(innhopp.LandOwners)
 		if err != nil {
@@ -4459,7 +4463,34 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 			return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
 		}
 
-		if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
+		if innhopp.ID != nil {
+			if _, duplicate := seenIDs[*innhopp.ID]; duplicate {
+				return fmt.Errorf("innhopp %d (%s): duplicate id %d", index+1, innhopp.Name, *innhopp.ID)
+			}
+			seenIDs[*innhopp.ID] = struct{}{}
+			keptIDs = append(keptIDs, *innhopp.ID)
+
+			tag, err := tx.Exec(ctx, `UPDATE event_innhopps SET
+                sequence=$3, name=$4, coordinates=$5, aircraft_id=$6, takeoff_airfield_id=$7, landing_airfield_id=$8, elevation=$9, scheduled_at=$10, notes=$11,
+                reason_for_choice=$12, adjust_altimeter_aad=$13, notam=$14, distance_by_air=$15, distance_by_road=$16, landing_distance_by_air=$17, landing_distance_by_road=$18, single_load_only=$19,
+                primary_landing_area_name=$20, primary_landing_area_description=$21, primary_landing_area_size=$22, primary_landing_area_obstacles=$23,
+                secondary_landing_area_name=$24, secondary_landing_area_description=$25, secondary_landing_area_size=$26, secondary_landing_area_obstacles=$27,
+                risk_assessment=$28, safety_precautions=$29, jumprun=$30, hospital=$31, rescue_boat=$32, minimum_requirements=$33, image_files=$34::jsonb, land_owners=$35::jsonb, land_owner_permission=$36
+                WHERE id=$1 AND event_id=$2`,
+				*innhopp.ID, eventID,
+				innhopp.Sequence, innhopp.Name, innhopp.Coordinates, innhopp.AircraftID, innhopp.TakeoffAirfieldID, innhopp.LandingAirfieldID, innhopp.Elevation, innhopp.ScheduledAt, innhopp.Notes,
+				innhopp.ReasonForChoice, innhopp.AdjustAltimeterAAD, innhopp.Notam, innhopp.DistanceByAir, innhopp.DistanceByRoad, innhopp.LandingDistanceByAir, innhopp.LandingDistanceByRoad, innhopp.SingleLoadOnly,
+				innhopp.PrimaryLandingArea.Name, innhopp.PrimaryLandingArea.Description, innhopp.PrimaryLandingArea.Size, innhopp.PrimaryLandingArea.Obstacles,
+				innhopp.SecondaryLandingArea.Name, innhopp.SecondaryLandingArea.Description, innhopp.SecondaryLandingArea.Size, innhopp.SecondaryLandingArea.Obstacles,
+				innhopp.RiskAssessment, innhopp.SafetyPrecautions, innhopp.Jumprun, innhopp.Hospital, innhopp.RescueBoat, innhopp.MinimumRequirements, string(imageFilesJSON), string(landOwnersJSON), innhopp.LandOwnerPermission,
+			)
+			if err != nil {
+				return fmt.Errorf("innhopp %d (%s): %w", index+1, innhopp.Name, err)
+			}
+			if tag.RowsAffected() != 1 {
+				return fmt.Errorf("innhopp %d (%s): id %d does not belong to event %d", index+1, innhopp.Name, *innhopp.ID, eventID)
+			}
+		} else if _, err := tx.Exec(ctx, `INSERT INTO event_innhopps (
                 event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                 reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
@@ -4516,6 +4547,16 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		}
 		if innhopp.LandingAirfieldID != nil {
 			airfieldIDsFromInnhopps[*innhopp.LandingAirfieldID] = struct{}{}
+		}
+	}
+
+	if hadExisting {
+		if len(keptIDs) == 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1`, eventID); err != nil {
+				return err
+			}
+		} else if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1 AND NOT (id = ANY($2))`, eventID, keptIDs); err != nil {
+			return err
 		}
 	}
 

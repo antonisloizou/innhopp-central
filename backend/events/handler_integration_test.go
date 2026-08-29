@@ -83,12 +83,16 @@ func TestUpdateEventPreservesInnhoppAircraftAssignmentWhenOmitted(t *testing.T) 
 		t.Fatalf("expected response innhopp aircraft_id to remain %d, got %+v", aircraftID, updated.Innhopps[0].AircraftID)
 	}
 
+	var persistedID int64
 	var persisted sql.NullInt64
-	if err := db.QueryRow(ctx, `SELECT aircraft_id FROM event_innhopps WHERE event_id = $1 AND sequence = 1`, eventID).Scan(&persisted); err != nil {
-		t.Fatalf("load persisted aircraft_id failed: %v", err)
+	if err := db.QueryRow(ctx, `SELECT id, aircraft_id FROM event_innhopps WHERE event_id = $1 AND sequence = 1`, eventID).Scan(&persistedID, &persisted); err != nil {
+		t.Fatalf("load persisted innhopp failed: %v", err)
+	}
+	if persistedID != innhoppID {
+		t.Fatalf("expected event save to preserve innhopp id %d, got %d", innhoppID, persistedID)
 	}
 	if !persisted.Valid || persisted.Int64 != aircraftID {
-		t.Fatalf("expected persisted aircraft_id to remain %d after replace-all save, got valid=%t value=%d", aircraftID, persisted.Valid, persisted.Int64)
+		t.Fatalf("expected persisted aircraft_id to remain %d after event save, got valid=%t value=%d", aircraftID, persisted.Valid, persisted.Int64)
 	}
 }
 
