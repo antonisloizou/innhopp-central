@@ -28,7 +28,6 @@ type Props = {
   entry: ScheduleEntry;
   closing: boolean;
   onClose: () => void;
-  onNavigateToEntry?: (entry: ScheduleEntry) => void;
   canOpenMapsActions: boolean;
   typeBadgeClassNames: Record<EntryType, string>;
 };
@@ -37,11 +36,30 @@ const ScheduleEntryPreviewOverlay = ({
   entry,
   closing,
   onClose,
-  onNavigateToEntry,
   canOpenMapsActions,
   typeBadgeClassNames
 }: Props) => {
   if (typeof document === 'undefined') return null;
+
+  const openEntryInNewTab = () => {
+    if (!entry.to) return;
+    window.open(entry.to, '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+
+  const openDetailsButton = entry.to ? (
+    <button
+      type="button"
+      className="link-button event-schedule-preview-link"
+      aria-label="Open details in a new tab"
+      onClick={(e) => {
+        e.stopPropagation();
+        openEntryInNewTab();
+      }}
+    >
+      Open details <span className="material-symbols-outlined event-schedule-preview-external-icon" aria-hidden="true">open_in_new</span>
+    </button>
+  ) : null;
 
   return createPortal(
     <div
@@ -185,7 +203,7 @@ const ScheduleEntryPreviewOverlay = ({
               fields.push(renderField('risk', 'RISK ASSESSMENT', entry.innhoppRisk || '—'));
               fields.push(renderField('minimum', 'MINIMUM REQUIREMENTS', entry.innhoppMinimumRequirements || '—'));
               fields.push(renderField('notes', 'NOTES', entry.notes || '—'));
-              if ((entry.innhoppCoordinates && canOpenMapsActions) || (entry.to && onNavigateToEntry)) {
+              if ((entry.innhoppCoordinates && canOpenMapsActions) || entry.to) {
                 fields.push(
                   <div key="actions" className="event-schedule-preview-action-grid form-field-full-span">
                     <div className="event-schedule-preview-action-row">
@@ -204,19 +222,7 @@ const ScheduleEntryPreviewOverlay = ({
                           Open in Maps
                         </button>
                       ) : null}
-                      {entry.to && onNavigateToEntry ? (
-                        <button
-                          type="button"
-                          className="link-button event-schedule-preview-link"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onNavigateToEntry(entry);
-                            onClose();
-                          }}
-                        >
-                          Open details
-                        </button>
-                      ) : null}
+                      {openDetailsButton}
                     </div>
                   </div>
                 );
@@ -258,19 +264,7 @@ const ScheduleEntryPreviewOverlay = ({
                           Open in Maps
                         </button>
                       ) : null}
-                      {entry.to && onNavigateToEntry ? (
-                        <button
-                          type="button"
-                          className="link-button event-schedule-preview-link"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onNavigateToEntry(entry);
-                            onClose();
-                          }}
-                        >
-                          Open details
-                        </button>
-                      ) : null}
+                      {openDetailsButton}
                     </div>
                   </>
                 ) : (
@@ -324,7 +318,7 @@ const ScheduleEntryPreviewOverlay = ({
                     (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
                     entry.transportRouteOrigin &&
                     entry.transportRouteDestination) ||
-                    ((entry.type === 'Transport' || entry.type === 'Ground Crew') && entry.to && onNavigateToEntry)) ? (
+                    ((entry.type === 'Transport' || entry.type === 'Ground Crew') && entry.to)) ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
                         {canOpenMapsActions &&
                         (entry.type === 'Transport' || entry.type === 'Ground Crew') &&
@@ -344,22 +338,10 @@ const ScheduleEntryPreviewOverlay = ({
                             Open route
                           </button>
                         ) : null}
-                        {entry.to && onNavigateToEntry ? (
-                          <button
-                            type="button"
-                            className="link-button event-schedule-preview-link"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onNavigateToEntry(entry);
-                              onClose();
-                            }}
-                          >
-                            Open details
-                          </button>
-                        ) : null}
+                        {openDetailsButton}
                       </div>
                     ) : null}
-                    {entry.type === 'Other' && (entry.coordinates && canOpenMapsActions || (entry.to && onNavigateToEntry)) ? (
+                    {entry.type === 'Other' && (entry.coordinates && canOpenMapsActions || entry.to) ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
                         {entry.coordinates && canOpenMapsActions ? (
                           <button
@@ -376,34 +358,12 @@ const ScheduleEntryPreviewOverlay = ({
                             Open in Maps
                           </button>
                         ) : null}
-                        {entry.to && onNavigateToEntry ? (
-                          <button
-                            type="button"
-                            className="link-button event-schedule-preview-link"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onNavigateToEntry(entry);
-                              onClose();
-                            }}
-                          >
-                            Open details
-                          </button>
-                        ) : null}
+                        {openDetailsButton}
                       </div>
                     ) : null}
-                    {entry.type === 'Meal' && entry.to && onNavigateToEntry ? (
+                    {entry.type === 'Meal' && entry.to ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
-                        <button
-                          type="button"
-                          className="link-button event-schedule-preview-link"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onNavigateToEntry(entry);
-                            onClose();
-                          }}
-                        >
-                          Open details
-                        </button>
+                        {openDetailsButton}
                       </div>
                     ) : null}
                   </>

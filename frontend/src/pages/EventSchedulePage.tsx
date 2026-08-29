@@ -2695,11 +2695,6 @@ const EventSchedulePage = () => {
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
           typeBadgeClassNames={typeBadgeClassNames}
-          onNavigateToEntry={(entry) => {
-            if (!entry.to) return;
-            setHighlightId(entry.id);
-            navigate(entry.to);
-          }}
         />
       ) : null}
     </section>

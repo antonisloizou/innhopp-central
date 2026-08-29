@@ -2482,10 +2482,6 @@ const EventBudgetPage = () => {
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
           typeBadgeClassNames={typeBadgeClassNames}
-          onNavigateToEntry={(entry) => {
-            if (!entry.to) return;
-            navigate(entry.to);
-          }}
         />
       ) : null}
 
