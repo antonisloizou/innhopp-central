@@ -96,6 +96,39 @@ func TestUpdateEventPreservesInnhoppAircraftAssignmentWhenOmitted(t *testing.T) 
 	}
 }
 
+func TestReplaceEventInnhoppsTxDoesNotDeleteOmittedInnhopps(t *testing.T) {
+	db := openEventTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureEventTestSchema(t, ctx, db)
+
+	seasonID := insertEventTestSeason(t, ctx, db)
+	eventID := insertEventTestEvent(t, ctx, db, seasonID)
+	innhoppID := insertEventTestInnhopp(t, ctx, db, eventID, 0)
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := replaceEventInnhoppsTx(ctx, tx, eventID, nil); err != nil {
+		t.Fatalf("bulk save without innhopps failed: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit transaction: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM event_innhopps WHERE id = $1`, innhoppID).Scan(&count); err != nil {
+		t.Fatalf("count persisted innhopp: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected omitted innhopp %d to remain after bulk event save", innhoppID)
+	}
+}
+
 func TestUpdateAirfieldRecalculatesDependentInnhoppAirDistances(t *testing.T) {
 	db := openEventTestDB(t)
 	defer db.Close()

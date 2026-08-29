@@ -4443,15 +4443,10 @@ func ensureNoDetachedAircraftInUseTx(ctx context.Context, tx pgx.Tx, eventID int
 // replaceEventInnhoppsTx keeps the historic name because event updates submit a
 // complete innhopp collection. Existing innhopps are deliberately updated in
 // place: their IDs are the anchor for operational records such as checklist
-// audit events, manifests, and budgets.
+// audit events, manifests, and budgets. This bulk-save path never deletes an
+// innhopp; intentional removals must use the dedicated innhopp delete endpoint.
 func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innhopps []innhoppInput) error {
-	var hadExisting bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE event_id = $1)`, eventID).Scan(&hadExisting); err != nil {
-		return err
-	}
-
 	airfieldIDsFromInnhopps := make(map[int64]struct{})
-	keptIDs := make([]int64, 0, len(innhopps))
 	seenIDs := make(map[int64]struct{}, len(innhopps))
 	for index, innhopp := range innhopps {
 		landOwnersJSON, err := encodeLandOwners(innhopp.LandOwners)
@@ -4468,7 +4463,6 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 				return fmt.Errorf("innhopp %d (%s): duplicate id %d", index+1, innhopp.Name, *innhopp.ID)
 			}
 			seenIDs[*innhopp.ID] = struct{}{}
-			keptIDs = append(keptIDs, *innhopp.ID)
 
 			tag, err := tx.Exec(ctx, `UPDATE event_innhopps SET
                 sequence=$3, name=$4, coordinates=$5, aircraft_id=$6, takeoff_airfield_id=$7, landing_airfield_id=$8, elevation=$9, scheduled_at=$10, notes=$11,
@@ -4547,16 +4541,6 @@ func replaceEventInnhoppsTx(ctx context.Context, tx pgx.Tx, eventID int64, innho
 		}
 		if innhopp.LandingAirfieldID != nil {
 			airfieldIDsFromInnhopps[*innhopp.LandingAirfieldID] = struct{}{}
-		}
-	}
-
-	if hadExisting {
-		if len(keptIDs) == 0 {
-			if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1`, eventID); err != nil {
-				return err
-			}
-		} else if _, err := tx.Exec(ctx, `DELETE FROM event_innhopps WHERE event_id = $1 AND NOT (id = ANY($2))`, eventID, keptIDs); err != nil {
-			return err
 		}
 	}
 
