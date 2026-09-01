@@ -207,7 +207,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
         SELECT $1,p.id,p.full_name,p.roles,COALESCE(old.is_present,FALSE),CASE WHEN $2='innhopp' THEN old.distance_from_target_meters ELSE NULL END,NOW()
         FROM event_participants ep JOIN participant_profiles p ON p.id=ep.participant_id
         LEFT JOIN roster_check_in_entries old ON old.roster_check_in_id=$3 AND old.participant_id=p.id
-        WHERE ep.event_id=$4 ORDER BY p.full_name,p.id`, id, typ, previousID, eventID)
+        WHERE ep.event_id=$4 AND ($2 <> 'innhopp' OR p.roles @> ARRAY['Skydiver']::TEXT[])
+        ORDER BY p.full_name,p.id`, id, typ, previousID, eventID)
 	if err != nil {
 		httpx.Error(w, 500, "failed to snapshot roster")
 		return
