@@ -190,7 +190,7 @@ export default function ChecklistsPage() {
   };
 
   const activePhases: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
-    ? ['execution', 'closeout']
+    ? ['readiness', 'execution', 'closeout']
     : ['readiness'];
   const phaseOrder: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
     ? ['execution', 'closeout', 'readiness']
@@ -218,7 +218,7 @@ export default function ChecklistsPage() {
     : checklist.operational_status === 'proceeding'
       ? <ChecklistStatusTag variant="proceeding" title="Enjoy" detail="Innhopp in progress" actionLabel="Complete" onAction={() => { if (!focusFirstMissing(['closeout'])) void perform(-1, () => completeInnhoppOperation(selectedInnhoppId)); }} />
       : checklist.overridden
-        ? <ChecklistStatusTag variant="overridden" title="Overridden" detail="Authorised to proceed" />
+        ? <ChecklistStatusTag variant="overridden" title="Overridden" detail="Authorised to proceed" actionLabel="Proceed" onAction={() => void perform(-1, () => proceedWithInnhopp(selectedInnhoppId))} />
         : checklist.ready
           ? <ChecklistStatusTag variant="clear" title="Clear" detail="Pre-flight checks completed" actionLabel="Proceed" onAction={() => void perform(-1, () => proceedWithInnhopp(selectedInnhoppId))} />
           : <ChecklistStatusTag variant="blocked" title="Blocked" detail="Remove before flight" actionLabel={canOverride ? 'Override' : undefined} onAction={canOverride ? () => { const reason = window.prompt('Why may this innhopp proceed while checks are incomplete?'); if (reason) void perform(-1, () => createChecklistOverride(selectedInnhoppId, reason)); } : undefined} />;

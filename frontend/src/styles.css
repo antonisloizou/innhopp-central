@@ -3918,6 +3918,12 @@ button.ghost {
   line-height: 1;
 }
 
+.schedule-status-recording-glyph {
+  font-size: 1rem;
+  vertical-align: middle;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
 .schedule-status-badge-placeholder {
   visibility: hidden;
 }
@@ -4847,6 +4853,75 @@ iframe {
   overflow-wrap: anywhere;
 }
 
+.event-schedule-subtitle-meta,
+.event-schedule-roster-inline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.event-schedule-subtitle-meta {
+  column-gap: 0.75rem;
+}
+
+.event-schedule-roster-inline-meta .material-symbols-outlined {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.roster-check-in-overlay {
+  width: min(42rem, calc(100vw - 2rem));
+  max-height: min(44rem, calc(100vh - 2rem));
+  overflow: auto;
+}
+
+.roster-check-in-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 1rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+.roster-check-in-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--divider-color);
+}
+
+.roster-check-in-row > label:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.roster-check-in-row input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.roster-check-in-distance {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.roster-check-in-distance input {
+  width: 6ch;
+}
+
+.roster-check-in-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
 .event-schedule-entry-link {
   display: block;
   width: 100%;
@@ -5360,8 +5435,33 @@ button.ghost.event-route-preview-overlay-button {
   flex-wrap: wrap;
 }
 
+.event-schedule-preview-link,
+.event-schedule-preview-details-part {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
 .event-schedule-preview-link {
-  font-size: 1rem;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+}
+
+.event-schedule-preview-link:hover:not(:disabled),
+.event-schedule-preview-link:focus-visible:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.event-schedule-preview-link:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 
 .event-schedule-preview-external-icon {
@@ -5370,7 +5470,39 @@ button.ghost.event-route-preview-overlay-button {
 }
 
 .event-schedule-preview-link--external {
-  padding-inline: 0.2rem;
+  padding-inline: 0.55rem;
+}
+
+.event-schedule-preview-details-action {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+}
+
+.event-schedule-preview-details-part {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0.4rem 0.65rem;
+  cursor: pointer;
+}
+
+.event-schedule-preview-details-part:hover,
+.event-schedule-preview-details-part:focus-visible {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.event-schedule-preview-details-separator {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .event-schedule-preview-action-separator {

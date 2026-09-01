@@ -25,6 +25,7 @@ import (
 	"github.com/innhopp/central/backend/rbac"
 	"github.com/innhopp/central/backend/realtime"
 	"github.com/innhopp/central/backend/registrations"
+	"github.com/innhopp/central/backend/rostercheckins"
 )
 
 func main() {
@@ -201,6 +202,7 @@ func main() {
 	router.Mount("/api/logistics", logistics.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/checklists", checklists.NewHandler(pool, streams).Routes(enforcer))
+	router.Mount("/api/roster-check-ins", rostercheckins.NewHandler(pool).Routes(enforcer))
 	if budgetsV1Enabled {
 		router.Mount("/api/budgets", budgets.NewHandler(pool, streams).Routes(enforcer))
 		router.Mount("/api/accounting", accounting.NewHandler(pool).Routes(enforcer))
@@ -1398,6 +1400,36 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			END IF;
 		END $$`,
 		`DROP INDEX IF EXISTS event_registrations_active_participant_idx`,
+		`CREATE TABLE IF NOT EXISTS roster_check_ins (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            schedule_item_type TEXT NOT NULL,
+            schedule_item_id INTEGER NOT NULL,
+            created_by_account_id INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_by_account_id INTEGER,
+            deleted_at TIMESTAMPTZ,
+            CHECK (schedule_item_type IN ('innhopp','transport','ground_crew','accommodation','other','meal'))
+        )`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS roster_check_ins_active_item_idx
+            ON roster_check_ins (event_id, schedule_item_type, schedule_item_id)
+            WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS roster_check_ins_event_idx ON roster_check_ins (event_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS roster_check_in_entries (
+            id BIGSERIAL PRIMARY KEY,
+            roster_check_in_id BIGINT NOT NULL REFERENCES roster_check_ins(id) ON DELETE CASCADE,
+            participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE RESTRICT,
+            participant_name_snapshot TEXT NOT NULL,
+            roles_snapshot TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+            is_present BOOLEAN NOT NULL DEFAULT FALSE,
+            distance_from_target_meters NUMERIC,
+            updated_by_account_id INTEGER,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (roster_check_in_id, participant_id),
+            CHECK (distance_from_target_meters IS NULL OR distance_from_target_meters >= 0)
+        )`,
+		`CREATE INDEX IF NOT EXISTS roster_check_in_entries_check_in_idx ON roster_check_in_entries (roster_check_in_id)`,
 	}
 
 	for _, stmt := range stmts {

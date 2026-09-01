@@ -62,6 +62,14 @@ import { countVisibleParticipants } from '../utils/eventParticipants';
 import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
 import { useResourceStream } from '../hooks/useResourceStream';
 import { ChecklistInnhopp, listChecklistInnhopps } from '../api/checklists';
+import {
+  RosterCheckIn,
+  RosterCheckInItemType,
+  RosterCheckInSummary,
+  createRosterCheckIn,
+  listRosterCheckInSummaries
+} from '../api/rosterCheckIns';
+import RosterCheckInOverlay from '../components/RosterCheckInOverlay';
 
 const OVERLAY_EXIT_MS = 180;
 type DayBucket = {
@@ -102,6 +110,29 @@ const mobileTypeGlyphs: Record<EntryType, string> = {
   Accommodation: 'bed',
   Meal: 'restaurant',
   Other: 'monitor_heart'
+};
+
+const rosterItemTypeForEntry = (entry: ScheduleEntry): RosterCheckInItemType => {
+  switch (entry.type) {
+    case 'Innhopp': return 'innhopp';
+    case 'Transport': return 'transport';
+    case 'Ground Crew': return 'ground_crew';
+    case 'Accommodation': return 'accommodation';
+    case 'Meal': return 'meal';
+    default: return 'other';
+  }
+};
+
+const rosterItemIDForEntry = (entry: ScheduleEntry) => Number(entry.id.split('-').pop());
+
+const loadRosterCheckInSummaries = async (eventId: number): Promise<RosterCheckInSummary[]> => {
+  try {
+    return await listRosterCheckInSummaries(eventId);
+  } catch (err) {
+    // Keep the schedule usable while an older backend is running during a rolling update.
+    if (err instanceof Error && 'status' in err && (err as Error & { status?: number }).status === 404) return [];
+    throw err;
+  }
 };
 
 const getEntryReadiness = (entry: Entry) => {
@@ -202,6 +233,9 @@ const EventSchedulePage = () => {
   const canAccessOperationalChecklists = canManageEvents(user);
   const [eventData, setEventData] = useState<Event | null>(null);
   const [checklistInnhopps, setChecklistInnhopps] = useState<Record<number, ChecklistInnhopp>>({});
+  const [rosterCheckInSummaries, setRosterCheckInSummaries] = useState<Record<string, RosterCheckInSummary>>({});
+  const [rosterCheckInOverlay, setRosterCheckInOverlay] = useState<{ checkIn: RosterCheckIn; title: string } | null>(null);
+  const [creatingRosterItem, setCreatingRosterItem] = useState<string | null>(null);
   const [transports, setTransports] = useState<Transport[]>([]);
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [accommodations, setAccommodations] = useState<Accommodation[]>([]);
@@ -309,6 +343,32 @@ const EventSchedulePage = () => {
   const closePreview = useCallback(() => {
     setPreviewEntry(null);
   }, []);
+  const openRosterCheckIn = useCallback(async (entry: ScheduleEntry) => {
+    const itemType = rosterItemTypeForEntry(entry);
+    const itemID = rosterItemIDForEntry(entry);
+    if (!eventData || !Number.isFinite(itemID)) return;
+    const key = `${itemType}-${itemID}`;
+    setCreatingRosterItem(entry.id);
+    try {
+      const checkIn = await createRosterCheckIn(eventData.id, itemType, itemID);
+      setRosterCheckInOverlay({ checkIn, title: entry.title });
+      setRosterCheckInSummaries((current) => ({
+        ...current,
+        [key]: {
+          schedule_item_type: checkIn.schedule_item_type,
+          schedule_item_id: checkIn.schedule_item_id,
+          checked_in_count: checkIn.checked_in_count,
+          expected_count: checkIn.expected_count,
+          average_distance_meters: checkIn.average_distance_meters
+        }
+      }));
+      closePreview();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Could not open roster check-in');
+    } finally {
+      setCreatingRosterItem(null);
+    }
+  }, [closePreview, eventData]);
 
   useEffect(() => {
     if (!dayAddMenuOpenKey) return;
@@ -515,7 +575,8 @@ const EventSchedulePage = () => {
       try {
         const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
         const checklistPromise = participantOnly ? Promise.resolve([] as ChecklistInnhopp[]) : listChecklistInnhopps(Number(eventId));
-        const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList] = await Promise.all([
+        const rosterCheckInPromise = participantOnly ? Promise.resolve([] as RosterCheckInSummary[]) : loadRosterCheckInSummaries(Number(eventId));
+        const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList, rosterCheckInList] = await Promise.all([
           getEvent(Number(eventId)),
           listTransports(),
           listGroundCrews(),
@@ -524,7 +585,8 @@ const EventSchedulePage = () => {
           listOthers(),
           listMeals(),
           listAirfields(),
-          checklistPromise
+          checklistPromise,
+          rosterCheckInPromise
         ]);
         if (cancelled) return;
         setEventData(evt);
@@ -536,6 +598,7 @@ const EventSchedulePage = () => {
         setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
         setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
         setChecklistInnhopps(Object.fromEntries(checklistList.map((item) => [item.id, item])));
+        setRosterCheckInSummaries(Object.fromEntries(rosterCheckInList.map((item) => [`${item.schedule_item_type}-${item.schedule_item_id}`, item])));
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load schedule');
@@ -563,7 +626,8 @@ const EventSchedulePage = () => {
     try {
       const participantPromise = participantOnly ? Promise.resolve([]) : listParticipantProfiles();
       const checklistPromise = participantOnly ? Promise.resolve([] as ChecklistInnhopp[]) : listChecklistInnhopps(Number(eventId));
-      const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList] = await Promise.all([
+      const rosterCheckInPromise = participantOnly ? Promise.resolve([] as RosterCheckInSummary[]) : loadRosterCheckInSummaries(Number(eventId));
+      const [evt, transportList, groundCrewList, accList, participantList, otherList, mealList, airfieldList, checklistList, rosterCheckInList] = await Promise.all([
         getEvent(Number(eventId)),
         listTransports(),
         listGroundCrews(),
@@ -572,7 +636,8 @@ const EventSchedulePage = () => {
         listOthers(),
         listMeals(),
         listAirfields(),
-        checklistPromise
+        checklistPromise,
+        rosterCheckInPromise
       ]);
       setEventData(evt);
       setTransports(Array.isArray(transportList) ? transportList.filter((t) => t.event_id === Number(eventId)) : []);
@@ -583,6 +648,7 @@ const EventSchedulePage = () => {
       setMeals(Array.isArray(mealList) ? mealList.filter((m) => m.event_id === Number(eventId)) : []);
       setAirfields(Array.isArray(airfieldList) ? airfieldList : []);
       setChecklistInnhopps(Object.fromEntries(checklistList.map((item) => [item.id, item])));
+      setRosterCheckInSummaries(Object.fromEntries(rosterCheckInList.map((item) => [`${item.schedule_item_type}-${item.schedule_item_id}`, item])));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load schedule');
     } finally {
@@ -1721,7 +1787,7 @@ const EventSchedulePage = () => {
 
   const previewOverlayEntry = previewEntry ?? renderedPreviewEntry;
 
-  const overlayOpen = Boolean(timePicker || renderedPreviewEntry || pendingDragMove);
+  const overlayOpen = Boolean(timePicker || renderedPreviewEntry || pendingDragMove || rosterCheckInOverlay);
 
   useEffect(() => {
     if (!overlayOpen || typeof document === 'undefined') return;
@@ -2238,6 +2304,21 @@ const EventSchedulePage = () => {
 
               const renderEntry = (entry: Entry) => {
                 const missingCoords = !!entry.missingCoordinates;
+                const rosterItemType = rosterItemTypeForEntry(entry);
+                const rosterItemID = rosterItemIDForEntry(entry);
+                const rosterKey = `${rosterItemType}-${rosterItemID}`;
+                const rosterSummary = rosterCheckInSummaries[rosterKey];
+                const rosterSummaryMeta = rosterSummary ? (
+                  <span className="event-schedule-roster-inline-meta">
+                    <span className="material-symbols-outlined" aria-hidden="true">check_box</span>
+                    <span>
+                      Checked in: {rosterSummary.checked_in_count}/{rosterSummary.expected_count}
+                      {entry.type === 'Innhopp' && rosterSummary.average_distance_meters != null
+                        ? ` · Average distance: ${Math.round(rosterSummary.average_distance_meters)} m`
+                        : ''}
+                    </span>
+                  </span>
+                ) : null;
                 let statusBadge: JSX.Element | null = null;
                 if (entry.type === 'Accommodation') {
                   statusBadge =
@@ -2251,7 +2332,7 @@ const EventSchedulePage = () => {
                       </span>
                     );
                 } else if (entry.type === 'Innhopp') {
-                  statusBadge = entry.operationalStatus === 'completed' ? <span className="badge success schedule-status-badge" title="Operation completed">Done</span> : entry.operationalStatus === 'proceeding' ? <span className="badge success schedule-status-badge" title="Checklist gate passed">Live</span> : entry.ready ? <span className="badge success schedule-status-badge" title="Innhopp is operationally ready">✓</span> : <span className="badge danger schedule-status-badge" title="Innhopp setup is incomplete">!</span>;
+                  statusBadge = entry.operationalStatus === 'completed' ? <span className="badge success schedule-status-badge" title="Operation completed" aria-label="Operation completed"><span className="material-symbols-outlined" aria-hidden="true">check_box</span></span> : entry.operationalStatus === 'proceeding' ? <span className="badge success schedule-status-badge" title="Checklist gate passed" aria-label="Live recording"><span className="material-symbols-outlined schedule-status-recording-glyph" aria-hidden="true">fiber_manual_record</span></span> : entry.ready ? <span className="badge success schedule-status-badge" title="Innhopp is operationally ready">✓</span> : <span className="badge danger schedule-status-badge" title="Innhopp setup is incomplete">!</span>;
                 } else if (entry.type === 'Meal') {
                   statusBadge = entry.mealComplete ? (
                     <span className="badge success schedule-status-badge">
@@ -2322,7 +2403,7 @@ const EventSchedulePage = () => {
                       <div className="muted event-schedule-route-meta">
                         <span className="event-schedule-meta-chip">
                           <span>{entry.type === 'Innhopp' ? '✈️' : '⏱'}</span>
-                          <span>{entry.routeDurationLabel}</span>
+                          <span>{entry.type === 'Innhopp' && entry.innhoppAircraftName ? `${entry.innhoppAircraftName} · ` : ''}{entry.routeDurationLabel}</span>
                         </span>
                         {entry.routeVehiclesLabel ? (
                           <span className="event-schedule-meta-chip event-schedule-meta-chip-grow">
@@ -2330,10 +2411,14 @@ const EventSchedulePage = () => {
                             <span className="event-schedule-meta-text">{entry.routeVehiclesLabel}</span>
                           </span>
                         ) : null}
+                        {rosterSummaryMeta}
                       </div>
-                    ) : (
-                      entry.subtitle && <div className="muted event-schedule-wrap-text">{entry.subtitle}</div>
-                    )}
+                    ) : entry.subtitle || rosterSummaryMeta ? (
+                      <div className="muted event-schedule-subtitle-meta">
+                        {entry.subtitle ? <span className="event-schedule-wrap-text">{entry.subtitle}</span> : null}
+                        {rosterSummaryMeta}
+                      </div>
+                    ) : null}
                     {entry.type === 'Innhopp' && entry.innhoppAircraftWarning ? (
                       <div className="muted event-schedule-wrap-text">{entry.innhoppAircraftWarning}</div>
                     ) : null}
@@ -2695,10 +2780,50 @@ const EventSchedulePage = () => {
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
           typeBadgeClassNames={typeBadgeClassNames}
+          onRosterCheckIn={participantOnly ? undefined : (entry) => void openRosterCheckIn(entry)}
+          onOperationalChecks={!canAccessOperationalChecklists ? undefined : (entry) => {
+            if (!eventData || entry.type !== 'Innhopp') return;
+            const innhoppID = rosterItemIDForEntry(entry);
+            if (!Number.isFinite(innhoppID)) return;
+            closePreview();
+            navigate(`/events/${eventData.id}/checklists?innhopp=${innhoppID}`);
+          }}
+          rosterCheckInLabel={(() => {
+            const itemType = rosterItemTypeForEntry(previewOverlayEntry.entry);
+            const itemID = rosterItemIDForEntry(previewOverlayEntry.entry);
+            const summary = rosterCheckInSummaries[`${itemType}-${itemID}`];
+            return creatingRosterItem === previewOverlayEntry.entry.id ? 'Opening…' : summary ? 'Open roster check-in' : 'Create roster check-in';
+          })()}
+          rosterCheckInDisabled={creatingRosterItem === previewOverlayEntry.entry.id}
           onNavigateToEntry={(entry) => {
             if (!entry.to) return;
             setHighlightId(entry.id);
             navigate(entry.to);
+          }}
+        />
+      ) : null}
+      {rosterCheckInOverlay ? (
+        <RosterCheckInOverlay
+          checkIn={rosterCheckInOverlay.checkIn}
+          title={rosterCheckInOverlay.title}
+          onClose={() => setRosterCheckInOverlay(null)}
+          onUpdated={(checkIn) => {
+            const key = `${rosterCheckInOverlay.checkIn.schedule_item_type}-${rosterCheckInOverlay.checkIn.schedule_item_id}`;
+            setRosterCheckInSummaries((current) => {
+              const next = { ...current };
+              if (!checkIn) {
+                delete next[key];
+              } else {
+                next[key] = {
+                  schedule_item_type: checkIn.schedule_item_type,
+                  schedule_item_id: checkIn.schedule_item_id,
+                  checked_in_count: checkIn.checked_in_count,
+                  expected_count: checkIn.expected_count,
+                  average_distance_meters: checkIn.average_distance_meters
+                };
+              }
+              return next;
+            });
           }}
         />
       ) : null}

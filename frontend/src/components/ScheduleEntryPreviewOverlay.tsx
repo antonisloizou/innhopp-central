@@ -29,6 +29,10 @@ type Props = {
   closing: boolean;
   onClose: () => void;
   onNavigateToEntry?: (entry: ScheduleEntry) => void;
+  onRosterCheckIn?: (entry: ScheduleEntry) => void;
+  onOperationalChecks?: (entry: ScheduleEntry) => void;
+  rosterCheckInLabel?: string;
+  rosterCheckInDisabled?: boolean;
   canOpenMapsActions: boolean;
   typeBadgeClassNames: Record<EntryType, string>;
 };
@@ -38,6 +42,10 @@ const ScheduleEntryPreviewOverlay = ({
   closing,
   onClose,
   onNavigateToEntry,
+  onRosterCheckIn,
+  onOperationalChecks,
+  rosterCheckInLabel,
+  rosterCheckInDisabled = false,
   canOpenMapsActions,
   typeBadgeClassNames
 }: Props) => {
@@ -49,12 +57,39 @@ const ScheduleEntryPreviewOverlay = ({
     onClose();
   };
 
+  const rosterCheckInAction = onRosterCheckIn ? (
+    <button
+      type="button"
+      className="event-schedule-preview-link event-schedule-preview-primary-action"
+      disabled={rosterCheckInDisabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onRosterCheckIn(entry);
+      }}
+    >
+      {rosterCheckInLabel || 'Create roster check-in'}
+    </button>
+  ) : null;
+
+  const operationalChecksAction = entry.type === 'Innhopp' && onOperationalChecks ? (
+    <button
+      type="button"
+      className="event-schedule-preview-link"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOperationalChecks(entry);
+      }}
+    >
+      Operational Checks
+    </button>
+  ) : null;
+
   const openDetailsActions = entry.to ? (
-    <>
+    <div className="event-schedule-preview-details-action">
       {onNavigateToEntry ? (
         <button
           type="button"
-          className="link-button event-schedule-preview-link"
+          className="event-schedule-preview-details-part"
           onClick={(e) => {
             e.stopPropagation();
             onNavigateToEntry(entry);
@@ -64,10 +99,10 @@ const ScheduleEntryPreviewOverlay = ({
           Open details
         </button>
       ) : null}
-      {onNavigateToEntry ? <span className="event-schedule-preview-action-separator" aria-hidden="true">|</span> : null}
+      {onNavigateToEntry ? <span className="event-schedule-preview-details-separator" aria-hidden="true">|</span> : null}
       <button
         type="button"
-        className="link-button event-schedule-preview-link event-schedule-preview-link--external"
+        className="event-schedule-preview-details-part event-schedule-preview-link--external"
         aria-label="Open details in a new tab"
         title="Open details in a new tab"
         onClick={(e) => {
@@ -77,7 +112,7 @@ const ScheduleEntryPreviewOverlay = ({
       >
         <span className="material-symbols-outlined event-schedule-preview-external-icon" aria-hidden="true">open_in_new</span>
       </button>
-    </>
+    </div>
   ) : null;
 
   return createPortal(
@@ -229,7 +264,7 @@ const ScheduleEntryPreviewOverlay = ({
                       {entry.innhoppCoordinates && canOpenMapsActions ? (
                         <button
                           type="button"
-                          className="link-button event-schedule-preview-link"
+                          className="event-schedule-preview-link"
                           onClick={(e) => {
                             e.stopPropagation();
                             window.open(
@@ -242,6 +277,8 @@ const ScheduleEntryPreviewOverlay = ({
                         </button>
                       ) : null}
                       {openDetailsActions}
+                      {operationalChecksAction}
+                      {rosterCheckInAction}
                     </div>
                   </div>
                 );
@@ -271,7 +308,7 @@ const ScheduleEntryPreviewOverlay = ({
                       {entry.coordinates && canOpenMapsActions ? (
                         <button
                           type="button"
-                          className="link-button event-schedule-preview-link"
+                          className="event-schedule-preview-link"
                           onClick={(e) => {
                             e.stopPropagation();
                             window.open(
@@ -284,6 +321,7 @@ const ScheduleEntryPreviewOverlay = ({
                         </button>
                       ) : null}
                       {openDetailsActions}
+                      {rosterCheckInAction}
                     </div>
                   </>
                 ) : (
@@ -345,7 +383,7 @@ const ScheduleEntryPreviewOverlay = ({
                         entry.transportRouteDestination ? (
                           <button
                             type="button"
-                            className="link-button event-schedule-preview-link"
+                            className="event-schedule-preview-link"
                             onClick={(e) => {
                               e.stopPropagation();
                               window.open(
@@ -358,6 +396,7 @@ const ScheduleEntryPreviewOverlay = ({
                           </button>
                         ) : null}
                         {openDetailsActions}
+                        {rosterCheckInAction}
                       </div>
                     ) : null}
                     {entry.type === 'Other' && (entry.coordinates && canOpenMapsActions || entry.to) ? (
@@ -365,7 +404,7 @@ const ScheduleEntryPreviewOverlay = ({
                         {entry.coordinates && canOpenMapsActions ? (
                           <button
                             type="button"
-                            className="link-button event-schedule-preview-link"
+                            className="event-schedule-preview-link"
                             onClick={(e) => {
                               e.stopPropagation();
                               window.open(
@@ -378,11 +417,13 @@ const ScheduleEntryPreviewOverlay = ({
                           </button>
                         ) : null}
                         {openDetailsActions}
+                        {rosterCheckInAction}
                       </div>
                     ) : null}
                     {entry.type === 'Meal' && entry.to ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
                         {openDetailsActions}
+                        {rosterCheckInAction}
                       </div>
                     ) : null}
                   </>
