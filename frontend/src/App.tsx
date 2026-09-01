@@ -52,6 +52,7 @@ import BudgetsOverviewPage from './pages/BudgetsOverviewPage';
 import AccountingOverviewPage from './pages/AccountingOverviewPage';
 import EventPrintPage from './pages/EventPrintPage';
 import ChecklistsPage from './pages/ChecklistsPage';
+import EventLeaderboardPage from './pages/EventLeaderboardPage';
 import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
@@ -65,6 +66,7 @@ const App = () => (
           <Route path="events" element={<EventCalendarPage />} />
           <Route path="checklists" element={<StaffRouteGuard><ChecklistsPage /></StaffRouteGuard>} />
           <Route path="events/:eventId/checklists" element={<StaffRouteGuard><ChecklistsPage /></StaffRouteGuard>} />
+          <Route path="events/:eventId/leaderboard" element={<StaffRouteGuard><EventLeaderboardPage /></StaffRouteGuard>} />
           {budgetsV1Enabled ? (
             <>
               <Route path="finance" element={<ParticipantRouteGuard><FinanceSummaryPage /></ParticipantRouteGuard>} />

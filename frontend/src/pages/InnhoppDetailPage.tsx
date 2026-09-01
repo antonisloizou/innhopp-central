@@ -307,21 +307,26 @@ const InnhoppDetailPage = () => {
         (evt) => Array.isArray(evt.airfield_ids) && evt.airfield_ids.includes(airfield.id)
       );
       const locations = relatedEvents.length
-        ? relatedEvents.map((evt) => evt.location || 'Location TBD')
+        ? [...new Set(relatedEvents.map((evt) => evt.location || 'Location TBD'))]
         : ['Unassigned location'];
-      locations.forEach((locationLabel, index) => {
+      locations.forEach((locationLabel) => {
         const label = locationLabel || 'Location TBD';
         if (!groups.has(label)) {
           groups.set(label, { label, options: [] });
         }
         groups.get(label)!.options.push({
-          key: `${airfield.id}-${index}-${label}`,
+          key: `${airfield.id}-${label}`,
           value: airfield.id,
           label: `${airfield.name}${airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}`
         });
       });
     });
-    return Array.from(groups.values());
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        options: group.options.sort((a, b) => a.label.localeCompare(b.label, 'nb'))
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'nb'));
   }, [airfields, allEvents]);
 
   const galleryImages = useMemo(

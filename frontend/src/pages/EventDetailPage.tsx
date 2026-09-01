@@ -1157,21 +1157,26 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     airfields.forEach((af) => {
       const relatedEvents = allEvents.filter((ev) => Array.isArray(ev.airfield_ids) && ev.airfield_ids.includes(af.id));
       const locations = relatedEvents.length
-        ? relatedEvents.map((ev) => ev.location || 'Location TBD')
+        ? [...new Set(relatedEvents.map((ev) => ev.location || 'Location TBD'))]
         : ['Unassigned location'];
-      locations.forEach((loc, idx) => {
+      locations.forEach((loc) => {
         const label = loc || 'Location TBD';
         if (!groups.has(label)) {
           groups.set(label, { label, options: [] });
         }
         groups.get(label)!.options.push({
-          key: `${af.id}-${idx}-${label}`,
+          key: `${af.id}-${label}`,
           value: af.id,
           label: `${af.name}${af.elevation != null ? ` (${af.elevation} m)` : ''}`
         });
       });
     });
-    return Array.from(groups.values());
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        options: group.options.sort((a, b) => a.label.localeCompare(b.label, 'nb'))
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'nb'));
   }, [airfields, allEvents]);
 
   useEffect(() => {

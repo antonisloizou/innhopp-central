@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { budgetsV1Enabled } from '../config/flags';
 import { useAuth } from '../auth/AuthProvider';
-import { isParticipantOnlySession } from '../auth/access';
+import { canManageEvents, isParticipantOnlySession } from '../auth/access';
 import { exportInnhopp, getEvent, Innhopp, listAccommodations } from '../api/events';
 import { listAirfields } from '../api/airfields';
 import { listGroundCrews, listOthers, listTransports } from '../api/logistics';
@@ -21,7 +21,8 @@ export type EventGearMenuPage =
   | 'registrations'
   | 'manifest'
   | 'communications'
-  | 'checklists';
+  | 'checklists'
+  | 'leaderboard';
 
 type EventGearMenuProps = {
   eventId: number;
@@ -59,6 +60,7 @@ const EventGearMenu = ({
   const navigate = useNavigate();
   const { user } = useAuth();
   const participantOnly = isParticipantOnlySession(user);
+  const canViewLeaderboard = canManageEvents(user);
   const forceDocumentNavigation = !!user?.impersonator || participantOnly;
   const [open, setOpen] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
@@ -251,6 +253,17 @@ const EventGearMenu = ({
               >
                 {driverSummaryExporting ? 'Exporting Driver Summary...' : 'Export Driver Summary'}
               </button>
+              {canViewLeaderboard ? <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  navigateTo(`/events/${eventId}/leaderboard`);
+                }}
+              >
+                Leaderboard
+              </button> : null}
               {onCopy ? <button
                 className="event-schedule-menu-item"
                 type="button"

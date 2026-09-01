@@ -281,10 +281,11 @@ func (h *Handler) updateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		IsPresent *bool    `json:"is_present"`
-		Distance  *float64 `json:"distance_from_target_meters"`
+		IsPresent     *bool    `json:"is_present"`
+		Distance      *float64 `json:"distance_from_target_meters"`
+		ClearDistance bool     `json:"clear_distance"`
 	}
-	if err := httpx.DecodeJSON(r, &req); err != nil || (req.IsPresent == nil && req.Distance == nil) {
+	if err := httpx.DecodeJSON(r, &req); err != nil || (req.IsPresent == nil && req.Distance == nil && !req.ClearDistance) {
 		httpx.Error(w, 400, "is_present or distance_from_target_meters is required")
 		return
 	}
@@ -299,11 +300,11 @@ func (h *Handler) updateEntry(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 404, "roster check-in not found")
 		return
 	}
-	if req.Distance != nil && typ != "innhopp" {
+	if (req.Distance != nil || req.ClearDistance) && typ != "innhopp" {
 		httpx.Error(w, 400, "distance is only available for innhopps")
 		return
 	}
-	tag, err := h.db.Exec(ctx, `UPDATE roster_check_in_entries SET is_present=COALESCE($1,is_present),distance_from_target_meters=CASE WHEN $2::numeric IS NULL THEN distance_from_target_meters ELSE $2 END,updated_by_account_id=$3,updated_at=NOW() WHERE roster_check_in_id=$4 AND participant_id=$5`, req.IsPresent, req.Distance, actorID(ctx), checkID, participantID)
+	tag, err := h.db.Exec(ctx, `UPDATE roster_check_in_entries SET is_present=COALESCE($1,is_present),distance_from_target_meters=CASE WHEN $2 THEN NULL WHEN $3::numeric IS NULL THEN distance_from_target_meters ELSE $3 END,updated_by_account_id=$4,updated_at=NOW() WHERE roster_check_in_id=$5 AND participant_id=$6`, req.IsPresent, req.ClearDistance, req.Distance, actorID(ctx), checkID, participantID)
 	if err != nil {
 		httpx.Error(w, 500, "failed to update roster entry")
 		return

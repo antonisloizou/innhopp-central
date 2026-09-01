@@ -94,6 +94,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewManifests)).Get("/manifests/{manifestID}", h.getManifest)
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Put("/manifests/{manifestID}", h.updateManifest)
 
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/leaderboard", h.getLeaderboard)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/stream", h.streamEvent)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}", h.getEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}", h.updateEvent)
@@ -253,6 +254,18 @@ type Manifest struct {
 	Notes          string    `json:"notes,omitempty"`
 	ParticipantIDs []int64   `json:"participant_ids"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+// LeaderboardEntry is a participant's closest recorded landing for an event.
+// A zero is a valid score; only absent distances are omitted from the board.
+type LeaderboardEntry struct {
+	ParticipantID    int64    `json:"participant_id"`
+	ParticipantName  string   `json:"participant_name"`
+	Roles            []string `json:"roles"`
+	BestDistanceM    float64  `json:"best_distance_meters"`
+	AverageDistanceM float64  `json:"average_distance_meters"`
+	TotalDistanceM   float64  `json:"total_distance_meters"`
+	RecordedScores   int      `json:"recorded_scores"`
 }
 
 type eventPayload struct {
@@ -1800,6 +1813,54 @@ func (h *Handler) listManifests(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, manifests)
+}
+
+func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
+	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
+	if err != nil || eventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	rows, err := h.db.Query(r.Context(), `
+		SELECT entry.participant_id,
+		       entry.participant_name_snapshot,
+		       entry.roles_snapshot,
+		       MIN(entry.distance_from_target_meters)::float8 AS best_distance_meters,
+		       AVG(entry.distance_from_target_meters)::float8 AS average_distance_meters,
+		       SUM(entry.distance_from_target_meters)::float8 AS total_distance_meters,
+		       COUNT(*)::int AS recorded_scores
+		FROM roster_check_ins check_in
+		JOIN roster_check_in_entries entry ON entry.roster_check_in_id = check_in.id
+		WHERE check_in.event_id = $1
+		  AND check_in.schedule_item_type = 'innhopp'
+		  AND check_in.deleted_at IS NULL
+		  AND entry.is_present = TRUE
+		  AND entry.distance_from_target_meters IS NOT NULL
+		GROUP BY entry.participant_id, entry.participant_name_snapshot, entry.roles_snapshot
+		ORDER BY best_distance_meters ASC, entry.participant_name_snapshot ASC, entry.participant_id ASC
+	`, eventID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load leaderboard")
+		return
+	}
+	defer rows.Close()
+
+	entries := make([]LeaderboardEntry, 0)
+	for rows.Next() {
+		var entry LeaderboardEntry
+		if err := rows.Scan(&entry.ParticipantID, &entry.ParticipantName, &entry.Roles, &entry.BestDistanceM, &entry.AverageDistanceM, &entry.TotalDistanceM, &entry.RecordedScores); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse leaderboard entry")
+			return
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load leaderboard")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, entries)
 }
 
 func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {

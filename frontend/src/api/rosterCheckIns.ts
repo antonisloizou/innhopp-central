@@ -42,7 +42,7 @@ export const createRosterCheckIn = (eventId: number, itemType: RosterCheckInItem
 export const updateRosterCheckInEntry = (
   checkInId: number,
   participantId: number,
-  payload: { is_present?: boolean; distance_from_target_meters?: number }
+  payload: { is_present?: boolean; distance_from_target_meters?: number; clear_distance?: boolean }
 ) => apiRequest<RosterCheckIn>(`/roster-check-ins/${checkInId}/entries/${participantId}`, { method: 'POST', body: JSON.stringify(payload) });
 
 export const deleteRosterCheckIn = (checkInId: number) =>

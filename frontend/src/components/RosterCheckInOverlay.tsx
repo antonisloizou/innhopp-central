@@ -16,7 +16,7 @@ const RosterCheckInOverlay = ({ checkIn: initialCheckIn, title, onClose, onUpdat
   const [error, setError] = useState<string | null>(null);
   const isInnhopp = checkIn.schedule_item_type === 'innhopp';
 
-  const save = async (participantId: number, payload: { is_present?: boolean; distance_from_target_meters?: number }) => {
+  const save = async (participantId: number, payload: { is_present?: boolean; distance_from_target_meters?: number; clear_distance?: boolean }) => {
     setSavingPerson(participantId);
     setError(null);
     try {
@@ -60,7 +60,13 @@ const RosterCheckInOverlay = ({ checkIn: initialCheckIn, title, onClose, onUpdat
         </div>
         {isInnhopp && checkIn.average_distance_meters != null ? <p className="muted">Average distance: {Math.round(checkIn.average_distance_meters)} m</p> : null}
         {error ? <p className="error-message">{error}</p> : null}
-        <div className="roster-check-in-list">
+        <div className={`roster-check-in-list${isInnhopp ? ' roster-check-in-list-with-header' : ''}`}>
+          {isInnhopp ? (
+            <div className="roster-check-in-list-header">
+              <span>Participant</span>
+              <span>Score</span>
+            </div>
+          ) : null}
           {checkIn.entries.map((entry) => (
             <div className="roster-check-in-row" key={entry.participant_id}>
               <label>
@@ -68,13 +74,15 @@ const RosterCheckInOverlay = ({ checkIn: initialCheckIn, title, onClose, onUpdat
                   type="checkbox"
                   checked={entry.is_present}
                   disabled={savingPerson === entry.participant_id}
-                  onChange={(event) => void save(entry.participant_id, { is_present: event.target.checked })}
+                  onChange={(event) => void save(entry.participant_id, {
+                    is_present: event.target.checked,
+                    clear_distance: isInnhopp && !event.target.checked
+                  })}
                 />
                 <span>{entry.participant_name}</span>
               </label>
               {isInnhopp ? (
                 <label className="roster-check-in-distance">
-                  <span>Score</span>
                   <input
                     type="number"
                     min="0"

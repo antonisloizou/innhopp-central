@@ -186,6 +186,17 @@ export const createEvent = (payload: CreateEventPayload) =>
   apiRequest<Event>('/events', { method: 'POST', body: JSON.stringify(payload) });
 
 export const getEvent = (id: number) => apiRequest<Event>(`/events/${id}`);
+export interface EventLeaderboardEntry {
+  participant_id: number;
+  participant_name: string;
+  roles: string[];
+  best_distance_meters: number;
+  average_distance_meters: number;
+  total_distance_meters: number;
+  recorded_scores: number;
+}
+export const getEventLeaderboard = (id: number) =>
+  apiRequest<EventLeaderboardEntry[]>(`/events/${id}/leaderboard`);
 export const copyEvent = (id: number) =>
   apiRequest<Event>(`/events/${id}/copy`, { method: 'POST' });
 export const deleteEvent = (id: number) =>
