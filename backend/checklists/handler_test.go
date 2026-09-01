@@ -7,8 +7,8 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 		readiness, execution, closeout int
 	}{
 		"jump_leader": {8, 0, 2},
-		"jump_master": {5, 1, 1},
-		"ground_crew": {8, 1, 2},
+		"jump_master": {5, 1, 2},
+		"ground_crew": {8, 1, 3},
 		"boat_crew":   {3, 1, 1},
 	}
 
@@ -54,6 +54,22 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 	}
 	if waterBriefing == nil || waterBriefing.Label != "Water briefing" || waterBriefing.Detail != "Ensure all jumpers are familiar with water landing procedures." || !waterBriefing.RequiresRescueBoat {
 		t.Fatalf("jump leader water briefing must be a rescue-boat-only check: %#v", waterBriefing)
+	}
+	for role, detail := range map[string]string{
+		"jump_master": "Coordinate with Ground Crew to record the distance from the T at which each jumper landed.",
+		"ground_crew": "Coordinate with the Jump Master to record the distance from the T at which each jumper landed.",
+	} {
+		var accuracyScore *seedItem
+		for i := range seedTemplates[role] {
+			item := &seedTemplates[role][i]
+			if item.Key == "record_accuracy_score" {
+				accuracyScore = item
+				break
+			}
+		}
+		if accuracyScore == nil || accuracyScore.Label != "Record accuracy score" || accuracyScore.Detail != detail || accuracyScore.Phase != "closeout" {
+			t.Fatalf("%s accuracy-score check is incorrect: %#v", role, accuracyScore)
+		}
 	}
 }
 

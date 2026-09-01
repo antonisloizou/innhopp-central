@@ -104,6 +104,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Readiness | Jumprun | Spotting, exit order, separation and Jump Master position are confirmed. |
 | Execution | Load is visually spotted before exit | Confirm the agreed visual reference and conditions are acceptable before releasing the load. |
 | Closeout | Load is accounted for | Count the load after landing and report status to Ground Crew/operations; escalate missing or overdue jumpers immediately. |
+| Closeout | Record accuracy score | Coordinate with Ground Crew to record the distance from the T at which each jumper landed. |
 
 ### Ground Crew
 
@@ -119,6 +120,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Readiness | Safety boat coordination is confirmed when required | Confirm Boat Crew location, communication, and readiness signal. This item appears only where a safety boat is required. |
 | Execution | Ground crew monitors exits and landings | Maintain communications, observe canopies/jumpers, track off-landings, and initiate pickup or emergency response when needed. |
 | Closeout | All jumpers are accounted for and reported | Confirm counts against the current manifest and report completion/any exceptions to DZ/operations. |
+| Closeout | Record accuracy score | Coordinate with the Jump Master to record the distance from the T at which each jumper landed. |
 | Closeout | Ground crew site is cleared | Recover markers and kit, then report any incident, damage, or missing equipment. |
 
 ### Boat Crew (only when `rescue_boat = true`)
