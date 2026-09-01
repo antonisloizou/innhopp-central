@@ -30,7 +30,11 @@ const rankEntries = (entries: Omit<LeaderboardEntry, 'rank'>[]): LeaderboardEntr
     const previous = ranked[index - 1];
     ranked.push({
       ...entry,
-      rank: previous ? (entry.distance === previous.distance ? previous.rank : previous.rank + 1) : 1
+      rank: previous && entry.distance === previous.distance && entry.recordedScores === previous.recordedScores
+        ? previous.rank
+        : previous
+          ? previous.rank + 1
+          : 1
     });
     return ranked;
   }, []);
@@ -43,8 +47,8 @@ const scoreForMode = (entry: Pick<LeaderboardEntry, 'bestDistance' | 'averageDis
 
 const scoreModeLabel: Record<ScoreMode, string> = { best: 'Best', average: 'Average', total: 'Total' };
 const formatDistance = (distance: number) => distance.toLocaleString(undefined, { maximumFractionDigits: 2 });
-const formatScore = (entry: Pick<LeaderboardEntry, 'distance' | 'recordedScores'>, mode: ScoreMode) =>
-  `${formatDistance(entry.distance)}m${mode === 'best' ? '' : ` (${entry.recordedScores} jump${entry.recordedScores === 1 ? '' : 's'})`}`;
+const formatScore = (entry: Pick<LeaderboardEntry, 'distance' | 'recordedScores'>) =>
+  `${formatDistance(entry.distance)}m (${entry.recordedScores} jump${entry.recordedScores === 1 ? '' : 's'})`;
 
 const EventLeaderboardPage = () => {
   const { eventId: rawEventId } = useParams();
@@ -52,7 +56,7 @@ const EventLeaderboardPage = () => {
   const eventId = Number(rawEventId);
   const [event, setEvent] = useState<Event | null>(null);
   const [scores, setScores] = useState<EventLeaderboardEntry[]>([]);
-  const [scope, setScope] = useState<LeaderboardScope>('all');
+  const [scope, setScope] = useState<LeaderboardScope>('participants');
   const [scoreMode, setScoreMode] = useState<ScoreMode>('average');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -108,12 +112,13 @@ const EventLeaderboardPage = () => {
     () => rankEntries(
       (scope === 'all' ? allEntries : allEntries.filter((entry) => !entry.isStaff))
         .map((entry) => ({ ...entry, distance: scoreForMode(entry, scoreMode) }))
-        .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name))
+        .sort((a, b) => a.distance - b.distance || b.recordedScores - a.recordedScores || a.name.localeCompare(b.name))
     ),
     [allEntries, scope, scoreMode]
   );
   const topEntries = entries.slice(0, 3);
-  const leadingDistance = entries[0]?.distance ?? 0;
+  const leaders = entries.filter((entry) => entry.rank === 1);
+  const hasLargeFirstPlaceTie = leaders.length >= 3;
 
   if (loading) return <p className="muted">Loading leaderboard…</p>;
   if (error || !event) return <p className="error-text">{error || 'Event not found.'}</p>;
@@ -148,25 +153,34 @@ const EventLeaderboardPage = () => {
       ) : (
         <>
           <section className="leaderboard-podium" aria-label="Top three">
-            {topEntries.map((entry) => (
+            {hasLargeFirstPlaceTie ? (
+              <article className="leaderboard-podium-card leaderboard-podium-card--gold leaderboard-podium-card--shared">
+                <span className="leaderboard-score-label">{scoreModeLabel[scoreMode]} distance</span>
+                <p className="leaderboard-podium-rank" aria-label="Shared first place"><span className="leaderboard-medal" aria-hidden="true">♛</span></p>
+                <ul aria-label="Joint first-place leaders">
+                  {leaders.map((entry) => <li key={entry.id}>{entry.name}</li>)}
+                </ul>
+                <strong>{formatScore(leaders[0])}</strong>
+              </article>
+            ) : topEntries.map((entry) => (
               <article className={podiumClass(entry.rank)} key={entry.id}>
-                <span className="leaderboard-medal" aria-hidden="true">{entry.rank === 1 ? '♛' : entry.rank === 2 ? '◆' : '●'}</span>
-                <p>#{entry.rank}</p>
+                <span className="leaderboard-score-label">{scoreModeLabel[scoreMode]} distance</span>
+                <p className="leaderboard-podium-rank" aria-label={`Rank ${entry.rank}`}><span className="leaderboard-medal" aria-hidden="true">{entry.rank === 1 ? '♛' : entry.rank === 2 ? '◆' : '●'}</span></p>
                 <h3>{entry.name}</h3>
-                <strong>{formatScore(entry, scoreMode)}</strong><span>{scoreMode.toLowerCase()} distance</span>
+                <strong>{formatScore(entry)}</strong>
               </article>
             ))}
           </section>
 
           <section className="leaderboard-list card" aria-label="Full leaderboard">
-            <header><div><p className="leaderboard-eyebrow">Full standings</p><h3>{scope === 'all' ? 'Everyone' : 'Participants'}</h3></div><span className="leaderboard-leader-note">{scoreModeLabel[scoreMode]}: {formatDistance(leadingDistance)}m from target</span></header>
+            <header><div><p className="leaderboard-eyebrow">Full standings</p><h3>{scope === 'all' ? 'Everyone' : 'Participants'}</h3></div></header>
             <ol>
               {entries.map((entry) => (
                 <li key={entry.id} className={entry.rank <= 3 ? `leaderboard-row leaderboard-row--top-${entry.rank}` : 'leaderboard-row'}>
                   <span className="leaderboard-rank">{entry.rank}</span>
                   <span className="leaderboard-avatar" aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span>
                   <span className="leaderboard-person"><strong>{entry.name}</strong>{entry.isStaff ? <small>Staff</small> : <small>Participant</small>}</span>
-                  <span className="leaderboard-loads"><strong>{formatScore(entry, scoreMode)}</strong><span>{entry.recordedScores} recorded score{entry.recordedScores === 1 ? '' : 's'}</span></span>
+                  <span className="leaderboard-loads"><strong>{formatScore(entry)}</strong><span>{entry.recordedScores} recorded score{entry.recordedScores === 1 ? '' : 's'}</span></span>
                 </li>
               ))}
             </ol>
