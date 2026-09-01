@@ -299,6 +299,13 @@ export default function ChecklistsPage() {
         Meal: 'schedule-type-badge schedule-type-badge--meal',
         Other: 'schedule-type-badge schedule-type-badge--other'
       }}
+      onNavigateToEntry={(entry) => {
+        if (entry.to) {
+          navigate(entry.to, {
+            state: { returnTo: `/events/${selectedEventId}/checklists?innhopp=${selectedInnhoppId}&role=${role}` }
+          });
+        }
+      }}
     />}
   </section>;
 }

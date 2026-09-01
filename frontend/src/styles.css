@@ -5365,9 +5365,17 @@ button.ghost.event-route-preview-overlay-button {
 }
 
 .event-schedule-preview-external-icon {
-  margin-left: 0.2rem;
   font-size: 0.95rem;
-  vertical-align: -0.1em;
+  display: block;
+}
+
+.event-schedule-preview-link--external {
+  padding-inline: 0.2rem;
+}
+
+.event-schedule-preview-action-separator {
+  color: var(--muted-text);
+  user-select: none;
 }
 
 .event-schedule-preview-subsection {

@@ -1569,6 +1569,9 @@ const EventRoutePlannerPage = () => {
           onClose={closePreview}
           canOpenMapsActions={canOpenMapsActions}
           typeBadgeClassNames={typeBadgeClassNames}
+          onNavigateToEntry={(entry) => {
+            if (entry.to) navigate(entry.to);
+          }}
         />
       ) : null}
     </section>

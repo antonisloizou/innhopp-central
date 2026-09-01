@@ -6,7 +6,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 	want := map[string]struct {
 		readiness, execution, closeout int
 	}{
-		"jump_leader": {7, 0, 2},
+		"jump_leader": {8, 0, 2},
 		"jump_master": {5, 1, 1},
 		"ground_crew": {8, 1, 2},
 		"boat_crew":   {3, 1, 1},
@@ -43,6 +43,17 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 	boatCoordination := seedTemplates["ground_crew"][7]
 	if boatCoordination.Key != "boat_coordination" || !boatCoordination.RequiresRescueBoat {
 		t.Fatal("ground crew boat coordination must be required only for rescue-boat innhopps")
+	}
+	var waterBriefing *seedItem
+	for i := range seedTemplates["jump_leader"] {
+		item := &seedTemplates["jump_leader"][i]
+		if item.Key == "water_briefing" {
+			waterBriefing = item
+			break
+		}
+	}
+	if waterBriefing == nil || waterBriefing.Label != "Water briefing" || waterBriefing.Detail != "Ensure all jumpers are familiar with water landing procedures." || !waterBriefing.RequiresRescueBoat {
+		t.Fatalf("jump leader water briefing must be a rescue-boat-only check: %#v", waterBriefing)
 	}
 }
 

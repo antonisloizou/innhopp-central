@@ -89,6 +89,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Readiness | Conditions and go/no-go decision are confirmed | Use current weather, wind, NOTAM/airspace information, and local conditions; record any material limitations. |
 | Readiness | Pilot and Jump Master plan is agreed | Confirm location, coordinates, altitude, jump run/exit point, number of runs/loads, timing, and abort/hold arrangements. |
 | Readiness | Manifest | Load sheets are ready and participants are briefed on boarding procedures. |
+| Readiness | Water briefing | Ensure all jumpers are familiar with water landing procedures. This item appears only where a safety boat is required. |
 | Execution | Team departure and location status | Ground crew departure status, next location, and that the location is left undisturbed are confirmed. |
 | Closeout | Innhopp outcome and incidents are reviewed | Confirm all reports have reached the appropriate DZ/operations contact and any incident follow-up has started. |
 

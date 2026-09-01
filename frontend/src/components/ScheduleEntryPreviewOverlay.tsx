@@ -28,6 +28,7 @@ type Props = {
   entry: ScheduleEntry;
   closing: boolean;
   onClose: () => void;
+  onNavigateToEntry?: (entry: ScheduleEntry) => void;
   canOpenMapsActions: boolean;
   typeBadgeClassNames: Record<EntryType, string>;
 };
@@ -36,6 +37,7 @@ const ScheduleEntryPreviewOverlay = ({
   entry,
   closing,
   onClose,
+  onNavigateToEntry,
   canOpenMapsActions,
   typeBadgeClassNames
 }: Props) => {
@@ -47,18 +49,35 @@ const ScheduleEntryPreviewOverlay = ({
     onClose();
   };
 
-  const openDetailsButton = entry.to ? (
-    <button
-      type="button"
-      className="link-button event-schedule-preview-link"
-      aria-label="Open details in a new tab"
-      onClick={(e) => {
-        e.stopPropagation();
-        openEntryInNewTab();
-      }}
-    >
-      Open details <span className="material-symbols-outlined event-schedule-preview-external-icon" aria-hidden="true">open_in_new</span>
-    </button>
+  const openDetailsActions = entry.to ? (
+    <>
+      {onNavigateToEntry ? (
+        <button
+          type="button"
+          className="link-button event-schedule-preview-link"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateToEntry(entry);
+            onClose();
+          }}
+        >
+          Open details
+        </button>
+      ) : null}
+      {onNavigateToEntry ? <span className="event-schedule-preview-action-separator" aria-hidden="true">|</span> : null}
+      <button
+        type="button"
+        className="link-button event-schedule-preview-link event-schedule-preview-link--external"
+        aria-label="Open details in a new tab"
+        title="Open details in a new tab"
+        onClick={(e) => {
+          e.stopPropagation();
+          openEntryInNewTab();
+        }}
+      >
+        <span className="material-symbols-outlined event-schedule-preview-external-icon" aria-hidden="true">open_in_new</span>
+      </button>
+    </>
   ) : null;
 
   return createPortal(
@@ -222,7 +241,7 @@ const ScheduleEntryPreviewOverlay = ({
                           Open in Maps
                         </button>
                       ) : null}
-                      {openDetailsButton}
+                      {openDetailsActions}
                     </div>
                   </div>
                 );
@@ -264,7 +283,7 @@ const ScheduleEntryPreviewOverlay = ({
                           Open in Maps
                         </button>
                       ) : null}
-                      {openDetailsButton}
+                      {openDetailsActions}
                     </div>
                   </>
                 ) : (
@@ -338,7 +357,7 @@ const ScheduleEntryPreviewOverlay = ({
                             Open route
                           </button>
                         ) : null}
-                        {openDetailsButton}
+                        {openDetailsActions}
                       </div>
                     ) : null}
                     {entry.type === 'Other' && (entry.coordinates && canOpenMapsActions || entry.to) ? (
@@ -358,12 +377,12 @@ const ScheduleEntryPreviewOverlay = ({
                             Open in Maps
                           </button>
                         ) : null}
-                        {openDetailsButton}
+                        {openDetailsActions}
                       </div>
                     ) : null}
                     {entry.type === 'Meal' && entry.to ? (
                       <div className="form-field-full-span event-schedule-preview-action-row">
-                        {openDetailsButton}
+                        {openDetailsActions}
                       </div>
                     ) : null}
                   </>
