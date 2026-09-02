@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Event, EventLeaderboardEntry, EventLeaderboardJump, getEvent, getEventLeaderboard, getEventLeaderboardParticipant } from '../api/events';
 import EventGearMenu from '../components/EventGearMenu';
@@ -92,6 +93,33 @@ const EventLeaderboardPage = () => {
     void load();
     return () => { cancelled = true; };
   }, [eventId]);
+
+  useEffect(() => {
+    if (!selectedEntry) return;
+    const scrollY = window.scrollY;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyPosition = document.body.style.position;
+    const previousBodyTop = document.body.style.top;
+    const previousBodyWidth = document.body.style.width;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    const scrollContainers = Array.from(document.querySelectorAll<HTMLElement>('.app-shell, .app-body, .app-content'));
+    const previousContainerOverflows = scrollContainers.map((element) => element.style.overflow);
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = '100%';
+    document.documentElement.style.overflow = 'hidden';
+    scrollContainers.forEach((element) => { element.style.overflow = 'hidden'; });
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.body.style.position = previousBodyPosition;
+      document.body.style.top = previousBodyTop;
+      document.body.style.width = previousBodyWidth;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+      scrollContainers.forEach((element, index) => { element.style.overflow = previousContainerOverflows[index]; });
+      window.scrollTo(0, scrollY);
+    };
+  }, [selectedEntry]);
 
   const allEntries = useMemo(() => {
     if (!event) return [];
@@ -216,10 +244,10 @@ const EventLeaderboardPage = () => {
         </>
       )}
       <button className="ghost leaderboard-back" type="button" onClick={() => navigate(`/events/${event.id}`)}>Back to event</button>
-      {selectedEntry ? (
+      {selectedEntry && typeof document !== 'undefined' ? createPortal(
         <div className="leaderboard-detail-backdrop" role="presentation" onClick={() => setSelectedEntry(null)}>
           <section className="card leaderboard-detail-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-detail-title" onClick={(click) => click.stopPropagation()}>
-            <button className="overlay-close-button overlay-close-top-left" type="button" aria-label="Close jump details" onClick={() => setSelectedEntry(null)}>×</button>
+            <button className="overlay-close-button leaderboard-detail-close" type="button" aria-label="Close jump details" onClick={() => setSelectedEntry(null)}>×</button>
             <header><p className="leaderboard-eyebrow">Completed Innhopps</p><h3 id="leaderboard-detail-title">{selectedEntry.name}</h3></header>
             {detailLoading ? <p className="muted">Loading jumps…</p> : detailError ? <p className="error-text">{detailError}</p> : (
               <>
@@ -235,6 +263,7 @@ const EventLeaderboardPage = () => {
             )}
           </section>
         </div>
+        , document.body
       ) : null}
     </section>
   );
