@@ -11,7 +11,11 @@ export type TransportVehicle = {
 export type Transport = {
   id: number;
   pickup_location: string;
+  pickup_location_type?: string;
+  pickup_location_id?: number;
   destination: string;
+  destination_type?: string;
+  destination_id?: number;
   passenger_count: number;
   duration_minutes?: number | null;
   scheduled_at?: string;

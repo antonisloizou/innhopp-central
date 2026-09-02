@@ -1513,8 +1513,13 @@ const EventSchedulePage = () => {
               : [];
           await updateTransport(numericId, {
             pickup_location: full.pickup_location,
+            pickup_location_type: full.pickup_location_type,
+            pickup_location_id: full.pickup_location_id,
             destination: full.destination,
+            destination_type: full.destination_type,
+            destination_id: full.destination_id,
             passenger_count: full.passenger_count,
+            duration_minutes: full.duration_minutes ?? undefined,
             scheduled_at: newIso || undefined,
             notes: full.notes || undefined,
             event_id: Number(full.event_id),
