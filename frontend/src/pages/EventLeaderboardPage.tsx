@@ -25,12 +25,12 @@ const podiumClass = (rank: number) => {
   return 'leaderboard-podium-card leaderboard-podium-card--bronze';
 };
 
-const rankEntries = (entries: Omit<LeaderboardEntry, 'rank'>[]): LeaderboardEntry[] =>
+const rankEntries = (entries: Omit<LeaderboardEntry, 'rank'>[], breakTiesByJumps: boolean): LeaderboardEntry[] =>
   entries.reduce<LeaderboardEntry[]>((ranked, entry, index) => {
     const previous = ranked[index - 1];
     ranked.push({
       ...entry,
-      rank: previous && entry.distance === previous.distance && entry.recordedScores === previous.recordedScores
+      rank: previous && entry.distance === previous.distance && (!breakTiesByJumps || entry.recordedScores === previous.recordedScores)
         ? previous.rank
         : previous
           ? previous.rank + 1
@@ -112,7 +112,8 @@ const EventLeaderboardPage = () => {
     () => rankEntries(
       (scope === 'all' ? allEntries : allEntries.filter((entry) => !entry.isStaff))
         .map((entry) => ({ ...entry, distance: scoreForMode(entry, scoreMode) }))
-        .sort((a, b) => a.distance - b.distance || b.recordedScores - a.recordedScores || a.name.localeCompare(b.name))
+        .sort((a, b) => a.distance - b.distance || (scoreMode === 'best' ? 0 : b.recordedScores - a.recordedScores) || a.name.localeCompare(b.name)),
+      scoreMode !== 'best'
     ),
     [allEntries, scope, scoreMode]
   );
@@ -158,9 +159,9 @@ const EventLeaderboardPage = () => {
                 <span className="leaderboard-score-label">{scoreModeLabel[scoreMode]} distance</span>
                 <p className="leaderboard-podium-rank" aria-label="Shared first place"><span className="leaderboard-medal" aria-hidden="true">♛</span></p>
                 <ul aria-label="Joint first-place leaders">
-                  {leaders.map((entry) => <li key={entry.id}>{entry.name}</li>)}
+                  {leaders.map((entry) => <li key={entry.id}>{entry.name} <small>({entry.recordedScores} jump{entry.recordedScores === 1 ? '' : 's'})</small></li>)}
                 </ul>
-                <strong>{formatScore(leaders[0])}</strong>
+                <strong>{scoreMode === 'best' ? `${formatDistance(leaders[0].distance)}m` : formatScore(leaders[0])}</strong>
               </article>
             ) : topEntries.map((entry) => (
               <article className={podiumClass(entry.rank)} key={entry.id}>
