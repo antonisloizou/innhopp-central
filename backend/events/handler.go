@@ -270,11 +270,11 @@ type LeaderboardEntry struct {
 }
 
 type LeaderboardJump struct {
-	InnhoppID int64      `json:"innhopp_id"`
-	Sequence  int        `json:"sequence"`
-	Name      string     `json:"name"`
+	InnhoppID   int64      `json:"innhopp_id"`
+	Sequence    int        `json:"sequence"`
+	Name        string     `json:"name"`
 	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
-	DistanceM *float64   `json:"distance_meters,omitempty"`
+	DistanceM   *float64   `json:"distance_meters,omitempty"`
 }
 
 type eventPayload struct {
