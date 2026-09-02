@@ -95,6 +95,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Put("/manifests/{manifestID}", h.updateManifest)
 
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/leaderboard", h.getLeaderboard)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/leaderboard/participants/{participantID}", h.getLeaderboardParticipant)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/stream", h.streamEvent)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}", h.getEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}", h.updateEvent)
@@ -266,6 +267,14 @@ type LeaderboardEntry struct {
 	AverageDistanceM float64  `json:"average_distance_meters"`
 	TotalDistanceM   float64  `json:"total_distance_meters"`
 	RecordedScores   int      `json:"recorded_scores"`
+}
+
+type LeaderboardJump struct {
+	InnhoppID int64      `json:"innhopp_id"`
+	Sequence  int        `json:"sequence"`
+	Name      string     `json:"name"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+	DistanceM *float64   `json:"distance_meters,omitempty"`
 }
 
 type eventPayload struct {
@@ -1861,6 +1870,53 @@ func (h *Handler) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, http.StatusOK, entries)
+}
+
+func (h *Handler) getLeaderboardParticipant(w http.ResponseWriter, r *http.Request) {
+	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
+	if err != nil || eventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	participantID, err := strconv.ParseInt(chi.URLParam(r, "participantID"), 10, 64)
+	if err != nil || participantID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid participant id")
+		return
+	}
+
+	rows, err := h.db.Query(r.Context(), `
+		SELECT innhopp.id, innhopp.sequence, innhopp.name, innhopp.scheduled_at, entry.distance_from_target_meters
+		FROM roster_check_ins check_in
+		JOIN roster_check_in_entries entry ON entry.roster_check_in_id = check_in.id
+		JOIN event_innhopps innhopp ON innhopp.id = check_in.schedule_item_id
+		WHERE check_in.event_id = $1
+		  AND check_in.schedule_item_type = 'innhopp'
+		  AND check_in.deleted_at IS NULL
+		  AND entry.participant_id = $2
+		  AND entry.is_present = TRUE
+		ORDER BY innhopp.sequence ASC, innhopp.id ASC
+	`, eventID, participantID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
+		return
+	}
+	defer rows.Close()
+
+	jumps := make([]LeaderboardJump, 0)
+	for rows.Next() {
+		var jump LeaderboardJump
+		if err := rows.Scan(&jump.InnhoppID, &jump.Sequence, &jump.Name, &jump.ScheduledAt, &jump.DistanceM); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to parse participant leaderboard details")
+			return
+		}
+		jumps = append(jumps, jump)
+	}
+	if err := rows.Err(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, jumps)
 }
 
 func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {

@@ -197,6 +197,15 @@ export interface EventLeaderboardEntry {
 }
 export const getEventLeaderboard = (id: number) =>
   apiRequest<EventLeaderboardEntry[]>(`/events/${id}/leaderboard`);
+export interface EventLeaderboardJump {
+  innhopp_id: number;
+  sequence: number;
+  name: string;
+  scheduled_at?: string | null;
+  distance_meters?: number | null;
+}
+export const getEventLeaderboardParticipant = (eventId: number, participantId: number) =>
+  apiRequest<EventLeaderboardJump[]>(`/events/${eventId}/leaderboard/participants/${participantId}`);
 export const copyEvent = (id: number) =>
   apiRequest<Event>(`/events/${id}/copy`, { method: 'POST' });
 export const deleteEvent = (id: number) =>

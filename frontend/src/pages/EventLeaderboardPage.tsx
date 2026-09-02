@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Event, EventLeaderboardEntry, getEvent, getEventLeaderboard } from '../api/events';
+import { Event, EventLeaderboardEntry, EventLeaderboardJump, getEvent, getEventLeaderboard, getEventLeaderboardParticipant } from '../api/events';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 
@@ -57,9 +57,13 @@ const EventLeaderboardPage = () => {
   const [event, setEvent] = useState<Event | null>(null);
   const [scores, setScores] = useState<EventLeaderboardEntry[]>([]);
   const [scope, setScope] = useState<LeaderboardScope>('participants');
-  const [scoreMode, setScoreMode] = useState<ScoreMode>('average');
+  const [scoreMode, setScoreMode] = useState<ScoreMode>('best');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<LeaderboardEntry | null>(null);
+  const [selectedJumps, setSelectedJumps] = useState<EventLeaderboardJump[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!Number.isInteger(eventId) || eventId <= 0) {
@@ -120,6 +124,27 @@ const EventLeaderboardPage = () => {
   const topEntries = entries.slice(0, 3);
   const leaders = entries.filter((entry) => entry.rank === 1);
   const hasLargeFirstPlaceTie = leaders.length >= 3;
+  const selectedScoredJumps = selectedJumps.filter((jump) => jump.distance_meters != null);
+  const selectedStats = selectedScoredJumps.length > 0 ? {
+    best: Math.min(...selectedScoredJumps.map((jump) => jump.distance_meters as number)),
+    average: selectedScoredJumps.reduce((sum, jump) => sum + (jump.distance_meters as number), 0) / selectedScoredJumps.length,
+    worst: Math.max(...selectedScoredJumps.map((jump) => jump.distance_meters as number))
+  } : null;
+
+  const openDetails = async (entry: LeaderboardEntry) => {
+    setSelectedEntry(entry);
+    setSelectedJumps([]);
+    setDetailError(null);
+    setDetailLoading(true);
+    try {
+      const jumps = await getEventLeaderboardParticipant(eventId, entry.id);
+      setSelectedJumps(Array.isArray(jumps) ? jumps : []);
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to load completed jumps.');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   if (loading) return <p className="muted">Loading leaderboard…</p>;
   if (error || !event) return <p className="error-text">{error || 'Event not found.'}</p>;
@@ -177,11 +202,13 @@ const EventLeaderboardPage = () => {
             <header><div><p className="leaderboard-eyebrow">Full standings</p><h3>{scope === 'all' ? 'Everyone' : 'Participants'}</h3></div></header>
             <ol>
               {entries.map((entry) => (
-                <li key={entry.id} className={entry.rank <= 3 ? `leaderboard-row leaderboard-row--top-${entry.rank}` : 'leaderboard-row'}>
-                  <span className="leaderboard-rank">{entry.rank}</span>
-                  <span className="leaderboard-avatar" aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span>
-                  <span className="leaderboard-person"><strong>{entry.name}</strong>{entry.isStaff ? <small>Staff</small> : <small>Participant</small>}</span>
-                  <span className="leaderboard-loads"><strong>{formatScore(entry)}</strong><span>{entry.recordedScores} recorded score{entry.recordedScores === 1 ? '' : 's'}</span></span>
+                <li key={entry.id}>
+                  <button type="button" className={entry.rank <= 3 ? `leaderboard-row leaderboard-row--top-${entry.rank}` : 'leaderboard-row'} onClick={() => void openDetails(entry)} aria-label={`View ${entry.name}'s completed jumps`}>
+                    <span className="leaderboard-rank">{entry.rank}</span>
+                    <span className="leaderboard-avatar" aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span>
+                    <span className="leaderboard-person"><strong>{entry.name}</strong>{entry.isStaff ? <small>Staff</small> : <small>Participant</small>}</span>
+                    <span className="leaderboard-loads"><strong>{formatScore(entry)}</strong><span>{entry.recordedScores} recorded score{entry.recordedScores === 1 ? '' : 's'}</span></span>
+                  </button>
                 </li>
               ))}
             </ol>
@@ -189,6 +216,26 @@ const EventLeaderboardPage = () => {
         </>
       )}
       <button className="ghost leaderboard-back" type="button" onClick={() => navigate(`/events/${event.id}`)}>Back to event</button>
+      {selectedEntry ? (
+        <div className="leaderboard-detail-backdrop" role="presentation" onClick={() => setSelectedEntry(null)}>
+          <section className="card leaderboard-detail-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-detail-title" onClick={(click) => click.stopPropagation()}>
+            <button className="overlay-close-button overlay-close-top-left" type="button" aria-label="Close jump details" onClick={() => setSelectedEntry(null)}>×</button>
+            <header><p className="leaderboard-eyebrow">Completed Innhopps</p><h3 id="leaderboard-detail-title">{selectedEntry.name}</h3></header>
+            {detailLoading ? <p className="muted">Loading jumps…</p> : detailError ? <p className="error-text">{detailError}</p> : (
+              <>
+                <ol className="leaderboard-jump-list">
+                  {selectedJumps.map((jump) => <li key={jump.innhopp_id}><strong>#{jump.sequence} {jump.name || 'Unnamed Innhopp'}</strong><span>{jump.distance_meters == null ? 'No score recorded' : `${formatDistance(jump.distance_meters)}m`}</span></li>)}
+                </ol>
+                <footer className="leaderboard-detail-stats">
+                  <div><span>Best</span><strong>{selectedStats ? `${formatDistance(selectedStats.best)}m` : '—'}</strong></div>
+                  <div><span>Average</span><strong>{selectedStats ? `${formatDistance(selectedStats.average)}m` : '—'}</strong></div>
+                  <div><span>Worst</span><strong>{selectedStats ? `${formatDistance(selectedStats.worst)}m` : '—'}</strong></div>
+                </footer>
+              </>
+            )}
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 };
