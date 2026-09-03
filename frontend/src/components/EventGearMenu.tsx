@@ -6,11 +6,10 @@ import { useAuth } from '../auth/AuthProvider';
 import { canManageEvents, isParticipantOnlySession } from '../auth/access';
 import { exportInnhopp, getEvent, Innhopp, listAccommodations } from '../api/events';
 import { listAirfields } from '../api/airfields';
-import { listGroundCrews, listMeals, listOthers, listTransports } from '../api/logistics';
+import { listGroundCrews, listOthers, listTransports } from '../api/logistics';
 import { parseCoordinates } from '../utils/coordinates';
 import { createDriverSummaryXlsx } from '../utils/driverSummaryExport';
 import { renderSatelliteMapForExport } from '../utils/innhoppExport';
-import { createEventKml } from '../utils/eventKmlExport';
 
 export type EventGearMenuPage =
   | 'schedule'
@@ -66,7 +65,7 @@ const EventGearMenu = ({
   const [open, setOpen] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
   const [driverSummaryExporting, setDriverSummaryExporting] = useState(false);
-  const [kmlExporting, setKmlExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const navigateTo = (path: string) => {
@@ -156,35 +155,6 @@ const EventGearMenu = ({
     }
   };
 
-  const handleKmlExport = async () => {
-    if (kmlExporting) return;
-    setKmlExporting(true);
-    try {
-      const [event, airfields, accommodations, meals, others] = await Promise.all([getEvent(eventId), listAirfields(), listAccommodations(eventId), listMeals(), listOthers()]);
-      const kml = createEventKml({
-        event,
-        airfields,
-        accommodations,
-        meals,
-        others
-      });
-      if (kml.locationCount === 0) throw new Error('No exportable locations with valid coordinates were found for this event.');
-      const file = new Blob([kml.content], { type: 'application/vnd.google-earth.kml+xml;charset=utf-8' });
-      const url = URL.createObjectURL(file);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${event.name.replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '') || `event-${event.id}`}.kml`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Failed to export KML.');
-    } finally {
-      setKmlExporting(false);
-    }
-  };
-
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
@@ -192,11 +162,16 @@ const EventGearMenu = ({
       if (!menuRef.current || !target) return;
       if (!menuRef.current.contains(target)) {
         setOpen(false);
+        setExportMenuOpen(false);
       }
     };
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setOpen(false);
+        if (exportMenuOpen) {
+          setExportMenuOpen(false);
+        } else {
+          setOpen(false);
+        }
       }
     };
     document.addEventListener('pointerdown', handlePointerDown);
@@ -205,7 +180,7 @@ const EventGearMenu = ({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [open]);
+  }, [open, exportMenuOpen]);
 
   return (
     <div className="event-schedule-actions" ref={menuRef}>
@@ -215,7 +190,10 @@ const EventGearMenu = ({
         aria-label={open ? 'Close actions menu' : 'Open actions menu'}
         aria-expanded={open}
         aria-controls={menuId}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setOpen((current) => !current);
+          setExportMenuOpen(false);
+        }}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.3 7.3 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.22-1.12.52-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.41 1.06.73 1.63.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.57-.22 1.12-.52 1.63-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" />
@@ -260,42 +238,60 @@ const EventGearMenu = ({
           ) : null}
           {!participantOnly ? (
             <>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  void handleExportAll();
-                }}
-                disabled={!!exportProgress}
-              >
-                Export all Innhopps
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  void handleDriverSummaryExport();
-                }}
-                disabled={driverSummaryExporting}
-              >
-                {driverSummaryExporting ? 'Exporting Driver Summary...' : 'Export Driver Summary'}
-              </button>
-              <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  void handleKmlExport();
-                }}
-                disabled={kmlExporting}
-              >
-                {kmlExporting ? 'Exporting KML...' : 'Export KML (Google Earth)'}
-              </button>
+              <div className="event-schedule-submenu">
+                <button
+                  className="event-schedule-menu-item event-schedule-submenu-trigger"
+                  type="button"
+                  role="menuitem"
+                  aria-haspopup="menu"
+                  aria-expanded={exportMenuOpen}
+                  onClick={() => setExportMenuOpen((current) => !current)}
+                >
+                  Export <span aria-hidden="true">›</span>
+                </button>
+                {exportMenuOpen ? (
+                  <div className="event-schedule-menu event-schedule-submenu-panel" role="menu" aria-label="Export">
+                    <button
+                      className="event-schedule-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        setExportMenuOpen(false);
+                        void handleExportAll();
+                      }}
+                      disabled={!!exportProgress}
+                    >
+                      All Innhopps OP
+                    </button>
+                    <button
+                      className="event-schedule-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        setExportMenuOpen(false);
+                        void handleDriverSummaryExport();
+                      }}
+                      disabled={driverSummaryExporting}
+                    >
+                      {driverSummaryExporting ? 'Exporting Driver Summary...' : 'Driver Summary'}
+                    </button>
+                    <button
+                      className="event-schedule-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        setExportMenuOpen(false);
+                        window.open(`/events/${eventId}/print?pdf=event-overview`, '_blank', 'noopener,noreferrer');
+                      }}
+                    >
+                      Event Overview
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               {canViewLeaderboard ? <button
                 className="event-schedule-menu-item"
                 type="button"

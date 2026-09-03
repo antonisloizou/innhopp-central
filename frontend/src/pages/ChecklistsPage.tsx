@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
 import { ChecklistStatusTag } from '../components/ChecklistStatusTag';
 import EventGearMenu from '../components/EventGearMenu';
+import RosterCheckInOverlay from '../components/RosterCheckInOverlay';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { ScheduleEntry } from '../components/schedulePreviewTypes';
 import { Event, getEvent, getInnhopp, listEvents } from '../api/events';
@@ -11,6 +12,8 @@ import { listAirfields } from '../api/airfields';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { parseEventLocal } from '../utils/eventDate';
+import { useResourceStream } from '../hooks/useResourceStream';
+import { RosterCheckIn, createRosterCheckIn } from '../api/rosterCheckIns';
 import {
   ChecklistHistoryEvent,
   ChecklistInnhopp,
@@ -79,10 +82,14 @@ export default function ChecklistsPage() {
   const [pendingItemId, setPendingItemId] = useState<number | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<number | null>(null);
   const [previewEntry, setPreviewEntry] = useState<ScheduleEntry | null>(null);
+  const [rosterCheckIn, setRosterCheckIn] = useState<RosterCheckIn | null>(null);
+  const [openingRoster, setOpeningRoster] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetReason, setResetReason] = useState('');
   const [reverseItem, setReverseItem] = useState<{ id: number; label: string } | null>(null);
   const [reverseReason, setReverseReason] = useState('');
+  const activeChecklistRequest = useRef('');
+  activeChecklistRequest.current = `${selectedInnhoppId}:${role}`;
 
   const canReverse = !!user?.roles.some((item) => ['admin', 'staff', 'jump_master', 'jump_leader', 'ground_crew', 'boat_crew'].includes(item));
   const canOverride = !!user?.roles.some((item) => ['admin', 'staff', 'jump_master'].includes(item));
@@ -95,14 +102,37 @@ export default function ChecklistsPage() {
   }, [selectedEventId]);
 
   const loadChecklist = useCallback(async (innhoppId: number, selectedRole: ChecklistRole) => {
+    const requestKey = `${innhoppId}:${selectedRole}`;
     const nextChecklist = await getChecklist(innhoppId, selectedRole);
+    const nextRoleChecklists = await Promise.all(nextChecklist.required_roles.map((requiredRole) => getChecklist(innhoppId, requiredRole)));
+
+    if (activeChecklistRequest.current !== requestKey) return;
     setChecklist(nextChecklist);
-    setRoleChecklists(await Promise.all(nextChecklist.required_roles.map((requiredRole) => getChecklist(innhoppId, requiredRole))));
+    setRoleChecklists(nextRoleChecklists);
   }, []);
 
   const refresh = async () => {
     if (selectedInnhoppId) await loadChecklist(selectedInnhoppId, role);
     await loadInnhopps();
+  };
+
+  useResourceStream({
+    path: selectedInnhoppId ? `/checklists/innhopps/${selectedInnhoppId}/stream` : null,
+    onMessage: () => {
+      void refresh();
+    }
+  });
+
+  const selectInnhopp = (innhoppId: number) => {
+    const innhopp = innhopps.find((item) => item.id === innhoppId);
+    const nextRole = innhopp?.required_roles[0] || role;
+    activeChecklistRequest.current = `${innhoppId}:${nextRole}`;
+    setChecklist(null);
+    setRoleChecklists([]);
+    setHistory([]);
+    setSelectedInnhoppId(innhoppId);
+    setRole(nextRole);
+    setSearchParams(innhoppId ? { innhopp: String(innhoppId), role: nextRole } : {});
   };
 
   useEffect(() => {
@@ -117,16 +147,31 @@ export default function ChecklistsPage() {
   useEffect(() => {
     const innhoppId = Number(searchParams.get('innhopp')) || 0;
     const nextRole = searchParams.get('role');
+    const nextSelectedRole = isChecklistRole(nextRole) ? nextRole : role;
+    if (innhoppId !== selectedInnhoppId || nextSelectedRole !== role) {
+      activeChecklistRequest.current = `${innhoppId}:${nextSelectedRole}`;
+      setChecklist(null);
+      setRoleChecklists([]);
+      setHistory([]);
+    }
     if (innhoppId !== selectedInnhoppId) setSelectedInnhoppId(innhoppId);
-    if (isChecklistRole(nextRole) && nextRole !== role) setRole(nextRole);
+    if (nextSelectedRole !== role) setRole(nextSelectedRole);
   }, [role, searchParams, selectedInnhoppId]);
 
   useEffect(() => {
+    activeChecklistRequest.current = `${selectedInnhoppId}:${role}`;
+    setChecklist(null);
+    setRoleChecklists([]);
+    setHistory([]);
     if (selectedInnhoppId) void loadChecklist(selectedInnhoppId, role).catch((loadError: Error) => setError(loadError.message));
   }, [selectedInnhoppId, role, loadChecklist]);
 
   useEffect(() => {
-    if (selectedInnhoppId && canReverse) void getChecklistHistory(selectedInnhoppId).then(setHistory).catch(() => {});
+    const innhoppId = selectedInnhoppId;
+    if (!innhoppId || !canReverse) return;
+    void getChecklistHistory(innhoppId).then((nextHistory) => {
+      if (activeChecklistRequest.current.startsWith(`${innhoppId}:`)) setHistory(nextHistory);
+    }).catch(() => {});
   }, [selectedInnhoppId, checklist, canReverse]);
 
   const perform = async (itemId: number, action: () => Promise<unknown>, onSuccess?: () => void) => {
@@ -189,6 +234,20 @@ export default function ChecklistsPage() {
     }
   };
 
+  const openRoster = async () => {
+    if (!selectedEventId || !selectedInnhoppId) return;
+    setOpeningRoster(true);
+    setError('');
+    try {
+      // Creating is idempotent: an existing roster is returned instead of duplicated.
+      setRosterCheckIn(await createRosterCheckIn(selectedEventId, 'innhopp', selectedInnhoppId));
+    } catch (openError) {
+      setError((openError as Error).message);
+    } finally {
+      setOpeningRoster(false);
+    }
+  };
+
   const activePhases: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
     ? ['readiness', 'execution', 'closeout']
     : ['readiness'];
@@ -237,7 +296,7 @@ export default function ChecklistsPage() {
     {error && <p className="form-error">{error}</p>}
     <div className="card checklist-selectors">
       <label>Event<select value={selectedEventId} onChange={(event) => { const id = Number(event.target.value); setSelectedInnhoppId(0); setSearchParams({}); setSelectedEventId(id); if (id) navigate(`/events/${id}/checklists`); }}><option value={0}>Select event</option>{events.filter((event) => !isPastEvent(event)).sort(compareEventsByStartDateAscending).map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label>
-      <label>Innhopp<select className={innhopps.find((item) => item.id === selectedInnhoppId)?.operational_status === 'completed' ? 'checklist-innhopp-select--completed' : undefined} value={selectedInnhoppId} onChange={(event) => { const id = Number(event.target.value); const innhopp = innhopps.find((item) => item.id === id); const nextRole = innhopp?.required_roles[0] || role; setSelectedInnhoppId(id); setRole(nextRole); setSearchParams(id ? { innhopp: String(id), role: nextRole } : {}); }}><option value={0}>Select innhopp</option>{innhopps.map((innhopp) => <option key={innhopp.id} value={innhopp.id} className={innhopp.operational_status === 'completed' ? 'checklist-innhopp-option--completed' : undefined}>#{innhopp.sequence} {innhopp.name}</option>)}</select></label>
+      <label>Innhopp<select className={innhopps.find((item) => item.id === selectedInnhoppId)?.operational_status === 'completed' ? 'checklist-innhopp-select--completed' : undefined} value={selectedInnhoppId} onChange={(event) => selectInnhopp(Number(event.target.value))}><option value={0}>Select innhopp</option>{innhopps.map((innhopp) => <option key={innhopp.id} value={innhopp.id} className={innhopp.operational_status === 'completed' ? 'checklist-innhopp-option--completed' : undefined}>#{innhopp.sequence} {innhopp.name}</option>)}</select></label>
       <label>Role<select value={role} disabled={!selectedInnhoppId} onChange={(event) => { const nextRole = event.target.value as ChecklistRole; setRole(nextRole); if (selectedInnhoppId) setSearchParams({ innhopp: String(selectedInnhoppId), role: nextRole }); }}>{checklist?.required_roles.map((item) => <option key={item} value={item}>{roleLabels[item]}</option>)}</select></label>
     </div>
     {checklist && <>
@@ -250,7 +309,7 @@ export default function ChecklistsPage() {
       <div className="checklist-role-summary">{roleChecklists.map((entry) => <button key={entry.role} className={`badge checklist-role-badge ${missingItems(entry).length ? 'danger' : 'success'}`} onClick={() => { setRole(entry.role); setSearchParams({ innhopp: String(selectedInnhoppId), role: entry.role }); }}>{roleLabels[entry.role]}: {missingItems(entry).length} missing</button>)}</div>
       {phaseOrder.map((phase) => {
         const items = checklist.items.filter((item) => item.phase === phase).sort((a, b) => Number(a.completed) - Number(b.completed));
-        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className="checklist-mark">{item.completed ? '✓' : pendingItemId === item.id ? '…' : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
+        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className="checklist-mark">{item.completed ? '✓' : pendingItemId === item.id ? '…' : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
       })}
       {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>History</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
     </>}
@@ -306,6 +365,12 @@ export default function ChecklistsPage() {
           });
         }
       }}
+    />}
+    {rosterCheckIn && <RosterCheckInOverlay
+      checkIn={rosterCheckIn}
+      title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`}
+      onClose={() => setRosterCheckIn(null)}
+      onUpdated={(updated) => setRosterCheckIn(updated)}
     />}
   </section>;
 }

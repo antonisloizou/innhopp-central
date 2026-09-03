@@ -3833,6 +3833,22 @@ button.ghost {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.event-schedule-submenu {
+  position: relative;
+}
+
+.event-schedule-submenu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.event-schedule-submenu-panel {
+  top: 0;
+  right: calc(100% + 0.5rem);
+}
+
 .event-schedule-menu-item.danger {
   color: #fecdd3;
 }
@@ -6183,7 +6199,8 @@ button.ghost.event-route-preview-overlay-button {
 .checklist-item small { color: var(--muted, #9aa3b2); font-size: .92rem; font-weight: 500; }
 .checklist-mark { font-size: 2rem; line-height: 1; color: #d78c3d; }
 .checklist-item.completed .checklist-mark { color: #2d9d67; }
-.checklist-reverse { margin-left: auto; }
+.checklist-reverse, .checklist-roster-action { margin-left: auto; }
+.checklist-roster-action + .checklist-reverse { margin-left: 0; }
 .checklist-history p { margin: 0.6rem 0; font-size: .95rem; }
 .checklist-role-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .checklist-role-badge { appearance: none; border: 0; cursor: pointer; margin-left: 0; }
@@ -6204,7 +6221,7 @@ button.ghost.event-route-preview-overlay-button {
 .checklist-status-tag--clear { --checklist-status-border: #16a34a; --checklist-status-background: repeating-linear-gradient(-45deg, #dcfce7 0 7px, #bbf7d0 7px 14px); --checklist-status-color: #166534; }
 .checklist-status-tag--proceeding { --checklist-status-border: #2563eb; --checklist-status-background: repeating-linear-gradient(-45deg, #dbeafe 0 7px, #bfdbfe 7px 14px); --checklist-status-color: #1d4ed8; }
 .checklist-status-tag--overridden { --checklist-status-border: #d97706; --checklist-status-background: repeating-linear-gradient(-45deg, #fef3c7 0 7px, #fde68a 7px 14px); --checklist-status-color: #92400e; }
-@media (max-width: 720px) { .checklist-selectors { grid-template-columns: 1fr; } .checklist-status { flex-wrap: wrap; } .checklist-innhopp-details { margin-left: 0 !important; } .checklist-item { min-height: 76px; padding: 16px; gap: 10px; } .checklist-copy strong { font-size: 1.08rem; } .checklist-copy p { font-size: .96rem; } .checklist-reverse { font-size: .88rem; } }
+@media (max-width: 720px) { .checklist-selectors { grid-template-columns: 1fr; } .checklist-status { flex-wrap: wrap; } .checklist-innhopp-details { margin-left: 0 !important; } .checklist-item { min-height: 76px; padding: 16px; gap: 10px; } .checklist-copy strong { font-size: 1.08rem; } .checklist-copy p { font-size: .96rem; } .checklist-reverse, .checklist-roster-action { font-size: .88rem; } }
 
 .budget-overview-card {
   display: grid;
