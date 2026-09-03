@@ -44,6 +44,8 @@ const phaseLabels: Record<ChecklistPhase, string> = {
   closeout: 'After landing'
 };
 
+const checklistRoles: ChecklistRole[] = ['jump_leader', 'jump_master', 'ground_crew', 'boat_crew'];
+
 const isChecklistRole = (value: string | null): value is ChecklistRole =>
   value === 'jump_leader' || value === 'jump_master' || value === 'ground_crew' || value === 'boat_crew';
 
@@ -103,8 +105,11 @@ export default function ChecklistsPage() {
 
   const loadChecklist = useCallback(async (innhoppId: number, selectedRole: ChecklistRole) => {
     const requestKey = `${innhoppId}:${selectedRole}`;
-    const nextChecklist = await getChecklist(innhoppId, selectedRole);
-    const nextRoleChecklists = await Promise.all(nextChecklist.required_roles.map((requiredRole) => getChecklist(innhoppId, requiredRole)));
+    const allRoleChecklists = await Promise.all(checklistRoles.map((checklistRole) => getChecklist(innhoppId, checklistRole)));
+    const nextChecklist = allRoleChecklists.find((entry) => entry.role === selectedRole);
+
+    if (!nextChecklist) return;
+    const nextRoleChecklists = allRoleChecklists.filter((entry) => nextChecklist.required_roles.includes(entry.role));
 
     if (activeChecklistRequest.current !== requestKey) return;
     setChecklist(nextChecklist);
@@ -118,6 +123,7 @@ export default function ChecklistsPage() {
 
   useResourceStream({
     path: selectedInnhoppId ? `/checklists/innhopps/${selectedInnhoppId}/stream` : null,
+    debounceMs: 75,
     onMessage: () => {
       void refresh();
     }
@@ -309,7 +315,7 @@ export default function ChecklistsPage() {
       <div className="checklist-role-summary">{roleChecklists.map((entry) => <button key={entry.role} className={`badge checklist-role-badge ${missingItems(entry).length ? 'danger' : 'success'}`} onClick={() => { setRole(entry.role); setSearchParams({ innhopp: String(selectedInnhoppId), role: entry.role }); }}>{roleLabels[entry.role]}: {missingItems(entry).length} missing</button>)}</div>
       {phaseOrder.map((phase) => {
         const items = checklist.items.filter((item) => item.phase === phase).sort((a, b) => Number(a.completed) - Number(b.completed));
-        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className="checklist-mark">{item.completed ? '✓' : pendingItemId === item.id ? '…' : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
+        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className={`checklist-mark${pendingItemId === item.id ? ' checklist-mark--pending' : ''}`}>{item.completed ? '✓' : pendingItemId === item.id ? <span className="checklist-spinner" aria-label="Saving" /> : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
       })}
       {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>History</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
     </>}

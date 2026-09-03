@@ -6199,6 +6199,10 @@ button.ghost.event-route-preview-overlay-button {
 .checklist-item small { color: var(--muted, #9aa3b2); font-size: .92rem; font-weight: 500; }
 .checklist-mark { font-size: 2rem; line-height: 1; color: #d78c3d; }
 .checklist-item.completed .checklist-mark { color: #2d9d67; }
+.checklist-mark--pending { display: inline-flex; width: 1em; height: 1em; align-items: center; justify-content: center; }
+.checklist-spinner { width: 0.72em; height: 0.72em; border: 0.12em solid currentColor; border-right-color: transparent; border-radius: 50%; animation: checklist-spinner-rotate 650ms linear infinite; }
+@keyframes checklist-spinner-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .checklist-spinner { animation-duration: 1.8s; } }
 .checklist-reverse, .checklist-roster-action { margin-left: auto; }
 .checklist-roster-action + .checklist-reverse { margin-left: 0; }
 .checklist-history p { margin: 0.6rem 0; font-size: .95rem; }
