@@ -2106,6 +2106,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		worstParticipantsInput,
 		fullParticipantsInput,
 	)
+	actualParticipants, err := h.countActualSkydiverRegistrations(ctx, budget.EventID)
+	if err != nil {
+		return BudgetSummary{}, err
+	}
 
 	confirmAircraftDerivedCost, confirmAircraftMinutes, confirmAircraftDistance, confirmCrewCount, confirmCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
 		aircraftInnhopps,
@@ -2128,6 +2132,15 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	fullAircraftDerivedCost, fullAircraftMinutes, fullAircraftDistance, fullCrewCount, fullCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
 		aircraftInnhopps,
 		fullParticipants,
+		liveRates,
+		fallbackRates,
+	)
+	if aircraftErr != nil {
+		return BudgetSummary{}, aircraftErr
+	}
+	actualAircraftDerivedCost, actualAircraftMinutes, actualAircraftDistance, actualCrewCount, actualCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
+		aircraftInnhopps,
+		actualParticipants,
 		liveRates,
 		fallbackRates,
 	)
@@ -2390,8 +2403,17 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	confirmExpectedCost, confirmCostWithDrift := buildCostWithDrift(confirmParticipants, confirmCrewCountByDay, confirmAircraftDerivedCost)
 	worstExpectedCost, worstCostWithDrift := buildCostWithDrift(worstParticipants, worstCrewCountByDay, worstAircraftDerivedCost)
 	fullExpectedCost, fullCostWithDrift := buildCostWithDrift(fullParticipants, fullCrewCountByDay, fullAircraftDerivedCost)
+	actualExpectedCost, actualCostWithDrift := buildCostWithDrift(actualParticipants, actualCrewCountByDay, actualAircraftDerivedCost)
 
 	scenarios := map[string]ScenarioSummary{
+		"actual": buildScenarioSummary(
+			"Actual",
+			actualParticipants,
+			actualExpectedCost,
+			actualCostWithDrift,
+			revenuePerParticipant,
+			optionalTipPercent,
+		),
 		"confirm_case": buildScenarioSummary(
 			"Confirm",
 			confirmParticipants,
@@ -2484,6 +2506,12 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		Parameters:  assumptions,
 		Assumptions: assumptions,
 		ScenarioMetrics: map[string]ScenarioMetrics{
+			"actual": {
+				AircraftCost:       actualAircraftDerivedCost,
+				AircraftMinutes:    actualAircraftMinutes,
+				AircraftDistanceKm: actualAircraftDistance,
+				PayableCrewCount:   actualCrewCount,
+			},
 			"confirm_case": {
 				AircraftCost:       confirmAircraftDerivedCost,
 				AircraftMinutes:    confirmAircraftMinutes,
@@ -2518,6 +2546,23 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		Scenarios:             scenarios,
 		MarginCurve:           curve,
 	}, nil
+}
+
+// countActualSkydiverRegistrations returns active event registrations belonging
+// to participants with the Skydiver role. Cancelled and expired registrations
+// are excluded from the actual attendance count.
+func (h *Handler) countActualSkydiverRegistrations(ctx context.Context, eventID int64) (int, error) {
+	var count int
+	err := h.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM event_registrations r
+		JOIN participant_profiles p ON p.id = r.participant_id
+		WHERE r.event_id = $1
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		  AND p.roles @> ARRAY['Skydiver']::TEXT[]
+	`, eventID).Scan(&count)
+	return count, err
 }
 
 func (h *Handler) fetchEventRevenueInputs(ctx context.Context, eventID int64) (depositAmount float64, mainInvoiceAmount float64, currency string, err error) {

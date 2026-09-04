@@ -1,6 +1,6 @@
 import { BudgetSummary } from '../api/budgets';
 
-export type ScenarioKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
+export type ScenarioKey = 'actual' | 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
 
 export type ScenarioBar = {
   key: ScenarioKey;
@@ -63,6 +63,7 @@ export type MarginCurveModel = {
 };
 
 const scenarioSpecs: Array<{ key: ScenarioKey; label: string }> = [
+  { key: 'actual', label: 'Actual' },
   { key: 'confirm_case', label: 'Confirm' },
   { key: 'worst_case_gate', label: 'Worst' },
   { key: 'full_capacity_case', label: 'Full' }
@@ -74,7 +75,8 @@ export const buildScenarioBars = (summary: BudgetSummary | null): ScenarioBar[] 
     .map(({ key, label }) => {
       const raw = summary.scenarios[key];
       if (!raw || typeof raw.participants !== 'number') return null;
-      const dynamicLabel = key === 'worst_case_gate' ? `Worst (${raw.participants} pax)` : label;
+      const dynamicLabel =
+        key === 'actual' || key === 'worst_case_gate' ? `${label} (${raw.participants} pax)` : label;
       return {
         key,
         label: dynamicLabel,
@@ -170,16 +172,8 @@ export const buildMarginCurveModel = (
       : summary?.cost_with_drift || 0;
     return (scenarioCostWithDrift * targetMarkupPercent) / 100;
   });
-  const confirmParticipants = summary?.scenarios?.confirm_case?.participants;
-  const fullParticipants = summary?.scenarios?.full_capacity_case?.participants;
-  const minParticipants = Math.max(
-    0,
-    typeof confirmParticipants === 'number' ? confirmParticipants - 1 : Math.min(...participants)
-  );
-  const maxParticipants = Math.max(
-    minParticipants + 1,
-    typeof fullParticipants === 'number' ? fullParticipants + 1 : Math.max(...participants)
-  );
+  const minParticipants = Math.max(0, Math.min(...participants) - 1);
+  const maxParticipants = Math.max(minParticipants + 1, Math.max(...participants) + 1);
   const allYValues = [...margins, ...targetMargins, 0];
   const yMin = Math.min(...allYValues);
   const yMax = Math.max(...allYValues);

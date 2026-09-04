@@ -69,6 +69,43 @@ func TestGetSummaryIntegration(t *testing.T) {
 	}
 }
 
+func TestGetSummaryCountsActiveSkydiverRegistrationsForActualScenario(t *testing.T) {
+	db := openBudgetTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureBudgetTestSchema(t, ctx, db)
+	seasonID := insertTestSeason(t, ctx, db)
+	eventID := insertTestEvent(t, ctx, db, seasonID, 100, 200)
+	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
+
+	var skydiverID, nonSkydiverID, cancelledSkydiverID int64
+	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Skydiver', 'skydiver@example.test', ARRAY['Participant', 'Skydiver']) RETURNING id`).Scan(&skydiverID); err != nil {
+		t.Fatalf("insert skydiver failed: %v", err)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Participant', 'participant@example.test', ARRAY['Participant']) RETURNING id`).Scan(&nonSkydiverID); err != nil {
+		t.Fatalf("insert participant failed: %v", err)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Cancelled Skydiver', 'cancelled@example.test', ARRAY['Skydiver']) RETURNING id`).Scan(&cancelledSkydiverID); err != nil {
+		t.Fatalf("insert cancelled skydiver failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_registrations (event_id, participant_id) VALUES ($1, $2), ($1, $3), ($1, $4)`, eventID, skydiverID, nonSkydiverID, cancelledSkydiverID); err != nil {
+		t.Fatalf("insert registrations failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE event_registrations SET cancelled_at = NOW() WHERE event_id = $1 AND participant_id = $2`, eventID, cancelledSkydiverID); err != nil {
+		t.Fatalf("cancel registration failed: %v", err)
+	}
+
+	summary, err := NewHandler(db).buildSummary(ctx, budgetID, nil)
+	if err != nil {
+		t.Fatalf("build summary failed: %v", err)
+	}
+	if got := summary.Scenarios["actual"].Participants; got != 1 {
+		t.Fatalf("actual participants mismatch: got %d want 1", got)
+	}
+}
+
 func TestGetSummaryConvertsEventRevenueFromEventCurrency(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
@@ -976,6 +1013,20 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             main_invoice_amount NUMERIC(12,2),
             currency TEXT NOT NULL DEFAULT 'EUR',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE TABLE IF NOT EXISTS participant_profiles (
+            id SERIAL PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            email TEXT NOT NULL UNIQUE,
+            roles TEXT[] NOT NULL DEFAULT ARRAY['Participant']
+        )`,
+		`CREATE TABLE IF NOT EXISTS event_registrations (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'deposit_pending',
+            cancelled_at TIMESTAMPTZ,
+            expired_at TIMESTAMPTZ
         )`,
 		`CREATE TABLE IF NOT EXISTS event_innhopps (
             id SERIAL PRIMARY KEY,

@@ -20,9 +20,9 @@ type LeaderboardEntry = {
   rank: number;
 };
 
-const podiumClass = (rank: number) => {
-  if (rank === 1) return 'leaderboard-podium-card leaderboard-podium-card--gold';
-  if (rank === 2) return 'leaderboard-podium-card leaderboard-podium-card--silver';
+const podiumClass = (position: number) => {
+  if (position === 0) return 'leaderboard-podium-card leaderboard-podium-card--gold';
+  if (position === 1) return 'leaderboard-podium-card leaderboard-podium-card--silver';
   return 'leaderboard-podium-card leaderboard-podium-card--bronze';
 };
 
@@ -193,6 +193,12 @@ const EventLeaderboardPage = () => {
             Participants <span>{allEntries.filter((entry) => !entry.isStaff).length}</span>
           </button>
         </div>
+        <label className="leaderboard-mobile-select">
+          <select value={scope} onChange={(event) => setScope(event.target.value as LeaderboardScope)} aria-label="Leaderboard audience">
+            <option value="all">All ({allEntries.length})</option>
+            <option value="participants">Participants ({allEntries.filter((entry) => !entry.isStaff).length})</option>
+          </select>
+        </label>
         <div className="leaderboard-scope leaderboard-score-mode" role="tablist" aria-label="Scoring method">
           {(['best', 'average', 'total'] as ScoreMode[]).map((mode) => (
             <button key={mode} type="button" role="tab" aria-selected={scoreMode === mode} className={scoreMode === mode ? 'active' : ''} onClick={() => setScoreMode(mode)}>
@@ -200,6 +206,11 @@ const EventLeaderboardPage = () => {
             </button>
           ))}
         </div>
+        <label className="leaderboard-mobile-select leaderboard-mobile-score-select">
+          <select value={scoreMode} onChange={(event) => setScoreMode(event.target.value as ScoreMode)} aria-label="Scoring method">
+            {(['best', 'average', 'total'] as ScoreMode[]).map((mode) => <option key={mode} value={mode}>{scoreModeLabel[mode]}</option>)}
+          </select>
+        </label>
       </div>
 
       {entries.length === 0 ? (
@@ -216,10 +227,10 @@ const EventLeaderboardPage = () => {
                 </ul>
                 <strong>{scoreMode === 'best' ? `${formatDistance(leaders[0].distance)}m` : formatScore(leaders[0])}</strong>
               </article>
-            ) : topEntries.map((entry) => (
-              <article className={podiumClass(entry.rank)} key={entry.id}>
+            ) : topEntries.map((entry, position) => (
+              <article className={podiumClass(position)} key={entry.id}>
                 <span className="leaderboard-score-label">{scoreModeLabel[scoreMode]} distance</span>
-                <p className="leaderboard-podium-rank" aria-label={`Rank ${entry.rank}`}><span className="leaderboard-medal" aria-hidden="true">{entry.rank === 1 ? '♛' : entry.rank === 2 ? '◆' : '●'}</span></p>
+                <p className="leaderboard-podium-rank" aria-label={`Rank ${entry.rank}`}><span className="leaderboard-medal" aria-hidden="true">{position === 0 ? '♛' : position === 1 ? '◆' : '●'}</span></p>
                 <h3>{entry.name}</h3>
                 <strong>{formatScore(entry)}</strong>
               </article>

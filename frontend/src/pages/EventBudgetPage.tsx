@@ -80,17 +80,19 @@ type BudgetSectionKey =
 
 type ParametersTabKey = 'participants' | 'pricing' | 'estimates' | 'currencies';
 type CostSplitTabKey = 'section' | 'innhopp' | 'day';
-type LabelScenarioKey = 'confirm' | 'worst' | 'full';
-type ScenarioSummaryKey = 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
+type LabelScenarioKey = 'actual' | 'confirm' | 'worst' | 'full';
+type ScenarioSummaryKey = 'actual' | 'confirm_case' | 'worst_case_gate' | 'full_capacity_case';
 type OverviewScenarioCardKey = 'expectedCost' | 'costWithDrift' | 'targetRevenue' | 'perParticipant';
 
 const labelScenarioMeta: Record<LabelScenarioKey, { label: string; long: string }> = {
+  actual: { label: 'Actual', long: 'Actual registrations scenario' },
   confirm: { label: 'Confirm', long: 'Confirm scenario' },
   worst: { label: 'Worst', long: 'Worst-case scenario' },
   full: { label: 'Full', long: 'Full-capacity scenario' }
 };
 
 const scenarioSummaryKeyByLabel: Record<LabelScenarioKey, ScenarioSummaryKey> = {
+  actual: 'actual',
   confirm: 'confirm_case',
   worst: 'worst_case_gate',
   full: 'full_capacity_case'
@@ -1400,7 +1402,7 @@ const EventBudgetPage = () => {
           </button>
           {openScenarioMenuFor === card ? (
             <div className="budget-scenario-menu" role="menu" onClick={(e) => e.stopPropagation()}>
-              {(['confirm', 'worst', 'full'] as LabelScenarioKey[]).map((key) => (
+              {(['actual', 'confirm', 'worst', 'full'] as LabelScenarioKey[]).map((key) => (
                 <button
                   key={key}
                   type="button"
@@ -1452,13 +1454,7 @@ const EventBudgetPage = () => {
     const pointerXRatio =
       (pointerX - marginCurve.plotLeft) / (marginCurve.plotRight - marginCurve.plotLeft || 1);
     const pointerParticipants = marginCurve.xMin + pointerXRatio * (marginCurve.xMax - marginCurve.xMin);
-    const confirmParticipants = summary?.scenarios?.confirm_case?.participants;
-    const fullParticipants = summary?.scenarios?.full_capacity_case?.participants;
-    if (
-      typeof confirmParticipants === 'number' &&
-      typeof fullParticipants === 'number' &&
-      (pointerParticipants < confirmParticipants || pointerParticipants > fullParticipants)
-    ) {
+    if (pointerParticipants < marginCurve.xMin || pointerParticipants > marginCurve.xMax) {
       return null;
     }
     const participants = Math.round(pointerParticipants);
@@ -1483,7 +1479,7 @@ const EventBudgetPage = () => {
   ) => {
     const scenarios = summary?.scenarios;
     if (!scenarios) return 0;
-    const points = [scenarios.confirm_case, scenarios.worst_case_gate, scenarios.full_capacity_case]
+    const points = [scenarios.actual, scenarios.confirm_case, scenarios.worst_case_gate, scenarios.full_capacity_case]
       .filter((scenario): scenario is NonNullable<typeof scenario> => Boolean(scenario))
       .map((scenario) => ({
         participants: Number(scenario.participants || 0),
@@ -1706,6 +1702,10 @@ const EventBudgetPage = () => {
                 <div className="budget-kpi-badge-row-spacer budget-kpi-badge-row-spacer-top" aria-hidden="true" />
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
+                    <span className="field-label">Actual</span>
+                    <strong>{formatMoney(summary.scenarios?.actual?.revenue || 0)}</strong>
+                  </div>
+                  <div className="budget-kpi-split-item">
                     <span className="field-label">Confirm</span>
                     <strong>{formatMoney(summary.scenarios?.confirm_case?.revenue || 0)}</strong>
                   </div>
@@ -1724,6 +1724,9 @@ const EventBudgetPage = () => {
                 </span>
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
+                    <strong>{formatMoney(summary.scenarios?.actual?.revenue_with_tip || 0)}</strong>
+                  </div>
+                  <div className="budget-kpi-split-item">
                     <strong>{formatMoney(summary.scenarios?.confirm_case?.revenue_with_tip || 0)}</strong>
                   </div>
                   <div className="budget-kpi-split-item">
@@ -1739,6 +1742,10 @@ const EventBudgetPage = () => {
                 <div className="budget-kpi-badge-row-spacer budget-kpi-badge-row-spacer-top" aria-hidden="true" />
                 <div className="budget-kpi-split">
                   <div className="budget-kpi-split-item">
+                    <span className="field-label">Actual</span>
+                    <strong>{formatMoney(summary.scenarios?.actual?.margin_without_tip || 0)}</strong>
+                  </div>
+                  <div className="budget-kpi-split-item">
                     <span className="field-label">Confirm</span>
                     <strong>{formatMoney(summary.scenarios?.confirm_case?.margin_without_tip || 0)}</strong>
                   </div>
@@ -1752,6 +1759,13 @@ const EventBudgetPage = () => {
                   </div>
                 </div>
                 <div className="budget-kpi-split">
+                  <div className="budget-kpi-split-item">
+                    <span
+                      className={`badge ${(summary.scenarios?.actual?.margin_without_tip || 0) >= 0 ? 'success' : 'danger'}`}
+                    >
+                      {(summary.scenarios?.actual?.margin_without_tip || 0) >= 0 ? 'Green' : 'Red'}
+                    </span>
+                  </div>
                   <div className="budget-kpi-split-item">
                     <span
                       className={`badge ${
@@ -1784,6 +1798,9 @@ const EventBudgetPage = () => {
                   Including tip
                 </span>
                 <div className="budget-kpi-split">
+                  <div className="budget-kpi-split-item">
+                    <strong>{formatMoney(summary.scenarios?.actual?.margin_with_tip || 0)}</strong>
+                  </div>
                   <div className="budget-kpi-split-item">
                     <strong>{formatMoney(summary.scenarios?.confirm_case?.margin_with_tip || 0)}</strong>
                   </div>
@@ -2204,6 +2221,7 @@ const EventBudgetPage = () => {
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setCostSplitScenario(e.target.value as LabelScenarioKey)}
                   >
+                    <option value="actual">Actual</option>
                     <option value="confirm">Confirm</option>
                     <option value="worst">Worst</option>
                     <option value="full">Full</option>
@@ -2746,6 +2764,7 @@ const EventBudgetPage = () => {
                         onClick={(e) => e.stopPropagation()}
                         onChange={(e) => setLineItemsScenario(e.target.value as LabelScenarioKey)}
                       >
+                        <option value="actual">Actual</option>
                         <option value="confirm">Confirm</option>
                         <option value="worst">Worst</option>
                         <option value="full">Full</option>
