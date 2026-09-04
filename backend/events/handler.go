@@ -1284,14 +1284,10 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy airfields")
 		return
 	}
-	aircraftInputs := make([]aircraftInput, 0, len(original.Aircraft))
-	for _, item := range original.Aircraft {
-		aircraftInputs = append(aircraftInputs, aircraftInput{
-			ID:        &item.ID,
-			SortOrder: item.SortOrder,
-		})
-	}
-	if _, err := replaceEventAircraftTx(ctx, tx, created.ID, aircraftInputs); err != nil {
+	// Aircraft are reusable records. Copying an event must only attach the
+	// existing aircraft; upserting an ID-only payload would overwrite the
+	// aircraft's details with zero values.
+	if err := attachExistingAircraftTx(ctx, tx, created.ID, original.Aircraft); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy aircraft attachments")
 		return
 	}
@@ -4461,6 +4457,19 @@ func replaceEventAircraftTx(ctx context.Context, tx pgx.Tx, eventID int64, aircr
 		ids = append(ids, aircraftID)
 	}
 	return ids, nil
+}
+
+func attachExistingAircraftTx(ctx context.Context, tx pgx.Tx, eventID int64, aircraft []Aircraft) error {
+	for _, item := range aircraft {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO event_aircraft (event_id, aircraft_id, sort_order)
+             VALUES ($1, $2, $3)`,
+			eventID, item.ID, item.SortOrder,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func fetchAttachedAircraftIDsTx(ctx context.Context, tx pgx.Tx, eventID int64) (map[int64]struct{}, error) {
