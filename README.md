@@ -72,6 +72,14 @@ Prereqs: Go 1.22+, Node 18+ (or current LTS), npm, and Docker (for local Postgre
 docker run --name innhopp-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=innhopp -p 5432:5432 -d postgres:15
 ```
 
+To overwrite that local database with the production database (requires SSH access
+to `innhopp`), run:
+```bash
+./scripts/refresh-local-db-from-prod.sh
+```
+The script does not print production credentials. Set `KEEP_DUMP=1` if you need to
+retain the temporary, validated dump for troubleshooting.
+
 2) Run the backend:
 ```bash
 cd backend

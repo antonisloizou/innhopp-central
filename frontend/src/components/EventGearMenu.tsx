@@ -6,10 +6,11 @@ import { useAuth } from '../auth/AuthProvider';
 import { canManageEvents, isParticipantOnlySession } from '../auth/access';
 import { exportInnhopp, getEvent, Innhopp, listAccommodations } from '../api/events';
 import { listAirfields } from '../api/airfields';
-import { listGroundCrews, listOthers, listTransports } from '../api/logistics';
+import { listGroundCrews, listMeals, listOthers, listTransports } from '../api/logistics';
 import { parseCoordinates } from '../utils/coordinates';
 import { createDriverSummaryXlsx } from '../utils/driverSummaryExport';
 import { renderSatelliteMapForExport } from '../utils/innhoppExport';
+import { createEventKml } from '../utils/eventKmlExport';
 
 export type EventGearMenuPage =
   | 'schedule'
@@ -65,6 +66,7 @@ const EventGearMenu = ({
   const [open, setOpen] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
   const [driverSummaryExporting, setDriverSummaryExporting] = useState(false);
+  const [kmlExporting, setKmlExporting] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -152,6 +154,29 @@ const EventGearMenu = ({
       window.alert(error instanceof Error ? error.message : 'Failed to export driver summary.');
     } finally {
       setDriverSummaryExporting(false);
+    }
+  };
+
+  const handleKmlExport = async () => {
+    if (kmlExporting) return;
+    setKmlExporting(true);
+    try {
+      const [event, airfields, accommodations, meals, others] = await Promise.all([getEvent(eventId), listAirfields(), listAccommodations(eventId), listMeals(), listOthers()]);
+      const kml = createEventKml({ event, airfields, accommodations, meals, others });
+      if (kml.locationCount === 0) throw new Error('No exportable locations with valid coordinates were found for this event.');
+      const file = new Blob([kml.content], { type: 'application/vnd.google-earth.kml+xml;charset=utf-8' });
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${event.name.replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '') || `event-${event.id}`}.kml`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to export KML.');
+    } finally {
+      setKmlExporting(false);
     }
   };
 
@@ -276,6 +301,19 @@ const EventGearMenu = ({
                       disabled={driverSummaryExporting}
                     >
                       {driverSummaryExporting ? 'Exporting Driver Summary...' : 'Driver Summary'}
+                    </button>
+                    <button
+                      className="event-schedule-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        setExportMenuOpen(false);
+                        void handleKmlExport();
+                      }}
+                      disabled={kmlExporting}
+                    >
+                      {kmlExporting ? 'Exporting KML...' : 'KML (Google Earth)'}
                     </button>
                     <button
                       className="event-schedule-menu-item"
