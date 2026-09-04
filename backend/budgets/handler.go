@@ -2106,7 +2106,7 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 		worstParticipantsInput,
 		fullParticipantsInput,
 	)
-	actualParticipants, err := h.countActualSkydiverRegistrations(ctx, budget.EventID)
+	actualParticipants, err := h.countActualCompletedParticipantRegistrations(ctx, budget.EventID)
 	if err != nil {
 		return BudgetSummary{}, err
 	}
@@ -2548,19 +2548,20 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}, nil
 }
 
-// countActualSkydiverRegistrations returns active event registrations belonging
-// to participants with the Skydiver role. Cancelled and expired registrations
-// are excluded from the actual attendance count.
-func (h *Handler) countActualSkydiverRegistrations(ctx context.Context, eventID int64) (int, error) {
+// countActualCompletedParticipantRegistrations returns the unique, completed
+// registrations that represent accommodation guests. Staff, cancelled, and
+// expired registrations are excluded regardless of the participant's other roles.
+func (h *Handler) countActualCompletedParticipantRegistrations(ctx context.Context, eventID int64) (int, error) {
 	var count int
 	err := h.db.QueryRow(ctx, `
-		SELECT COUNT(*)
+		SELECT COUNT(DISTINCT r.participant_id)
 		FROM event_registrations r
 		JOIN participant_profiles p ON p.id = r.participant_id
 		WHERE r.event_id = $1
+		  AND r.status = 'completed'
 		  AND r.cancelled_at IS NULL
 		  AND r.expired_at IS NULL
-		  AND p.roles @> ARRAY['Skydiver']::TEXT[]
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
 	`, eventID).Scan(&count)
 	return count, err
 }

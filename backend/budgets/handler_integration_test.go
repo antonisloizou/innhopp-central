@@ -69,7 +69,7 @@ func TestGetSummaryIntegration(t *testing.T) {
 	}
 }
 
-func TestGetSummaryCountsActiveSkydiverRegistrationsForActualScenario(t *testing.T) {
+func TestGetSummaryCountsCompletedNonStaffRegistrationsForActualScenario(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
 
@@ -80,20 +80,23 @@ func TestGetSummaryCountsActiveSkydiverRegistrationsForActualScenario(t *testing
 	eventID := insertTestEvent(t, ctx, db, seasonID, 100, 200)
 	budgetID := insertTestBudgetWithOneSection(t, ctx, db, eventID)
 
-	var skydiverID, nonSkydiverID, cancelledSkydiverID int64
+	var skydiverID, nonSkydiverID, staffID, cancelledID int64
 	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Skydiver', 'skydiver@example.test', ARRAY['Participant', 'Skydiver']) RETURNING id`).Scan(&skydiverID); err != nil {
 		t.Fatalf("insert skydiver failed: %v", err)
 	}
 	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Participant', 'participant@example.test', ARRAY['Participant']) RETURNING id`).Scan(&nonSkydiverID); err != nil {
 		t.Fatalf("insert participant failed: %v", err)
 	}
-	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Cancelled Skydiver', 'cancelled@example.test', ARRAY['Skydiver']) RETURNING id`).Scan(&cancelledSkydiverID); err != nil {
-		t.Fatalf("insert cancelled skydiver failed: %v", err)
+	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Staff Skydiver', 'staff@example.test', ARRAY['Participant', 'Skydiver', 'Staff']) RETURNING id`).Scan(&staffID); err != nil {
+		t.Fatalf("insert staff failed: %v", err)
 	}
-	if _, err := db.Exec(ctx, `INSERT INTO event_registrations (event_id, participant_id) VALUES ($1, $2), ($1, $3), ($1, $4)`, eventID, skydiverID, nonSkydiverID, cancelledSkydiverID); err != nil {
+	if err := db.QueryRow(ctx, `INSERT INTO participant_profiles (full_name, email, roles) VALUES ('Cancelled Participant', 'cancelled@example.test', ARRAY['Participant']) RETURNING id`).Scan(&cancelledID); err != nil {
+		t.Fatalf("insert cancelled participant failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_registrations (event_id, participant_id, status) VALUES ($1, $2, 'completed'), ($1, $3, 'completed'), ($1, $4, 'completed'), ($1, $5, 'completed')`, eventID, skydiverID, nonSkydiverID, staffID, cancelledID); err != nil {
 		t.Fatalf("insert registrations failed: %v", err)
 	}
-	if _, err := db.Exec(ctx, `UPDATE event_registrations SET cancelled_at = NOW() WHERE event_id = $1 AND participant_id = $2`, eventID, cancelledSkydiverID); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE event_registrations SET cancelled_at = NOW() WHERE event_id = $1 AND participant_id = $2`, eventID, cancelledID); err != nil {
 		t.Fatalf("cancel registration failed: %v", err)
 	}
 
@@ -101,8 +104,8 @@ func TestGetSummaryCountsActiveSkydiverRegistrationsForActualScenario(t *testing
 	if err != nil {
 		t.Fatalf("build summary failed: %v", err)
 	}
-	if got := summary.Scenarios["actual"].Participants; got != 1 {
-		t.Fatalf("actual participants mismatch: got %d want 1", got)
+	if got := summary.Scenarios["actual"].Participants; got != 2 {
+		t.Fatalf("actual participants mismatch: got %d want 2", got)
 	}
 }
 
