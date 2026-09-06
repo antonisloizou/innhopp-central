@@ -91,6 +91,7 @@ type InnhoppFormRow = {
   distance_by_air?: number;
   distance_by_road?: number;
   single_load_only: boolean;
+  additional_loads: number;
   primary_landing_area: LandingAreaForm;
   secondary_landing_area: LandingAreaForm;
   risk_assessment?: string;
@@ -299,6 +300,7 @@ const normalizeInnhopps = (event: Event): InnhoppFormRow[] => {
     distance_by_air: i.distance_by_air ?? undefined,
     distance_by_road: i.distance_by_road ?? undefined,
     single_load_only: i.single_load_only ?? false,
+    additional_loads: i.additional_loads ?? 0,
     primary_landing_area: toLandingAreaForm(i.primary_landing_area),
     secondary_landing_area: toLandingAreaForm(i.secondary_landing_area),
     risk_assessment: i.risk_assessment || '',
@@ -809,6 +811,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         distance_by_air: copy.distance_by_air ?? undefined,
         distance_by_road: copy.distance_by_road ?? undefined,
         single_load_only: copy.single_load_only ?? false,
+        additional_loads: copy.additional_loads ?? 0,
         primary_landing_area: toLandingAreaForm(copy.primary_landing_area),
         secondary_landing_area: toLandingAreaForm(copy.secondary_landing_area),
         risk_assessment: copy.risk_assessment || '',
@@ -1259,6 +1262,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             distance_by_air: row.distance_by_air,
             distance_by_road: row.distance_by_road,
             single_load_only: row.single_load_only ?? false,
+            additional_loads: Math.max(0, Math.floor(Number(row.additional_loads) || 0)),
             primary_landing_area: toLandingAreaPayload(row.primary_landing_area),
             secondary_landing_area: toLandingAreaPayload(row.secondary_landing_area),
             risk_assessment: row.risk_assessment?.trim(),
@@ -1679,6 +1683,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         distance_by_air: undefined,
         distance_by_road: undefined,
         single_load_only: false,
+        additional_loads: 0,
         primary_landing_area: emptyLandingArea(),
         secondary_landing_area: emptyLandingArea(),
         risk_assessment: '',

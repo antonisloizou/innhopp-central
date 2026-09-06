@@ -176,6 +176,7 @@ const InnhoppDetailPage = () => {
       landing_distance_by_air: undefined,
       landing_distance_by_road: undefined,
       single_load_only: false,
+      additional_loads: 0,
       primary_landing_area: emptyLandingArea(),
       secondary_landing_area: emptyLandingArea(),
       risk_assessment: '',
@@ -412,6 +413,7 @@ const InnhoppDetailPage = () => {
       landing_distance_by_air: target.landing_distance_by_air ?? undefined,
       landing_distance_by_road: target.landing_distance_by_road ?? undefined,
       single_load_only: target.single_load_only ?? false,
+      additional_loads: target.additional_loads ?? 0,
       primary_landing_area: toLandingAreaForm(target.primary_landing_area),
       secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
       risk_assessment: target.risk_assessment || '',
@@ -606,6 +608,7 @@ const InnhoppDetailPage = () => {
         ? state.distance_by_road
         : state.landing_distance_by_road,
       single_load_only: state.single_load_only ?? false,
+      additional_loads: Math.max(0, Math.floor(Number(state.additional_loads) || 0)),
       primary_landing_area: toLandingAreaPayload(state.primary_landing_area),
       secondary_landing_area: toLandingAreaPayload(state.secondary_landing_area),
       risk_assessment: state.risk_assessment?.trim() || '',
@@ -1571,6 +1574,22 @@ const InnhoppDetailPage = () => {
                 />{' '}
                 <span className="innhopp-detail-checkbox-label">Single Load Only</span>
               </span>
+            </label>
+            <label className="form-field form-field-full-span">
+              <span>Additional Loads</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.additional_loads ?? 0}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    additional_loads: Math.max(0, Math.floor(Number(e.target.value) || 0))
+                  }))
+                }
+              />
+              <small className="muted">Adds this many outbound-and-return aircraft trips for passenger loads.</small>
             </label>
           </div>
         <div className="form-actions innhopp-detail-save-actions">

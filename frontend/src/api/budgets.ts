@@ -92,6 +92,7 @@ export type BudgetSummary = {
       aircraft_cost: number;
       aircraft_minutes: number;
       aircraft_distance_km: number;
+      aircraft_by_innhopp?: Record<string, { quantity: number }>;
       payable_crew_count: number;
     }
   >;

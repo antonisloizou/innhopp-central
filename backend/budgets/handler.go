@@ -124,10 +124,15 @@ type BudgetSummary struct {
 }
 
 type ScenarioMetrics struct {
-	AircraftCost       float64 `json:"aircraft_cost"`
-	AircraftMinutes    float64 `json:"aircraft_minutes"`
-	AircraftDistanceKm float64 `json:"aircraft_distance_km"`
-	PayableCrewCount   int     `json:"payable_crew_count"`
+	AircraftCost       float64                          `json:"aircraft_cost"`
+	AircraftMinutes    float64                          `json:"aircraft_minutes"`
+	AircraftDistanceKm float64                          `json:"aircraft_distance_km"`
+	AircraftByInnhopp  map[string]AircraftInnhoppMetric `json:"aircraft_by_innhopp,omitempty"`
+	PayableCrewCount   int                              `json:"payable_crew_count"`
+}
+
+type AircraftInnhoppMetric struct {
+	Quantity float64 `json:"quantity"`
 }
 
 var defaultSections = []struct {
@@ -347,6 +352,7 @@ type eventAircraftInnhopp struct {
 	LandingAirfieldID      int64
 	LandingDistanceByAirKm *float64
 	SingleLoadOnly         bool
+	AdditionalLoads        int
 	AircraftID             *int64
 	AircraftName           string
 	PricingModel           string
@@ -411,14 +417,17 @@ func seatsPerAircraftLoad(capacity int, crewOnLoadCount int) int {
 }
 
 func aircraftLoadCount(item eventAircraftInnhopp, participantCount int) int {
-	if participantCount <= 0 {
-		return 0
+	loadCount := 0
+	if participantCount > 0 {
+		seats := seatsPerAircraftLoad(item.Capacity, item.CrewOnLoadCount)
+		if seats > 0 {
+			loadCount = int(math.Ceil(float64(participantCount) / float64(seats)))
+		}
 	}
-	seats := seatsPerAircraftLoad(item.Capacity, item.CrewOnLoadCount)
-	if seats <= 0 {
-		return 0
+	if item.SingleLoadOnly && loadCount > 0 {
+		loadCount = 1
 	}
-	return int(math.Ceil(float64(participantCount) / float64(seats)))
+	return loadCount + max(item.AdditionalLoads, 0)
 }
 
 func (h *Handler) collectBudgetSummaryCurrencyCodes(ctx context.Context, budgetID int64, eventID int64, estimateCurrencies map[string]string, initial []string) ([]string, error) {
@@ -465,7 +474,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 	rows, err := h.db.Query(
 		ctx,
 		`SELECT i.id, COALESCE(i.sequence, 0), COALESCE(i.name, ''), i.scheduled_at,
-		        i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air, i.single_load_only,
+		        i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air, i.single_load_only, COALESCE(i.additional_loads, 0),
                 i.aircraft_id, COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
                 COALESCE(a.capacity, 14), COALESCE(a.crew_on_load_count, 2), a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
          FROM event_innhopps i
@@ -503,6 +512,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 			&item.LandingAirfieldID,
 			&landingDistanceByAir,
 			&item.SingleLoadOnly,
+			&item.AdditionalLoads,
 			&aircraftID,
 			&item.AircraftName,
 			&item.PricingModel,
@@ -595,9 +605,6 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 
 func computeTimeBasedAircraftMetric(item eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) aircraftComputedMetric {
 	loadCount := aircraftLoadCount(item, participantCount)
-	if item.SingleLoadOnly && loadCount > 0 {
-		loadCount = 1
-	}
 	if loadCount <= 0 {
 		return aircraftComputedMetric{}
 	}
@@ -725,9 +732,6 @@ func computeAircraftScenarioTotalsFromItems(items []eventAircraftInnhopp, partic
 		minutes += metric.AirMinutes
 		distance += metric.AirDistanceKm
 		crewLoads := aircraftLoadCount(item, participantCount)
-		if item.SingleLoadOnly && crewLoads > 0 {
-			crewLoads = 1
-		}
 		crewForInnhopp := crewLoads * max(item.CrewOnLoadCount, 0)
 		if item.ServiceDate != nil {
 			dayKey := item.ServiceDate.UTC().Format("2006-01-02")
@@ -752,6 +756,18 @@ func computeAircraftScenarioTotalsFromItems(items []eventAircraftInnhopp, partic
 	}
 	sort.Strings(currencies)
 	return cost, minutes, distance, crewCount, crewCountByDay, currencies, nil
+}
+
+func computeAircraftInnhoppMetrics(items []eventAircraftInnhopp, participantCount int, liveRates, fallbackRates map[string]float64) map[string]AircraftInnhoppMetric {
+	metrics := make(map[string]AircraftInnhoppMetric, len(items))
+	for _, item := range items {
+		metric := computeAircraftMetric(item, participantCount, liveRates, fallbackRates)
+		if !metric.Valid {
+			continue
+		}
+		metrics[strconv.FormatInt(item.InnhoppID, 10)] = AircraftInnhoppMetric{Quantity: metric.Quantity}
+	}
+	return metrics
 }
 
 func (h *Handler) getBudgetByEvent(w http.ResponseWriter, r *http.Request) {
@@ -2110,6 +2126,10 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if err != nil {
 		return BudgetSummary{}, err
 	}
+	actualSkydiverParticipants, err := h.countActualCompletedSkydiverRegistrations(ctx, budget.EventID)
+	if err != nil {
+		return BudgetSummary{}, err
+	}
 
 	confirmAircraftDerivedCost, confirmAircraftMinutes, confirmAircraftDistance, confirmCrewCount, confirmCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
 		aircraftInnhopps,
@@ -2140,13 +2160,17 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	}
 	actualAircraftDerivedCost, actualAircraftMinutes, actualAircraftDistance, actualCrewCount, actualCrewCountByDay, _, aircraftErr := computeAircraftScenarioTotalsFromItems(
 		aircraftInnhopps,
-		actualParticipants,
+		actualSkydiverParticipants,
 		liveRates,
 		fallbackRates,
 	)
 	if aircraftErr != nil {
 		return BudgetSummary{}, aircraftErr
 	}
+	confirmAircraftByInnhopp := computeAircraftInnhoppMetrics(aircraftInnhopps, confirmParticipants, liveRates, fallbackRates)
+	worstAircraftByInnhopp := computeAircraftInnhoppMetrics(aircraftInnhopps, worstParticipants, liveRates, fallbackRates)
+	fullAircraftByInnhopp := computeAircraftInnhoppMetrics(aircraftInnhopps, fullParticipants, liveRates, fallbackRates)
+	actualAircraftByInnhopp := computeAircraftInnhoppMetrics(aircraftInnhopps, actualSkydiverParticipants, liveRates, fallbackRates)
 	lineRows, err := h.db.Query(
 		ctx,
 		`SELECT section_id, quantity, unit_cost, cost_currency, service_date, COALESCE(notes, '')
@@ -2510,24 +2534,28 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 				AircraftCost:       actualAircraftDerivedCost,
 				AircraftMinutes:    actualAircraftMinutes,
 				AircraftDistanceKm: actualAircraftDistance,
+				AircraftByInnhopp:  actualAircraftByInnhopp,
 				PayableCrewCount:   actualCrewCount,
 			},
 			"confirm_case": {
 				AircraftCost:       confirmAircraftDerivedCost,
 				AircraftMinutes:    confirmAircraftMinutes,
 				AircraftDistanceKm: confirmAircraftDistance,
+				AircraftByInnhopp:  confirmAircraftByInnhopp,
 				PayableCrewCount:   confirmCrewCount,
 			},
 			"worst_case_gate": {
 				AircraftCost:       worstAircraftDerivedCost,
 				AircraftMinutes:    worstAircraftMinutes,
 				AircraftDistanceKm: worstAircraftDistance,
+				AircraftByInnhopp:  worstAircraftByInnhopp,
 				PayableCrewCount:   worstCrewCount,
 			},
 			"full_capacity_case": {
 				AircraftCost:       fullAircraftDerivedCost,
 				AircraftMinutes:    fullAircraftMinutes,
 				AircraftDistanceKm: fullAircraftDistance,
+				AircraftByInnhopp:  fullAircraftByInnhopp,
 				PayableCrewCount:   fullCrewCount,
 			},
 		},
@@ -2562,6 +2590,24 @@ func (h *Handler) countActualCompletedParticipantRegistrations(ctx context.Conte
 		  AND r.cancelled_at IS NULL
 		  AND r.expired_at IS NULL
 		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+	`, eventID).Scan(&count)
+	return count, err
+}
+
+// countActualCompletedSkydiverRegistrations returns the completed, active,
+// non-staff skydivers whose count determines aircraft loads.
+func (h *Handler) countActualCompletedSkydiverRegistrations(ctx context.Context, eventID int64) (int, error) {
+	var count int
+	err := h.db.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT r.participant_id)
+		FROM event_registrations r
+		JOIN participant_profiles p ON p.id = r.participant_id
+		WHERE r.event_id = $1
+		  AND r.status = 'completed'
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		  AND 'Skydiver' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
 	`, eventID).Scan(&count)
 	return count, err
 }

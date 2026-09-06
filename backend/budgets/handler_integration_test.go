@@ -69,7 +69,7 @@ func TestGetSummaryIntegration(t *testing.T) {
 	}
 }
 
-func TestGetSummaryCountsCompletedNonStaffRegistrationsForActualScenario(t *testing.T) {
+func TestGetSummaryUsesSkydiversForActualAircraftLoads(t *testing.T) {
 	db := openBudgetTestDB(t)
 	defer db.Close()
 
@@ -99,6 +99,20 @@ func TestGetSummaryCountsCompletedNonStaffRegistrationsForActualScenario(t *test
 	if _, err := db.Exec(ctx, `UPDATE event_registrations SET cancelled_at = NOW() WHERE event_id = $1 AND participant_id = $2`, eventID, cancelledID); err != nil {
 		t.Fatalf("cancel registration failed: %v", err)
 	}
+	var aircraftID, innhoppID int64
+	if err := db.QueryRow(ctx, `INSERT INTO aircraft (name, pricing_model, rate_currency, capacity, crew_on_load_count, rate_per_minute, cruising_speed_kmh, minimum_load_duration)
+         VALUES ('Skydiver Aircraft', 'time', 'EUR', 5, 1, 1, 150, 15)
+         RETURNING id`).Scan(&aircraftID); err != nil {
+		t.Fatalf("insert aircraft failed: %v", err)
+	}
+	if _, err := db.Exec(ctx, `INSERT INTO event_aircraft (event_id, aircraft_id, sort_order) VALUES ($1, $2, 0)`, eventID, aircraftID); err != nil {
+		t.Fatalf("attach aircraft failed: %v", err)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO event_innhopps (event_id, sequence, name, aircraft_id, takeoff_airfield_id, distance_by_air)
+         VALUES ($1, 1, 'Skydiver Load', $2, 100, 19)
+         RETURNING id`, eventID, aircraftID).Scan(&innhoppID); err != nil {
+		t.Fatalf("insert innhopp failed: %v", err)
+	}
 
 	summary, err := NewHandler(db).buildSummary(ctx, budgetID, nil)
 	if err != nil {
@@ -106,6 +120,14 @@ func TestGetSummaryCountsCompletedNonStaffRegistrationsForActualScenario(t *test
 	}
 	if got := summary.Scenarios["actual"].Participants; got != 2 {
 		t.Fatalf("actual participants mismatch: got %d want 2", got)
+	}
+	if got, err := NewHandler(db).countActualCompletedSkydiverRegistrations(ctx, eventID); err != nil {
+		t.Fatalf("count actual skydivers: %v", err)
+	} else if got != 1 {
+		t.Fatalf("actual skydiver count mismatch: got %d want 1", got)
+	}
+	if got := summary.ScenarioMetrics["actual"].AircraftByInnhopp[strconv.FormatInt(innhoppID, 10)].Quantity; got != 16 {
+		t.Fatalf("actual aircraft quantity mismatch: got %.2f want 16.00", got)
 	}
 }
 
@@ -421,6 +443,34 @@ func TestSyncAutoAircraftLineItemsUsesTakeoffToInnhoppPlusInnhoppToLanding(t *te
 	}
 	if strings.Contains(notes, ":missing-distance") {
 		t.Fatalf("unexpected missing-distance marker in notes: %q", notes)
+	}
+}
+
+func TestComputeTimeBasedAircraftMetricAddsAdditionalRoundTrips(t *testing.T) {
+	distance := 19.0
+	speed := 150.0
+	minimum := 15.0
+	rate := 448.0
+	aircraftID := int64(1)
+	metric := computeTimeBasedAircraftMetric(eventAircraftInnhopp{
+		InnhoppID:           1,
+		AircraftID:          &aircraftID,
+		AircraftName:        "Heli",
+		Capacity:            5,
+		CrewOnLoadCount:     1,
+		TakeoffAirfieldID:   1,
+		DistanceByAirKm:     &distance,
+		AdditionalLoads:     2,
+		CruisingSpeedKmh:    &speed,
+		MinimumLoadDuration: &minimum,
+		RatePerMinute:       &rate,
+		RateCurrency:        "NOK",
+	}, 12, nil, map[string]float64{"NOK": 1})
+
+	// 12 skydivers / 4 passenger seats = 3 loads; plus 2 passenger loads = 5
+	// complete 19km outbound-and-return trips: 190km at 150km/h = 76 minutes.
+	if metric.Quantity != 76 {
+		t.Fatalf("quantity mismatch: got %.2f want 76.00", metric.Quantity)
 	}
 }
 
@@ -1042,7 +1092,8 @@ func ensureBudgetTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool)
             landing_airfield_id INTEGER,
             distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
             landing_distance_by_air NUMERIC(10,2) NOT NULL DEFAULT 0,
-            single_load_only BOOLEAN NOT NULL DEFAULT FALSE
+            single_load_only BOOLEAN NOT NULL DEFAULT FALSE,
+            additional_loads INTEGER NOT NULL DEFAULT 0
         )`,
 		`CREATE TABLE IF NOT EXISTS aircraft (
             id SERIAL PRIMARY KEY,

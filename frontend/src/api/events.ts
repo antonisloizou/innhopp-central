@@ -85,6 +85,7 @@ export interface Innhopp {
   landing_distance_by_air?: number | null;
   landing_distance_by_road?: number | null;
   single_load_only: boolean;
+  additional_loads: number;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string | null;
@@ -262,6 +263,7 @@ export interface InnhoppInput {
   landing_distance_by_air?: number;
   landing_distance_by_road?: number;
   single_load_only?: boolean;
+  additional_loads?: number;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string;
@@ -316,6 +318,7 @@ export interface UpdateInnhoppPayload {
   landing_distance_by_air?: number;
   landing_distance_by_road?: number;
   single_load_only?: boolean;
+  additional_loads?: number;
   primary_landing_area?: LandingArea;
   secondary_landing_area?: LandingArea;
   risk_assessment?: string;

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/innhopp/central/backend/budgets"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/logistics"
@@ -73,6 +74,7 @@ type Innhopp struct {
 	LandingDistanceByAir  *float64       `json:"landing_distance_by_air,omitempty"`
 	LandingDistanceByRoad *float64       `json:"landing_distance_by_road,omitempty"`
 	SingleLoadOnly        bool           `json:"single_load_only"`
+	AdditionalLoads       int            `json:"additional_loads"`
 	PrimaryLandingArea    LandingArea    `json:"primary_landing_area"`
 	SecondaryLandingArea  LandingArea    `json:"secondary_landing_area"`
 	RiskAssessment        string         `json:"risk_assessment,omitempty"`
@@ -137,6 +139,7 @@ type payload struct {
 	LandingDistanceByAir  *float64           `json:"landing_distance_by_air"`
 	LandingDistanceByRoad *float64           `json:"landing_distance_by_road"`
 	SingleLoadOnly        bool               `json:"single_load_only"`
+	AdditionalLoads       int                `json:"additional_loads"`
 	PrimaryLandingArea    landingAreaPayload `json:"primary_landing_area"`
 	SecondaryLandingArea  landingAreaPayload `json:"secondary_landing_area"`
 	RiskAssessment        string             `json:"risk_assessment"`
@@ -314,6 +317,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		&innhopp.LandingDistanceByAir,
 		&innhopp.LandingDistanceByRoad,
 		&singleLoadOnly,
+		&innhopp.AdditionalLoads,
 		&primaryName,
 		&primaryDescription,
 		&primarySize,
@@ -418,7 +422,7 @@ func (h *Handler) getInnhopp(w http.ResponseWriter, r *http.Request) {
 
 	row := h.db.QueryRow(r.Context(),
 		`SELECT id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
+                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only, additional_loads,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
@@ -525,6 +529,10 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		val := *p.LandingDistanceByRoad
 		landingDistanceByRoad = &val
 	}
+	if p.AdditionalLoads < 0 {
+		httpx.Error(w, http.StatusBadRequest, "additional_loads must be zero or positive")
+		return
+	}
 
 	if p.TakeoffAirfieldID != nil && *p.TakeoffAirfieldID <= 0 {
 		httpx.Error(w, http.StatusBadRequest, "takeoff_airfield_id must be positive")
@@ -601,20 +609,20 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		`UPDATE event_innhopps
          SET sequence = $1, name = $2, aircraft_id = CASE WHEN $3 THEN $4 ELSE aircraft_id END, coordinates = $5, takeoff_airfield_id = $6, elevation = $7, scheduled_at = $8, notes = $9,
              reason_for_choice = $10, adjust_altimeter_aad = $11, notam = $12, distance_by_air = $13, distance_by_road = $14,
-             landing_airfield_id = $15, landing_distance_by_air = $16, landing_distance_by_road = $17, single_load_only = $18,
-             primary_landing_area_name = $19, primary_landing_area_description = $20, primary_landing_area_size = $21, primary_landing_area_obstacles = $22,
-             secondary_landing_area_name = $23, secondary_landing_area_description = $24, secondary_landing_area_size = $25, secondary_landing_area_obstacles = $26,
-             risk_assessment = $27, safety_precautions = $28, jumprun = $29, hospital = $30, rescue_boat = $31, minimum_requirements = $32,
-             image_files = COALESCE($33::jsonb, image_files), land_owners = $34::jsonb, land_owner_permission = $35
-         WHERE id = $36
+             landing_airfield_id = $15, landing_distance_by_air = $16, landing_distance_by_road = $17, single_load_only = $18, additional_loads = $19,
+             primary_landing_area_name = $20, primary_landing_area_description = $21, primary_landing_area_size = $22, primary_landing_area_obstacles = $23,
+             secondary_landing_area_name = $24, secondary_landing_area_description = $25, secondary_landing_area_size = $26, secondary_landing_area_obstacles = $27,
+             risk_assessment = $28, safety_precautions = $29, jumprun = $30, hospital = $31, rescue_boat = $32, minimum_requirements = $33,
+             image_files = COALESCE($34::jsonb, image_files), land_owners = $35::jsonb, land_owner_permission = $36
+         WHERE id = $37
          RETURNING id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
+                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only, additional_loads,
                    primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                    secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                    risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                    created_at`,
 		seq, name, aircraftIDSet, aircraftID, coords, p.TakeoffAirfieldID, elevation, scheduled, strings.TrimSpace(p.Notes),
-		reason, adjust, notam, distanceByAir, distanceByRoad, p.LandingAirfieldID, landingDistanceByAir, landingDistanceByRoad, p.SingleLoadOnly,
+		reason, adjust, notam, distanceByAir, distanceByRoad, p.LandingAirfieldID, landingDistanceByAir, landingDistanceByRoad, p.SingleLoadOnly, p.AdditionalLoads,
 		primaryLanding.Name, primaryLanding.Description, primaryLanding.Size, primaryLanding.Obstacles,
 		secondaryLanding.Name, secondaryLanding.Description, secondaryLanding.Size, secondaryLanding.Obstacles,
 		risk, safety, jumprun, hospital, p.RescueBoat, minimum, imageFilesJSONText, ownersJSONText, p.LandOwnerPermission, innhoppID,
@@ -659,6 +667,18 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := logistics.RecalculateRouteDurationsForLocationReference(r.Context(), h.db, "Innhopp", innhopp.ID); err != nil {
 		logUpdateFailure(innhoppID, p, err, "recalculate_route_durations")
+	}
+	var budgetID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT id FROM event_budgets WHERE event_id = $1`, innhopp.EventID).Scan(&budgetID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		logUpdateFailure(innhoppID, p, err, "find_event_budget")
+		httpx.Error(w, http.StatusInternalServerError, "failed to update aircraft budget")
+		return
+	} else if err == nil {
+		if err := budgets.NewHandler(h.db).SyncAutoAircraftLineItems(r.Context(), budgetID); err != nil {
+			logUpdateFailure(innhoppID, p, err, "sync_aircraft_budget")
+			httpx.Error(w, http.StatusInternalServerError, "failed to update aircraft budget")
+			return
+		}
 	}
 
 	h.publishEventUpdate(innhopp.EventID, "innhopp.updated")

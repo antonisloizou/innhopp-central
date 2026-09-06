@@ -1444,6 +1444,7 @@ type innhoppAircraftEstimate struct {
 	DistanceByAirKm      *float64
 	LandingDistanceByAir *float64
 	SingleLoadOnly       bool
+	AdditionalLoads      int
 	TakeoffAirfieldID    int64
 	LandingAirfieldID    int64
 	RatePerMinute        *float64
@@ -1475,6 +1476,7 @@ func computeTimeBasedEstimatedAmount(item innhoppAircraftEstimate, loadCount int
 	if item.SingleLoadOnly && loadCount > 0 {
 		loadCount = 1
 	}
+	loadCount += max(item.AdditionalLoads, 0)
 	if loadCount <= 0 {
 		return 0, "", false
 	}
@@ -1588,7 +1590,7 @@ func (h *Handler) computeInnhoppExpectedCostSuggestion(ctx context.Context, even
 	if err := h.db.QueryRow(
 		ctx,
 		`SELECT COALESCE(i.name, ''), COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
-		        i.distance_by_air, i.landing_distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.single_load_only,
+		        i.distance_by_air, i.landing_distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.single_load_only, COALESCE(i.additional_loads, 0),
                 a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
          FROM event_innhopps i
          LEFT JOIN event_aircraft ea ON ea.event_id = i.event_id AND ea.aircraft_id = i.aircraft_id
@@ -1606,6 +1608,7 @@ func (h *Handler) computeInnhoppExpectedCostSuggestion(ctx context.Context, even
 		&item.TakeoffAirfieldID,
 		&item.LandingAirfieldID,
 		&item.SingleLoadOnly,
+		&item.AdditionalLoads,
 		&ratePerMinute,
 		&cruisingSpeedKmh,
 		&minimumLoadDuration,

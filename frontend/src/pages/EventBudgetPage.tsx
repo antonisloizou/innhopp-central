@@ -914,6 +914,7 @@ const EventBudgetPage = () => {
     const driftScale = expected <= 0 || withDrift <= 0 ? 1 : withDrift / expected;
     return {
       selectedScenario,
+      selectedMetrics,
       aircraftCostScale,
       payableCrewScale,
       participantScale: participantScaleValue,
@@ -1312,9 +1313,22 @@ const EventBudgetPage = () => {
               : 1;
           const paxScale = isFoodAccommodation && isEstimateOrHybridMode ? lineItemsScales.participantScale : 1;
           const scaledQuantity = Number(item.quantity || 0) * loadScale * paxScale;
-          const scenarioQuantity = isAircraft ? Math.ceil(scaledQuantity) : scaledQuantity;
+          const perInnhoppAircraftQuantity =
+            isAircraft &&
+            item.notes?.startsWith(AUTO_AIRCRAFT_LINE_ITEM_PREFIX) &&
+            typeof item.innhopp_id === 'number'
+              ? lineItemsScales.selectedMetrics?.aircraft_by_innhopp?.[String(item.innhopp_id)]?.quantity
+              : undefined;
+          const scenarioQuantity =
+            typeof perInnhoppAircraftQuantity === 'number'
+              ? perInnhoppAircraftQuantity
+              : isAircraft
+                ? Math.ceil(scaledQuantity)
+                : scaledQuantity;
           const scenarioScale = loadScale * paxScale * lineItemsScales.driftScale;
-          const scenarioLineTotal = isAircraft
+          const scenarioLineTotal = typeof perInnhoppAircraftQuantity === 'number'
+            ? scenarioQuantity * Number(item.unit_cost || 0) * lineItemsScales.driftScale
+            : isAircraft
             ? scenarioQuantity * Number(item.unit_cost || 0) * lineItemsScales.driftScale
             : Number(item.line_total || 0) * scenarioScale;
           return {

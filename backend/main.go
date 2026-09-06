@@ -483,6 +483,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     landing_distance_by_air NUMERIC,
     landing_distance_by_road NUMERIC,
     single_load_only BOOLEAN NOT NULL DEFAULT FALSE,
+    additional_loads INTEGER NOT NULL DEFAULT 0 CHECK (additional_loads >= 0),
     primary_landing_area_name TEXT,
     primary_landing_area_description TEXT,
     primary_landing_area_size TEXT,
@@ -517,6 +518,12 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS landing_distance_by_air NUMERIC`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS landing_distance_by_road NUMERIC`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS single_load_only BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS additional_loads INTEGER NOT NULL DEFAULT 0`,
+		`DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_innhopps_additional_loads_nonnegative') THEN
+                ALTER TABLE event_innhopps ADD CONSTRAINT event_innhopps_additional_loads_nonnegative CHECK (additional_loads >= 0);
+            END IF;
+        END $$`,
 		`ALTER TABLE event_innhopps ALTER COLUMN distance_by_air TYPE NUMERIC USING distance_by_air::numeric`,
 		`ALTER TABLE event_innhopps ALTER COLUMN distance_by_road TYPE NUMERIC USING distance_by_road::numeric`,
 		`ALTER TABLE event_innhopps ALTER COLUMN landing_distance_by_air TYPE NUMERIC USING landing_distance_by_air::numeric`,
