@@ -1016,9 +1016,11 @@ const EventBudgetPage = () => {
   };
   const aircraftPerInnhoppRows = useMemo(() => {
     const fallbackAircraftCostCurrency = (baseCurrency || 'EUR').trim().toUpperCase() || 'EUR';
-    const seedRows = (activeEventData?.innhopps || []).map((innhopp) => {
-      const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
-      const label = innhopp.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
+    const seedRows = (activeEventData?.innhopps || [])
+      .filter((innhopp) => typeof innhopp.aircraft_id === 'number' && innhopp.aircraft_id > 0)
+      .map((innhopp) => {
+        const cleanName = (innhopp.name || '').trim() || `Innhopp ${innhopp.id}`;
+        const label = innhopp.sequence && innhopp.sequence > 0 ? `#${innhopp.sequence} ${cleanName}` : cleanName;
         return {
           key: innhopp.id,
           label,
@@ -1042,6 +1044,7 @@ const EventBudgetPage = () => {
       )
       .forEach((item) => {
         const innhopp = innhoppsByID.get(item.innhopp_id);
+        if (!innhopp || typeof innhopp.aircraft_id !== 'number' || innhopp.aircraft_id <= 0) return;
         const existing = byInnhoppID.get(item.innhopp_id);
         const fallbackName = item.description || item.name || `Innhopp ${item.innhopp_id}`;
         const normalizedName = fallbackName.trim().replace(/^#\d+\s+/, '');
@@ -2484,7 +2487,7 @@ const EventBudgetPage = () => {
                   );
                 })()}
               {costSplitTab === 'innhopp' && aircraftPerInnhoppSplit.length === 0 ? (
-                <p className="muted">No innhopps available for aircraft calculation yet.</p>
+                <p className="muted">No innhopps with an assigned aircraft are available for calculation yet.</p>
               ) : null}
               {costSplitTab === 'day' && costSplitByDay.length === 0 ? (
                 <p className="muted">No dated line items available yet.</p>
