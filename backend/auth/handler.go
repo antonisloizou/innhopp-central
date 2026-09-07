@@ -273,7 +273,12 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Roles:     finalRoles,
 		Token:     rawToken,
 	}
-	if redirectURL := h.postLoginRedirectURL(redirectPath); redirectURL != "" {
+	postLoginPath, err := h.postLoginPath(r.Context(), account.ID, redirectPath)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to determine post-login destination")
+		return
+	}
+	if redirectURL := h.postLoginRedirectURL(postLoginPath); redirectURL != "" {
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 		return
 	}
@@ -464,6 +469,56 @@ func (h *Handler) stopImpersonation(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	h.sessions.Clear(w)
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
+}
+
+// postLoginPath preserves an explicitly requested protected route. When there
+// is no requested route, it sends a person assigned to a live event (as either
+// a participant or staff member) straight to that event's schedule.
+func (h *Handler) postLoginPath(ctx context.Context, accountID int64, requestedPath string) (string, error) {
+	if redirectPath := sanitizePostLoginPath(requestedPath); redirectPath != "" {
+		return redirectPath, nil
+	}
+
+	liveEventID, err := h.findLiveEventForAccount(ctx, accountID)
+	if err != nil {
+		return "", err
+	}
+	if liveEventID > 0 {
+		return fmt.Sprintf("/events/%d", liveEventID), nil
+	}
+
+	return defaultPostLoginPath, nil
+}
+
+// findLiveEventForAccount returns the most recently started live event the
+// account is assigned to. event_participants contains both ordinary
+// participants and staff, so no role filter is needed here.
+func (h *Handler) findLiveEventForAccount(ctx context.Context, accountID int64) (int64, error) {
+	if accountID <= 0 {
+		return 0, nil
+	}
+
+	var eventID int64
+	err := h.db.QueryRow(ctx, `
+		SELECT e.id
+		FROM events e
+		JOIN event_participants ep ON ep.event_id = e.id
+		JOIN participant_profiles p ON p.id = ep.participant_id
+		WHERE p.account_id = $1
+		  AND e.status <> 'draft'
+		  AND e.starts_at <= NOW()
+		  AND COALESCE(e.ends_at, e.starts_at) >= NOW()
+		ORDER BY e.starts_at DESC, e.id DESC
+		LIMIT 1
+	`, accountID).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	return eventID, nil
 }
 
 func (h *Handler) postLoginRedirectURL(path string) string {

@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   CreateParticipantPayload,
   ParticipantProfile,
@@ -14,12 +14,14 @@ import ParticipantProfileForm, {
 } from '../components/ParticipantProfileForm';
 import { useAuth } from '../auth/AuthProvider';
 import { formatEventLocalDate } from '../utils/eventDate';
+import ParticipantEventsCard from '../components/ParticipantEventsCard';
 
 const PENDING_PUBLIC_REGISTRATION_KEY = 'innhopp-pending-public-registration';
 
 const MyProfilePage = () => {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<ParticipantProfile | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [form, setForm] = useState<CreateParticipantPayload>(
@@ -230,6 +232,14 @@ const MyProfilePage = () => {
         canEditAdminRole={canUseManagedUpdate}
         canSelfRemoveElevatedRoles={!canUseManagedUpdate}
       />
+      {profile ? (
+        <ParticipantEventsCard
+          participantId={profile.id}
+          participantName={profile.full_name || user?.full_name || 'My score'}
+          useOwnScores
+          onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
+        />
+      ) : null}
     </section>
   );
 };

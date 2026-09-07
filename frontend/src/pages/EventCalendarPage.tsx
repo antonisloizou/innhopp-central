@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canManageEvents } from '../auth/access';
 import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/events';
-import { ParticipantProfile, getMyParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
 import { countVisibleParticipants } from '../utils/eventParticipants';
 import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
@@ -51,7 +51,6 @@ const CALENDAR_CARD_STATE_KEY = 'event-calendar-card-state';
 
 type CalendarCardState = {
   monthOverview: boolean;
-  myEvents: boolean;
   eventCalendar: boolean;
 };
 
@@ -72,7 +71,6 @@ type WeekEventSegment = {
 
 const defaultCardState: CalendarCardState = {
   monthOverview: true,
-  myEvents: true,
   eventCalendar: true
 };
 
@@ -139,11 +137,9 @@ const EventCalendarPage = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showPastMyEvents, setShowPastMyEvents] = useState(false);
   const [showPastEventCalendar, setShowPastEventCalendar] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<string>('');
   const [participants, setParticipants] = useState<ParticipantProfile[]>([]);
-  const [myParticipantProfile, setMyParticipantProfile] = useState<ParticipantProfile | null>(null);
   const [seasonMenuOpen, setSeasonMenuOpen] = useState(false);
   const [deletingSeasonId, setDeletingSeasonId] = useState<number | null>(null);
   const [cardState, setCardState] = useState<CalendarCardState>(defaultCardState);
@@ -189,19 +185,6 @@ const EventCalendarPage = () => {
           }
           await refreshSession();
           await loadCalendarData();
-        }
-
-        try {
-          const myProfileResponse = await getMyParticipantProfile();
-          if (cancelled) return;
-          setMyParticipantProfile(myProfileResponse);
-        } catch (myProfileError) {
-          const status = (myProfileError as Error & { status?: number })?.status;
-          if (!cancelled && (status === 403 || status === 404)) {
-            setMyParticipantProfile(null);
-          } else {
-            throw myProfileError;
-          }
         }
 
         try {
@@ -292,25 +275,6 @@ const EventCalendarPage = () => {
     return false;
   };
 
-  const myEvents = useMemo(
-    () =>
-      events.filter((event) => {
-        if (!myParticipantProfile) return false;
-        return Array.isArray(event.participant_ids) && event.participant_ids.includes(myParticipantProfile.id);
-      }),
-    [events, myParticipantProfile]
-  );
-
-  const visibleMyEvents = useMemo(
-    () => myEvents.filter((event) => showPastMyEvents || !isPastEvent(event)),
-    [myEvents, showPastMyEvents]
-  );
-
-  const pastMyEventsCount = useMemo(
-    () => myEvents.filter((event) => isPastEvent(event)).length,
-    [myEvents]
-  );
-
   const eventCalendarEvents = useMemo(
     () =>
       events.filter((event) => {
@@ -355,31 +319,6 @@ const EventCalendarPage = () => {
         events: [...group].sort(compareEventsChronologically)
       }));
   }, [eventCalendarEvents, seasonLookup]);
-
-  const groupedMyEvents = useMemo(() => {
-    const map = new Map<number, Event[]>();
-    visibleMyEvents.forEach((event) => {
-      const list = map.get(event.season_id) || [];
-      list.push(event);
-      map.set(event.season_id, list);
-    });
-
-    const sortNameAsc = (a: number, b: number) => {
-      const nameA = seasonLookup.get(a)?.name || `Season ${a}`;
-      const nameB = seasonLookup.get(b)?.name || `Season ${b}`;
-      const cmp = nameA.localeCompare(nameB);
-      if (cmp !== 0) return cmp;
-      return a - b;
-    };
-
-    return Array.from(map.entries())
-      .sort(([a], [b]) => sortNameAsc(a, b))
-      .map(([seasonId, group]) => ({
-        seasonId,
-        label: seasonLookup.get(seasonId)?.name || `Season ${seasonId}`,
-        events: [...group].sort(compareEventsChronologically)
-      }));
-  }, [seasonLookup, visibleMyEvents]);
 
   const participantLookup = useMemo(() => {
     const map = new Map<number, ParticipantProfile>();
@@ -648,7 +587,7 @@ const EventCalendarPage = () => {
     <section className="stack">
       <div className="stack">
         <CollapsibleCalendarCard
-          title="Monthly Overview"
+          title="Event Calendar"
           open={cardState.monthOverview}
           onToggle={() => toggleCard('monthOverview')}
           badge={
@@ -755,40 +694,8 @@ const EventCalendarPage = () => {
           </div>
         </CollapsibleCalendarCard>
 
-        {myEvents.length > 0 && (
-          <CollapsibleCalendarCard
-            title="My Events"
-            open={cardState.myEvents}
-            onToggle={() => toggleCard('myEvents')}
-            badge={
-              <span className="badge neutral">
-                {visibleMyEvents.length} {visibleMyEvents.length === 1 ? 'event' : 'events'}
-              </span>
-            }
-            toolbar={
-              <div onClick={(event) => event.stopPropagation()}>
-                <button
-                  className="ghost"
-                  type="button"
-                  onClick={() => setShowPastMyEvents((value) => !value)}
-                >
-                  {showPastMyEvents
-                    ? `Hide past events (${pastMyEventsCount})`
-                    : `Show past events (${pastMyEventsCount})`}
-                </button>
-              </div>
-            }
-          >
-            {visibleMyEvents.length === 0 ? (
-              <p className="muted">No current events in your schedule</p>
-            ) : (
-              renderEventGroups(groupedMyEvents, { showFirstHeading: true })
-            )}
-          </CollapsibleCalendarCard>
-        )}
-
         <CollapsibleCalendarCard
-          title="Event Calendar"
+          title="All Events"
           open={cardState.eventCalendar}
           onToggle={() => toggleCard('eventCalendar')}
           badge={

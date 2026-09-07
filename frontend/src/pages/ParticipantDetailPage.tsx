@@ -13,6 +13,7 @@ import ParticipantProfileForm, {
   toParticipantPayload
 } from '../components/ParticipantProfileForm';
 import { DetailPageLockTitle, useDetailPageLock } from '../components/DetailPageLock';
+import ParticipantEventsCard from '../components/ParticipantEventsCard';
 
 const ParticipantDetailPage = () => {
   const { participantId } = useParams();
@@ -192,6 +193,11 @@ const ParticipantDetailPage = () => {
         roleMode="editable"
         showAdminRoleControl={canManageAccountRoles}
         canEditAdminRole={canManageAccountRoles}
+      />
+      <ParticipantEventsCard
+        participantId={profile.id}
+        participantName={profile.full_name}
+        onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
       />
       {lockNotice}
     </section>

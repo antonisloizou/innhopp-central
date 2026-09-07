@@ -49,6 +49,8 @@ type Profile struct {
 	Phone                 string    `json:"phone,omitempty"`
 	ExperienceLevel       string    `json:"experience_level,omitempty"`
 	EmergencyContact      string    `json:"emergency_contact,omitempty"`
+	EmergencyContactName  string    `json:"emergency_contact_name,omitempty"`
+	EmergencyContactPhone string    `json:"emergency_contact_phone,omitempty"`
 	Whatsapp              string    `json:"whatsapp,omitempty"`
 	Instagram             string    `json:"instagram,omitempty"`
 	Citizenship           string    `json:"citizenship,omitempty"`
@@ -82,6 +84,8 @@ type profilePayload struct {
 	Phone                 string   `json:"phone"`
 	ExperienceLevel       string   `json:"experience_level"`
 	EmergencyContact      string   `json:"emergency_contact"`
+	EmergencyContactName  string   `json:"emergency_contact_name"`
+	EmergencyContactPhone string   `json:"emergency_contact_phone"`
 	Whatsapp              string   `json:"whatsapp"`
 	Instagram             string   `json:"instagram"`
 	Citizenship           string   `json:"citizenship"`
@@ -115,6 +119,8 @@ const profileSelectColumns = `
 	COALESCE(phone, ''),
 	COALESCE(experience_level, ''),
 	COALESCE(emergency_contact, ''),
+	COALESCE(emergency_contact_name, ''),
+	COALESCE(emergency_contact_phone, ''),
 	COALESCE(whatsapp, ''),
 	COALESCE(instagram, ''),
 	COALESCE(citizenship, ''),
@@ -367,6 +373,8 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 		&profile.Phone,
 		&profile.ExperienceLevel,
 		&profile.EmergencyContact,
+		&profile.EmergencyContactName,
+		&profile.EmergencyContactPhone,
 		&profile.Whatsapp,
 		&profile.Instagram,
 		&profile.Citizenship,
@@ -491,6 +499,8 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	payload.Phone = normalizeOptionalString(payload.Phone)
 	payload.ExperienceLevel = normalizeOptionalString(payload.ExperienceLevel)
 	payload.EmergencyContact = normalizeOptionalString(payload.EmergencyContact)
+	payload.EmergencyContactName = normalizeOptionalString(payload.EmergencyContactName)
+	payload.EmergencyContactPhone = normalizeOptionalString(payload.EmergencyContactPhone)
 	payload.Whatsapp = normalizeOptionalString(payload.Whatsapp)
 	payload.Instagram = normalizeOptionalString(payload.Instagram)
 	payload.Citizenship = normalizeOptionalString(payload.Citizenship)
@@ -570,8 +580,8 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, roles := sanitizePayload(&payload, "", "")
-	if fullName == "" || email == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
+	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
+		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
 		return
 	}
 
@@ -606,7 +616,9 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			dietary_restrictions,
 			medical_conditions,
 			medical_expertise,
-			hss_qualities
+			hss_qualities,
+			emergency_contact_name,
+			emergency_contact_phone
 		)
 		VALUES (
 			$1,
@@ -638,7 +650,9 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			$26,
 			$27,
 			$28,
-			$29
+			$29,
+			$30,
+			$31
 		)
 		RETURNING `+profileSelectColumns,
 		fullName,
@@ -670,6 +684,8 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 		payload.MedicalConditions,
 		payload.MedicalExpertise,
 		payload.HSSQualities,
+		payload.EmergencyContactName,
+		payload.EmergencyContactPhone,
 	)
 
 	profile, err := scanProfile(row)
@@ -766,8 +782,8 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, _ := sanitizePayload(&payload, claims.FullName, claims.Email)
-	if fullName == "" || email == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
+	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
+		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
 		return
 	}
 
@@ -830,11 +846,13 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 				dietary_restrictions,
 				medical_conditions,
 				medical_expertise,
-				hss_qualities
+				hss_qualities,
+				emergency_contact_name,
+				emergency_contact_phone
 			)
 			VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-				$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
+				$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32
 			)
 			RETURNING `+profileSelectColumns,
 			fullName,
@@ -867,6 +885,8 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			payload.MedicalConditions,
 			payload.MedicalExpertise,
 			payload.HSSQualities,
+			payload.EmergencyContactName,
+			payload.EmergencyContactPhone,
 		)
 
 		profile, insertErr := scanProfile(row)
@@ -903,7 +923,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		SET
 			full_name = $1,
 			email = $2,
-			account_id = COALESCE($31, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
+			account_id = COALESCE($33, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
 			phone = $3,
 			experience_level = $4,
 			emergency_contact = $5,
@@ -930,8 +950,10 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			dietary_restrictions = $26,
 			medical_conditions = $27,
 			medical_expertise = $28,
-			hss_qualities = $29
-		WHERE id = $30
+			hss_qualities = $29,
+			emergency_contact_name = $30,
+			emergency_contact_phone = $31
+		WHERE id = $32
 	`,
 		fullName,
 		email,
@@ -962,6 +984,8 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		payload.MedicalConditions,
 		payload.MedicalExpertise,
 		payload.HSSQualities,
+		payload.EmergencyContactName,
+		payload.EmergencyContactPhone,
 		existingID,
 		nullableAccountID(claims.AccountID),
 	)
@@ -1012,8 +1036,8 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, roles := sanitizePayload(&payload, "", "")
-	if fullName == "" || email == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
+	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
+		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
 		return
 	}
 
@@ -1049,8 +1073,10 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 			dietary_restrictions = $26,
 			medical_conditions = $27,
 			medical_expertise = $28,
-			hss_qualities = $29
-		WHERE id = $30
+			hss_qualities = $29,
+			emergency_contact_name = $30,
+			emergency_contact_phone = $31
+		WHERE id = $32
 	`,
 		fullName,
 		email,
@@ -1081,6 +1107,8 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		payload.MedicalConditions,
 		payload.MedicalExpertise,
 		payload.HSSQualities,
+		payload.EmergencyContactName,
+		payload.EmergencyContactPhone,
 		profileID,
 	)
 	if execErr != nil {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Event, EventLeaderboardEntry, EventLeaderboardJump, getEvent, getEventLeaderboard, getEventLeaderboardParticipant } from '../api/events';
+import { Event, EventLeaderboardEntry, getEvent, getEventLeaderboard } from '../api/events';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
+import LeaderboardScoreCardOverlay from '../components/LeaderboardScoreCardOverlay';
 
 type LeaderboardScope = 'all' | 'participants';
 type ScoreMode = 'best' | 'average' | 'total';
@@ -62,9 +62,6 @@ const EventLeaderboardPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<LeaderboardEntry | null>(null);
-  const [selectedJumps, setSelectedJumps] = useState<EventLeaderboardJump[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!Number.isInteger(eventId) || eventId <= 0) {
@@ -93,33 +90,6 @@ const EventLeaderboardPage = () => {
     void load();
     return () => { cancelled = true; };
   }, [eventId]);
-
-  useEffect(() => {
-    if (!selectedEntry) return;
-    const scrollY = window.scrollY;
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousBodyPosition = document.body.style.position;
-    const previousBodyTop = document.body.style.top;
-    const previousBodyWidth = document.body.style.width;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    const scrollContainers = Array.from(document.querySelectorAll<HTMLElement>('.app-shell, .app-body, .app-content'));
-    const previousContainerOverflows = scrollContainers.map((element) => element.style.overflow);
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = '100%';
-    document.documentElement.style.overflow = 'hidden';
-    scrollContainers.forEach((element) => { element.style.overflow = 'hidden'; });
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      document.body.style.position = previousBodyPosition;
-      document.body.style.top = previousBodyTop;
-      document.body.style.width = previousBodyWidth;
-      document.documentElement.style.overflow = previousHtmlOverflow;
-      scrollContainers.forEach((element, index) => { element.style.overflow = previousContainerOverflows[index]; });
-      window.scrollTo(0, scrollY);
-    };
-  }, [selectedEntry]);
 
   const allEntries = useMemo(() => {
     if (!event) return [];
@@ -152,27 +122,7 @@ const EventLeaderboardPage = () => {
   const topEntries = entries.slice(0, 3);
   const leaders = entries.filter((entry) => entry.rank === 1);
   const hasLargeFirstPlaceTie = leaders.length >= 3;
-  const selectedScoredJumps = selectedJumps.filter((jump) => jump.distance_meters != null);
-  const selectedStats = selectedScoredJumps.length > 0 ? {
-    best: Math.min(...selectedScoredJumps.map((jump) => jump.distance_meters as number)),
-    average: selectedScoredJumps.reduce((sum, jump) => sum + (jump.distance_meters as number), 0) / selectedScoredJumps.length,
-    worst: Math.max(...selectedScoredJumps.map((jump) => jump.distance_meters as number))
-  } : null;
-
-  const openDetails = async (entry: LeaderboardEntry) => {
-    setSelectedEntry(entry);
-    setSelectedJumps([]);
-    setDetailError(null);
-    setDetailLoading(true);
-    try {
-      const jumps = await getEventLeaderboardParticipant(eventId, entry.id);
-      setSelectedJumps(Array.isArray(jumps) ? jumps : []);
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : 'Failed to load completed jumps.');
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+  const openDetails = (entry: LeaderboardEntry) => setSelectedEntry(entry);
 
   if (loading) return <p className="muted">Loading leaderboard…</p>;
   if (error || !event) return <p className="error-text">{error || 'Event not found.'}</p>;
@@ -242,7 +192,7 @@ const EventLeaderboardPage = () => {
             <ol>
               {entries.map((entry) => (
                 <li key={entry.id}>
-                  <button type="button" className={entry.rank <= 3 ? `leaderboard-row leaderboard-row--top-${entry.rank}` : 'leaderboard-row'} onClick={() => void openDetails(entry)} aria-label={`View ${entry.name}'s completed jumps`}>
+                  <button type="button" className={entry.rank <= 3 ? `leaderboard-row leaderboard-row--top-${entry.rank}` : 'leaderboard-row'} onClick={() => openDetails(entry)} aria-label={`View ${entry.name}'s completed jumps`}>
                     <span className="leaderboard-rank">{entry.rank}</span>
                     <span className="leaderboard-avatar" aria-hidden="true">{entry.name.charAt(0).toUpperCase()}</span>
                     <span className="leaderboard-person"><strong>{entry.name}</strong>{entry.isStaff ? <small>Staff</small> : <small>Participant</small>}</span>
@@ -255,27 +205,7 @@ const EventLeaderboardPage = () => {
         </>
       )}
       <button className="ghost leaderboard-back" type="button" onClick={() => navigate(`/events/${event.id}`)}>Back to event</button>
-      {selectedEntry && typeof document !== 'undefined' ? createPortal(
-        <div className="leaderboard-detail-backdrop" role="presentation" onClick={() => setSelectedEntry(null)}>
-          <section className="card leaderboard-detail-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-detail-title" onClick={(click) => click.stopPropagation()}>
-            <button className="overlay-close-button leaderboard-detail-close" type="button" aria-label="Close jump details" onClick={() => setSelectedEntry(null)}>×</button>
-            <header><p className="leaderboard-eyebrow">Completed Innhopps</p><h3 id="leaderboard-detail-title">{selectedEntry.name}</h3></header>
-            {detailLoading ? <p className="muted">Loading jumps…</p> : detailError ? <p className="error-text">{detailError}</p> : (
-              <>
-                <ol className="leaderboard-jump-list">
-                  {selectedJumps.map((jump) => <li key={jump.innhopp_id}><strong>#{jump.sequence} {jump.name || 'Unnamed Innhopp'}</strong><span>{jump.distance_meters == null ? 'No score recorded' : `${formatDistance(jump.distance_meters)}m`}</span></li>)}
-                </ol>
-                <footer className="leaderboard-detail-stats">
-                  <div><span>Best</span><strong>{selectedStats ? `${formatDistance(selectedStats.best)}m` : '—'}</strong></div>
-                  <div><span>Average</span><strong>{selectedStats ? `${formatDistance(selectedStats.average)}m` : '—'}</strong></div>
-                  <div><span>Worst</span><strong>{selectedStats ? `${formatDistance(selectedStats.worst)}m` : '—'}</strong></div>
-                </footer>
-              </>
-            )}
-          </section>
-        </div>
-        , document.body
-      ) : null}
+      {selectedEntry ? <LeaderboardScoreCardOverlay eventId={eventId} participantId={selectedEntry.id} participantName={selectedEntry.name} onClose={() => setSelectedEntry(null)} /> : null}
     </section>
   );
 };

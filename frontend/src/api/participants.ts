@@ -7,6 +7,8 @@ export interface ParticipantProfile {
   phone?: string;
   experience_level?: string;
   emergency_contact?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
   whatsapp?: string;
   instagram?: string;
   citizenship?: string;
@@ -43,6 +45,8 @@ export interface CreateParticipantPayload {
   phone?: string;
   experience_level?: string;
   emergency_contact?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
   whatsapp?: string;
   instagram?: string;
   citizenship?: string;

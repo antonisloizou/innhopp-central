@@ -107,12 +107,14 @@ const CollapsibleCard = ({
   title,
   children,
   open,
-  onToggle
+  onToggle,
+  hasMissingRequired = false
 }: {
   title: string;
   children: ReactNode;
   open: boolean;
   onToggle: () => void;
+  hasMissingRequired?: boolean;
 }) => (
   <article className="card">
     <header className="card-header participant-profile-card-header" onClick={onToggle}>
@@ -126,7 +128,9 @@ const CollapsibleCard = ({
       >
         {open ? '▾' : '▸'}
       </button>
-      <h3 className="participant-profile-card-title">{title}</h3>
+      <h3 className={`participant-profile-card-title${!open && hasMissingRequired ? ' participant-profile-card-title--missing' : ''}`}>
+        {title}
+      </h3>
     </header>
     {open ? <div className="participant-profile-card-body">{children}</div> : null}
   </article>
@@ -244,6 +248,8 @@ export const createParticipantFormState = (
     phone: profile?.phone ?? seed?.phone ?? '',
     experience_level: profile?.experience_level ?? seed?.experience_level ?? '',
     emergency_contact: profile?.emergency_contact ?? seed?.emergency_contact ?? '',
+    emergency_contact_name: profile?.emergency_contact_name ?? seed?.emergency_contact_name ?? '',
+    emergency_contact_phone: profile?.emergency_contact_phone ?? seed?.emergency_contact_phone ?? '',
     whatsapp: profile?.whatsapp ?? seed?.whatsapp ?? '',
     instagram: profile?.instagram ?? seed?.instagram ?? '',
     citizenship: profile?.citizenship ?? seed?.citizenship ?? '',
@@ -277,6 +283,8 @@ export const toParticipantPayload = (form: CreateParticipantPayload): CreatePart
   phone: form.phone?.trim() || undefined,
   experience_level: form.experience_level?.trim() || undefined,
   emergency_contact: form.emergency_contact?.trim() || undefined,
+  emergency_contact_name: form.emergency_contact_name?.trim() || undefined,
+  emergency_contact_phone: form.emergency_contact_phone?.trim() || undefined,
   whatsapp: form.whatsapp?.trim() || undefined,
   instagram: form.instagram?.trim() || undefined,
   citizenship: form.citizenship?.trim() || undefined,
@@ -316,10 +324,10 @@ const ParticipantProfileForm = ({
   canSelfRemoveElevatedRoles = false
 }: ParticipantProfileFormProps) => {
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
-    basic: true,
-    skydiving: true,
-    medical: true,
-    preferences: true
+    basic: false,
+    skydiving: false,
+    medical: false,
+    preferences: false
   });
   const updateField = <K extends keyof CreateParticipantPayload>(key: K, value: CreateParticipantPayload[K]) => {
     onChange({ ...form, [key]: value });
@@ -349,12 +357,25 @@ const ParticipantProfileForm = ({
     jump_count: !isNonJumper && typeof form.jump_count !== 'number',
     recent_jump_count: !isNonJumper && typeof form.recent_jump_count !== 'number',
     tshirt_size: !hasText(form.tshirt_size),
-    tshirt_gender: !hasText(form.tshirt_gender)
+    tshirt_gender: !hasText(form.tshirt_gender),
+    emergency_contact_name: !hasText(form.emergency_contact_name),
+    emergency_contact_phone: !hasText(form.emergency_contact_phone)
   };
 
   return (
     <form className="stack" onSubmit={onSubmit}>
-      <CollapsibleCard title="Basic info" open={expandedCards.basic} onToggle={() => toggleCard('basic')}>
+      <CollapsibleCard
+        title="Basic info"
+        open={expandedCards.basic}
+        onToggle={() => toggleCard('basic')}
+        hasMissingRequired={
+          missingRequired.full_name ||
+          missingRequired.email ||
+          missingRequired.whatsapp ||
+          missingRequired.tshirt_size ||
+          missingRequired.tshirt_gender
+        }
+      >
         <div className="form-grid participant-profile-grid">
           <label className={`form-field ${missingRequired.full_name ? 'field-missing' : ''}`}>
             <span>Name</span>
@@ -538,7 +559,19 @@ const ParticipantProfileForm = ({
         <CardSaveAction submitting={submitting} saved={saved} error={error} />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Skydiving" open={expandedCards.skydiving} onToggle={() => toggleCard('skydiving')}>
+      <CollapsibleCard
+        title="Skydiving"
+        open={expandedCards.skydiving}
+        onToggle={() => toggleCard('skydiving')}
+        hasMissingRequired={
+          missingRequired.license ||
+          missingRequired.main_canopy ||
+          missingRequired.wingload ||
+          missingRequired.years_in_sport ||
+          missingRequired.jump_count ||
+          missingRequired.recent_jump_count
+        }
+      >
         <div className="form-grid participant-profile-grid">
           <label className={`form-field ${missingRequired.license ? 'field-missing' : ''}`}>
             <span>License</span>
@@ -647,8 +680,36 @@ const ParticipantProfileForm = ({
         <CardSaveAction submitting={submitting} saved={saved} error={error} />
       </CollapsibleCard>
 
-      <CollapsibleCard title="Medical and Safety" open={expandedCards.medical} onToggle={() => toggleCard('medical')}>
+      <CollapsibleCard
+        title="Medical and Safety"
+        open={expandedCards.medical}
+        onToggle={() => toggleCard('medical')}
+        hasMissingRequired={missingRequired.emergency_contact_name || missingRequired.emergency_contact_phone}
+      >
         <div className="form-grid">
+          <div className="form-field participant-profile-full-span">
+            <span>Emergency Contact</span>
+            <div className="form-grid">
+              <label className={`form-field ${missingRequired.emergency_contact_name ? 'field-missing' : ''}`}>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={form.emergency_contact_name || ''}
+                  onChange={(event) => updateField('emergency_contact_name', event.target.value)}
+                  required
+                />
+              </label>
+              <label className={`form-field ${missingRequired.emergency_contact_phone ? 'field-missing' : ''}`}>
+                <span>Phone</span>
+                <input
+                  type="tel"
+                  value={form.emergency_contact_phone || ''}
+                  onChange={(event) => updateField('emergency_contact_phone', event.target.value)}
+                  required
+                />
+              </label>
+            </div>
+          </div>
           <label className="form-field participant-profile-full-span">
             <span>Any Medical or other physical conditions</span>
             <input

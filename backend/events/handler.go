@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/innhopp/central/backend/airfields"
+	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/logistics"
@@ -95,6 +96,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageManifests)).Put("/manifests/{manifestID}", h.updateManifest)
 
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/leaderboard", h.getLeaderboard)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/leaderboard/me", h.getOwnLeaderboardParticipant)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/leaderboard/participants/{participantID}", h.getLeaderboardParticipant)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/stream", h.streamEvent)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}", h.getEvent)
@@ -1883,7 +1885,56 @@ func (h *Handler) getLeaderboardParticipant(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	rows, err := h.db.Query(r.Context(), `
+	jumps, err := h.listLeaderboardJumps(r.Context(), eventID, participantID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, jumps)
+}
+
+func (h *Handler) getOwnLeaderboardParticipant(w http.ResponseWriter, r *http.Request) {
+	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
+	if err != nil || eventID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var participantID int64
+	err = h.db.QueryRow(r.Context(), `
+		SELECT id
+		FROM participant_profiles
+		WHERE ($1 > 0 AND account_id = $1) OR lower(email) = lower($2)
+		ORDER BY CASE WHEN $1 > 0 AND account_id = $1 THEN 0 ELSE 1 END, id ASC
+		LIMIT 1
+	`, claims.AccountID, strings.TrimSpace(claims.Email)).Scan(&participantID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "participant profile not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant profile")
+		return
+	}
+
+	jumps, err := h.listLeaderboardJumps(r.Context(), eventID, participantID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, jumps)
+}
+
+func (h *Handler) listLeaderboardJumps(ctx context.Context, eventID, participantID int64) ([]LeaderboardJump, error) {
+	rows, err := h.db.Query(ctx, `
 		SELECT innhopp.id, innhopp.sequence, innhopp.name, innhopp.scheduled_at, entry.distance_from_target_meters
 		FROM roster_check_ins check_in
 		JOIN roster_check_in_entries entry ON entry.roster_check_in_id = check_in.id
@@ -1896,8 +1947,7 @@ func (h *Handler) getLeaderboardParticipant(w http.ResponseWriter, r *http.Reque
 		ORDER BY innhopp.sequence ASC, innhopp.id ASC
 	`, eventID, participantID)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -1905,17 +1955,15 @@ func (h *Handler) getLeaderboardParticipant(w http.ResponseWriter, r *http.Reque
 	for rows.Next() {
 		var jump LeaderboardJump
 		if err := rows.Scan(&jump.InnhoppID, &jump.Sequence, &jump.Name, &jump.ScheduledAt, &jump.DistanceM); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "failed to parse participant leaderboard details")
-			return
+			return nil, err
 		}
 		jumps = append(jumps, jump)
 	}
 	if err := rows.Err(); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to load participant leaderboard details")
-		return
+		return nil, err
 	}
 
-	httpx.WriteJSON(w, http.StatusOK, jumps)
+	return jumps, nil
 }
 
 func (h *Handler) createManifest(w http.ResponseWriter, r *http.Request) {

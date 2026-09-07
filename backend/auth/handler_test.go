@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -69,5 +70,29 @@ func TestCollectRolesMergesExistingAndParticipantRoles(t *testing.T) {
 
 	if len(want) != 0 {
 		t.Fatalf("collectRoles() missed roles: %v", want)
+	}
+}
+
+func TestPostLoginPathPreservesRequestedRoute(t *testing.T) {
+	h := &Handler{}
+
+	path, err := h.postLoginPath(context.Background(), 42, "/events/9/innhopps/4")
+	if err != nil {
+		t.Fatalf("postLoginPath() returned an error: %v", err)
+	}
+	if path != "/events/9/innhopps/4" {
+		t.Fatalf("postLoginPath() = %q, want requested route", path)
+	}
+}
+
+func TestPostLoginPathFallsBackToEventListWithoutAccount(t *testing.T) {
+	h := &Handler{}
+
+	path, err := h.postLoginPath(context.Background(), 0, "")
+	if err != nil {
+		t.Fatalf("postLoginPath() returned an error: %v", err)
+	}
+	if path != defaultPostLoginPath {
+		t.Fatalf("postLoginPath() = %q, want %q", path, defaultPostLoginPath)
 	}
 }

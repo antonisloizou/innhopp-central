@@ -207,6 +207,8 @@ export interface EventLeaderboardJump {
 }
 export const getEventLeaderboardParticipant = (eventId: number, participantId: number) =>
   apiRequest<EventLeaderboardJump[]>(`/events/${eventId}/leaderboard/participants/${participantId}`);
+export const getMyEventLeaderboardParticipant = (eventId: number) =>
+  apiRequest<EventLeaderboardJump[]>(`/events/${eventId}/leaderboard/me`);
 export const copyEvent = (id: number) =>
   apiRequest<Event>(`/events/${id}/copy`, { method: 'POST' });
 export const deleteEvent = (id: number) =>
