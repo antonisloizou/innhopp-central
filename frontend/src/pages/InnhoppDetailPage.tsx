@@ -1575,7 +1575,7 @@ const InnhoppDetailPage = () => {
                 <span className="innhopp-detail-checkbox-label">Single Load Only</span>
               </span>
             </label>
-            <label className="form-field form-field-full-span">
+            <label className="form-field form-field-full-span innhopp-detail-additional-loads-field">
               <span>Additional Loads</span>
               <input
                 type="number"
@@ -1589,7 +1589,6 @@ const InnhoppDetailPage = () => {
                   }))
                 }
               />
-              <small className="muted">Adds this many outbound-and-return aircraft trips for passenger loads.</small>
             </label>
           </div>
         <div className="form-actions innhopp-detail-save-actions">

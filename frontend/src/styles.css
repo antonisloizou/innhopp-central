@@ -357,6 +357,16 @@ button.ghost {
   margin: 0;
 }
 
+.innhopp-detail-additional-loads-field {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.innhopp-detail-additional-loads-field input[type='number'] {
+  flex: 1 1 auto;
+}
+
 .registration-link-preview {
   grid-column: 1 / -1;
 }
