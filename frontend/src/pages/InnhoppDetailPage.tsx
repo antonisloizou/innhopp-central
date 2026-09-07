@@ -1567,12 +1567,12 @@ const InnhoppDetailPage = () => {
             </div>
             <label className="form-field form-field-full-span innhopp-detail-checkbox-field">
               <span className="innhopp-detail-checkbox-row">
+                <span className="innhopp-detail-checkbox-label">Single Load Only</span>
                 <input
                   type="checkbox"
                   checked={form.single_load_only ?? false}
                   onChange={(e) => setForm((prev) => ({ ...prev, single_load_only: e.target.checked }))}
-                />{' '}
-                <span className="innhopp-detail-checkbox-label">Single Load Only</span>
+                />
               </span>
             </label>
             <label className="form-field form-field-full-span innhopp-detail-additional-loads-field">
