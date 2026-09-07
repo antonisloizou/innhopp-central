@@ -35,6 +35,7 @@ import {
   mergeCurrencyRates,
   normalizeBudgetCurrency
 } from '../utils/budgetCurrency';
+import { parseEventLocal } from '../utils/eventDate';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { useResourceStream } from '../hooks/useResourceStream';
 import {
@@ -103,6 +104,11 @@ const AUTO_AIRCRAFT_SLOT_OVERFLOW_MARKER = ':slot-overflow';
 const AUTO_AIRCRAFT_LINE_ITEM_PREFIX = '[auto-aircraft-innhopp]:';
 const AUTO_ESTIMATE_LINE_ITEM_PREFIX = '[auto-estimate]:';
 const AUTO_ESTIMATE_WARNING_MARKER = ':estimate-generated';
+const isPastEvent = (event: Event) => {
+  if (event.status === 'past') return true;
+  const endsAt = parseEventLocal(event.ends_at) ?? parseEventLocal(event.starts_at);
+  return endsAt ? endsAt.getTime() < Date.now() : false;
+};
 const formatQty = (value: number) => {
   if (!Number.isFinite(value)) return '0';
   if (Number.isInteger(value)) return String(value);
@@ -275,6 +281,14 @@ const EventBudgetPage = () => {
     () => events.find((ev) => ev.id === activeEventID) || null,
     [events, activeEventID]
   );
+  useEffect(() => {
+    const actualScenario = summary?.scenarios?.actual;
+    if (!activeEventData || !isPastEvent(activeEventData) || !actualScenario || actualScenario.participants <= 0) {
+      return;
+    }
+    setCostSplitScenario('actual');
+    setLineItemsScenario('actual');
+  }, [activeEventData, summary?.scenarios?.actual]);
   const baseCurrency = budget?.base_currency || 'EUR';
   const eventCurrency = normalizeBudgetCurrency(activeEventData?.currency, 'EUR');
   const eventRegistrationAmount = useMemo(() => {
