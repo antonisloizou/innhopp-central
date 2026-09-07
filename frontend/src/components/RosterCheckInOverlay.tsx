@@ -90,7 +90,7 @@ const RosterCheckInOverlay = ({ checkIn: initialCheckIn, title, onClose, onUpdat
                     inputMode="numeric"
                     defaultValue={entry.distance_from_target_meters ?? ''}
                     disabled={savingPerson === entry.participant_id}
-                    placeholder="0"
+                    placeholder="-"
                     onBlur={(event) => {
                       const raw = event.target.value.trim();
                       if (!raw) return;
