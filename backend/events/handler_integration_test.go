@@ -129,6 +129,48 @@ func TestReplaceEventInnhoppsTxDoesNotDeleteOmittedInnhopps(t *testing.T) {
 	}
 }
 
+func TestCreateInnhoppPersistsAdditionalLoads(t *testing.T) {
+	db := openEventTestDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureEventTestSchema(t, ctx, db)
+
+	seasonID := insertEventTestSeason(t, ctx, db)
+	eventID := insertEventTestEvent(t, ctx, db, seasonID)
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Post("/api/events/{eventID}/innhopps", h.createInnhopp)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/"+strconv.FormatInt(eventID, 10)+"/innhopps", bytes.NewBufferString(`{
+		"sequence": 1,
+		"name": "Blåžejov",
+		"additional_loads": 3
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create status mismatch: got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var created Innhopp
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created innhopp: %v", err)
+	}
+	if created.AdditionalLoads != 3 {
+		t.Fatalf("expected response additional_loads 3, got %d", created.AdditionalLoads)
+	}
+	var persisted int
+	if err := db.QueryRow(ctx, "SELECT additional_loads FROM event_innhopps WHERE id = $1", created.ID).Scan(&persisted); err != nil {
+		t.Fatalf("load persisted additional_loads: %v", err)
+	}
+	if persisted != 3 {
+		t.Fatalf("expected persisted additional_loads 3, got %d", persisted)
+	}
+}
+
 func TestUpdateAirfieldRecalculatesDependentInnhoppAirDistances(t *testing.T) {
 	db := openEventTestDB(t)
 	defer db.Close()

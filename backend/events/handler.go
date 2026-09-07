@@ -3815,7 +3815,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
             $11, $12, $13, $14, $15, $16, $17, $18,
             $19, $20, $21, $22,
             $23, $24, $25, $26,
-            $27, $28, $29, $30, $31, $32, $33::jsonb, $34::jsonb, $35
+            $27, $28, $29, $30, $31, $32, $33, $34::jsonb, $35::jsonb, $36
         )
         RETURNING id, event_id, sequence, name, coordinates, aircraft_id, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only, additional_loads,
@@ -3825,6 +3825,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
                   created_at`,
 		eventID, in.Sequence, in.Name, in.Coordinates, in.AircraftID, in.TakeoffAirfieldID, in.LandingAirfieldID, in.Elevation, in.ScheduledAt, strings.TrimSpace(payload.Notes),
 		in.ReasonForChoice, in.AdjustAltimeterAAD, in.Notam, in.DistanceByAir, in.DistanceByRoad, in.LandingDistanceByAir, in.LandingDistanceByRoad, in.SingleLoadOnly,
+		in.AdditionalLoads,
 		in.PrimaryLandingArea.Name, in.PrimaryLandingArea.Description, in.PrimaryLandingArea.Size, in.PrimaryLandingArea.Obstacles,
 		in.SecondaryLandingArea.Name, in.SecondaryLandingArea.Description, in.SecondaryLandingArea.Size, in.SecondaryLandingArea.Obstacles,
 		in.RiskAssessment, in.SafetyPrecautions, in.Jumprun, in.Hospital, in.RescueBoat, in.MinimumRequirements, string(imageFilesJSON), string(ownersJSON), in.LandOwnerPermission,
@@ -3881,6 +3882,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		&landingAir,
 		&landingRoad,
 		&singleLoadOnly,
+		&created.AdditionalLoads,
 		&primaryName,
 		&primaryDescription,
 		&primarySize,
@@ -3900,6 +3902,7 @@ func (h *Handler) createInnhopp(w http.ResponseWriter, r *http.Request) {
 		&landOwnerPermission,
 		&created.CreatedAt,
 	); err != nil {
+		log.Printf("events.createInnhopp event_id=%d sequence=%d name=%q failed: %v", eventID, in.Sequence, in.Name, err)
 		httpx.Error(w, http.StatusInternalServerError, "failed to create innhopp")
 		return
 	}
