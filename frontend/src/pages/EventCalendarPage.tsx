@@ -559,12 +559,12 @@ const EventCalendarPage = () => {
                             <dd>{formatDate(event.ends_at)}</dd>
                           </div>
                           <div>
-                            <dt>Participants</dt>
-                            <dd>{countVisibleParticipants(event.participant_ids, participantLookup, event.participant_count)}</dd>
-                          </div>
-                          <div>
                             <dt>INNHOPPS</dt>
                             <dd>{getInnhoppSequenceCount(event.innhopps)}</dd>
+                          </div>
+                          <div>
+                            <dt>Participants</dt>
+                            <dd>{countVisibleParticipants(event.participant_ids, participantLookup, event.participant_count)}</dd>
                           </div>
                           <div>
                             <dt>Slots</dt>
