@@ -936,7 +936,6 @@ const EventBudgetPage = () => {
     };
   };
   const costSplitScales = getScenarioScales(costSplitScenario);
-  const selectedCostSplitScenario = costSplitScales.selectedScenario;
   const aircraftCostScale = costSplitScales.aircraftCostScale;
   const payableCrewScale = costSplitScales.payableCrewScale;
   const participantScale = costSplitScales.participantScale;
@@ -1071,8 +1070,11 @@ const EventBudgetPage = () => {
         );
         if (existing) {
           existing.minutes += Number(item.quantity || 0);
+          existing.unitCost = Number(item.unit_cost || 0);
           existing.totalCost += Number(item.line_total || 0);
           existing.displayTotalCost += converted;
+          existing.costCurrency =
+            (item.cost_currency || fallbackAircraftCostCurrency).trim().toUpperCase() || fallbackAircraftCostCurrency;
           existing.hasMissingDistanceWarning =
             existing.hasMissingDistanceWarning || warningMessageForNotes(item.notes) !== null;
           return;
@@ -1096,24 +1098,24 @@ const EventBudgetPage = () => {
     );
   }, [lineItems, innhoppsByID, activeEventData?.innhopps, baseCurrency, effectiveDisplayCurrency, liveRates]);
   const aircraftPerInnhoppSplit = useMemo(() => {
-    const scaledRows = aircraftPerInnhoppRows.map((row) => ({
-      ...row,
-      displayTotalCost: row.displayTotalCost * aircraftCostScale
-    }));
-    const aircraftSectionBaseTotal =
-      summary?.section_totals?.find((section) => (section.code || '').trim().toLowerCase() === 'aircraft')?.total || 0;
-    const aircraftSectionScenarioTotal = convertBaseAmountToDisplayCurrency(
-      aircraftSectionBaseTotal * aircraftCostScale * scenarioDriftScale
-    );
-    const rawTotal = scaledRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
-    const normalizeRatio = rawTotal > 0 ? aircraftSectionScenarioTotal / rawTotal : 1;
-    const normalizedRows =
-      costSplitMode === 'amount'
-        ? scaledRows.map((row) => ({
-            ...row,
-            displayTotalCost: row.displayTotalCost * normalizeRatio
-          }))
-        : scaledRows;
+    const selectedAircraftMetrics = costSplitScales.selectedMetrics?.aircraft_by_innhopp || {};
+    const normalizedRows = aircraftPerInnhoppRows.map((row) => {
+      const scenarioQuantity = selectedAircraftMetrics[String(row.key)]?.quantity;
+      if (!Number.isFinite(scenarioQuantity)) {
+        return {
+          ...row,
+          displayTotalCost: row.displayTotalCost * aircraftCostScale
+        };
+      }
+
+      const minutes = Number(scenarioQuantity);
+      const costInSourceCurrency = minutes * row.unitCost;
+      return {
+        ...row,
+        minutes,
+        displayTotalCost: convertAmountToDisplayCurrency(costInSourceCurrency, row.costCurrency) * scenarioDriftScale
+      };
+    });
     const total = normalizedRows.reduce((acc, row) => acc + row.displayTotalCost, 0);
     const max = normalizedRows.reduce((acc, row) => Math.max(acc, row.displayTotalCost), 0);
     return normalizedRows.map((row) => {
@@ -1124,7 +1126,7 @@ const EventBudgetPage = () => {
         barPct: max > 0 ? (row.displayTotalCost / max) * 100 : 0
       };
     });
-  }, [aircraftPerInnhoppRows, aircraftCostScale, costSplitMode, summary?.section_totals, scenarioDriftScale]);
+  }, [aircraftPerInnhoppRows, aircraftCostScale, costSplitScales.selectedMetrics, scenarioDriftScale, baseCurrency, effectiveDisplayCurrency, liveRates]);
   const costSplitByDay = useMemo(() => {
     const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const monthNames = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
