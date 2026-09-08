@@ -41,6 +41,7 @@ export type ScheduleEntry = {
   innhoppRisk?: string | null;
   innhoppMinimumRequirements?: string | null;
   innhoppRescueBoat?: boolean | null;
+  innhoppFerryFlight?: boolean;
   transportRouteOrigin?: string | null;
   transportRouteDestination?: string | null;
   routeDurationLabel?: string;

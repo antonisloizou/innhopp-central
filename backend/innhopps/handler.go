@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/innhopp/central/backend/auth"
 	"github.com/innhopp/central/backend/budgets"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
@@ -73,7 +74,7 @@ type Innhopp struct {
 	DistanceByRoad        *float64       `json:"distance_by_road,omitempty"`
 	LandingDistanceByAir  *float64       `json:"landing_distance_by_air,omitempty"`
 	LandingDistanceByRoad *float64       `json:"landing_distance_by_road,omitempty"`
-	SingleLoadOnly        bool           `json:"single_load_only"`
+	FerryFlight           bool           `json:"ferry_flight"`
 	AdditionalLoads       int            `json:"additional_loads"`
 	PrimaryLandingArea    LandingArea    `json:"primary_landing_area"`
 	SecondaryLandingArea  LandingArea    `json:"secondary_landing_area"`
@@ -138,7 +139,7 @@ type payload struct {
 	DistanceByRoad        *float64           `json:"distance_by_road"`
 	LandingDistanceByAir  *float64           `json:"landing_distance_by_air"`
 	LandingDistanceByRoad *float64           `json:"landing_distance_by_road"`
-	SingleLoadOnly        bool               `json:"single_load_only"`
+	FerryFlight           bool               `json:"ferry_flight"`
 	AdditionalLoads       int                `json:"additional_loads"`
 	PrimaryLandingArea    landingAreaPayload `json:"primary_landing_area"`
 	SecondaryLandingArea  landingAreaPayload `json:"secondary_landing_area"`
@@ -276,7 +277,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 	var distanceByRoad sql.NullFloat64
 	var rescueBoat sql.NullBool
 	var landOwnerPermission sql.NullBool
-	var singleLoadOnly bool
+	var ferryFlight bool
 	var coords sql.NullString
 	var reason sql.NullString
 	var adjust sql.NullString
@@ -316,7 +317,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		&distanceByRoad,
 		&innhopp.LandingDistanceByAir,
 		&innhopp.LandingDistanceByRoad,
-		&singleLoadOnly,
+		&ferryFlight,
 		&innhopp.AdditionalLoads,
 		&primaryName,
 		&primaryDescription,
@@ -356,7 +357,7 @@ func scanInnhopp(row pgx.Row) (Innhopp, error) {
 		val := distanceByRoad.Float64
 		innhopp.DistanceByRoad = &val
 	}
-	innhopp.SingleLoadOnly = singleLoadOnly
+	innhopp.FerryFlight = ferryFlight
 
 	innhopp.Coordinates = coords.String
 	innhopp.ReasonForChoice = reason.String
@@ -422,7 +423,7 @@ func (h *Handler) getInnhopp(w http.ResponseWriter, r *http.Request) {
 
 	row := h.db.QueryRow(r.Context(),
 		`SELECT id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only, additional_loads,
+                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, ferry_flight, additional_loads,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
@@ -440,8 +441,25 @@ func (h *Handler) getInnhopp(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to load innhopp")
 		return
 	}
+	if innhopp.FerryFlight && isParticipantOnlySession(r) {
+		httpx.Error(w, http.StatusNotFound, "innhopp not found")
+		return
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, innhopp)
+}
+
+func isParticipantOnlySession(r *http.Request) bool {
+	claims := auth.FromContext(r.Context())
+	if claims == nil || len(claims.Roles) == 0 {
+		return false
+	}
+	for _, role := range claims.Roles {
+		if !strings.EqualFold(role, string(rbac.RoleParticipant)) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
@@ -609,20 +627,20 @@ func (h *Handler) updateInnhopp(w http.ResponseWriter, r *http.Request) {
 		`UPDATE event_innhopps
          SET sequence = $1, name = $2, aircraft_id = CASE WHEN $3 THEN $4 ELSE aircraft_id END, coordinates = $5, takeoff_airfield_id = $6, elevation = $7, scheduled_at = $8, notes = $9,
              reason_for_choice = $10, adjust_altimeter_aad = $11, notam = $12, distance_by_air = $13, distance_by_road = $14,
-             landing_airfield_id = $15, landing_distance_by_air = $16, landing_distance_by_road = $17, single_load_only = $18, additional_loads = $19,
+             landing_airfield_id = $15, landing_distance_by_air = $16, landing_distance_by_road = $17, ferry_flight = $18, additional_loads = $19,
              primary_landing_area_name = $20, primary_landing_area_description = $21, primary_landing_area_size = $22, primary_landing_area_obstacles = $23,
              secondary_landing_area_name = $24, secondary_landing_area_description = $25, secondary_landing_area_size = $26, secondary_landing_area_obstacles = $27,
              risk_assessment = $28, safety_precautions = $29, jumprun = $30, hospital = $31, rescue_boat = $32, minimum_requirements = $33,
              image_files = COALESCE($34::jsonb, image_files), land_owners = $35::jsonb, land_owner_permission = $36
          WHERE id = $37
          RETURNING id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only, additional_loads,
+                   reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, ferry_flight, additional_loads,
                    primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                    secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                    risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission,
                    created_at`,
 		seq, name, aircraftIDSet, aircraftID, coords, p.TakeoffAirfieldID, elevation, scheduled, strings.TrimSpace(p.Notes),
-		reason, adjust, notam, distanceByAir, distanceByRoad, p.LandingAirfieldID, landingDistanceByAir, landingDistanceByRoad, p.SingleLoadOnly, p.AdditionalLoads,
+		reason, adjust, notam, distanceByAir, distanceByRoad, p.LandingAirfieldID, landingDistanceByAir, landingDistanceByRoad, p.FerryFlight, p.AdditionalLoads,
 		primaryLanding.Name, primaryLanding.Description, primaryLanding.Size, primaryLanding.Obstacles,
 		secondaryLanding.Name, secondaryLanding.Description, secondaryLanding.Size, secondaryLanding.Obstacles,
 		risk, safety, jumprun, hospital, p.RescueBoat, minimum, imageFilesJSONText, ownersJSONText, p.LandOwnerPermission, innhoppID,

@@ -1,6 +1,9 @@
 package budgets
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestScenarioParticipantCounts(t *testing.T) {
 	confirm, worst, full := scenarioParticipantCounts(12, 13, 24)
@@ -60,4 +63,41 @@ func TestScenarioStatusAndMarginDeficit(t *testing.T) {
 	if got := marginDeficit(10); got != 0 {
 		t.Fatalf("margin deficit mismatch: got %.2f want 0", got)
 	}
+}
+
+func TestComputeAircraftScenarioTotalsExcludesFerryFlightsFromPayableCrew(t *testing.T) {
+	serviceDate := time.Date(2026, time.August, 30, 0, 0, 0, 0, time.UTC)
+	items := []eventAircraftInnhopp{
+		{
+			InnhoppName:      "Ferry Flight",
+			ServiceDate:      &serviceDate,
+			FerryFlight:      true,
+			Capacity:         5,
+			CrewOnLoadCount:  1,
+			AircraftName:     "Helicopter",
+			PricingModel:     "time",
+			RatePerMinute:    float64Ptr(100),
+			CruisingSpeedKmh: float64Ptr(100),
+		},
+	}
+
+	_, _, _, crewCount, crewByDay, _, err := computeAircraftScenarioTotalsFromItems(
+		items,
+		19,
+		map[string]float64{"EUR": 1},
+		map[string]float64{"EUR": 1},
+	)
+	if err != nil {
+		t.Fatalf("compute totals: %v", err)
+	}
+	if crewCount != 0 {
+		t.Fatalf("payable crew count = %d, want 0", crewCount)
+	}
+	if crewByDay[serviceDate.Format("2006-01-02")] != 0 {
+		t.Fatalf("daily payable crew count = %d, want 0", crewByDay[serviceDate.Format("2006-01-02")])
+	}
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
 }

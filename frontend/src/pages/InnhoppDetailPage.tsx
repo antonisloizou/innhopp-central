@@ -175,7 +175,7 @@ const InnhoppDetailPage = () => {
       distance_by_road: undefined,
       landing_distance_by_air: undefined,
       landing_distance_by_road: undefined,
-      single_load_only: false,
+      ferry_flight: false,
       additional_loads: 0,
       primary_landing_area: emptyLandingArea(),
       secondary_landing_area: emptyLandingArea(),
@@ -406,7 +406,7 @@ const InnhoppDetailPage = () => {
       distance_by_road: target.distance_by_road ?? undefined,
       landing_distance_by_air: target.landing_distance_by_air ?? undefined,
       landing_distance_by_road: target.landing_distance_by_road ?? undefined,
-      single_load_only: target.single_load_only ?? false,
+      ferry_flight: target.ferry_flight ?? false,
       additional_loads: target.additional_loads ?? 0,
       primary_landing_area: toLandingAreaForm(target.primary_landing_area),
       secondary_landing_area: toLandingAreaForm(target.secondary_landing_area),
@@ -485,6 +485,7 @@ const InnhoppDetailPage = () => {
         } else {
           const copy = (location.state as any)?.copyInnhopp as Innhopp | undefined;
           const initialScheduledAt = (location.state as any)?.initialScheduledAt as string | undefined;
+          const initialFerryFlight = (location.state as any)?.initialFerryFlight === true;
 
           if (eventId) {
             try {
@@ -516,6 +517,9 @@ const InnhoppDetailPage = () => {
               date.setUTCHours(9, 0, 0, 0);
               nextForm = { ...nextForm, scheduled_at: date.toISOString() };
             }
+          }
+          if (initialFerryFlight) {
+            nextForm = { ...nextForm, ferry_flight: true };
           }
         }
 
@@ -601,7 +605,7 @@ const InnhoppDetailPage = () => {
       landing_distance_by_road: sameLandingAsTakeoff
         ? state.distance_by_road
         : state.landing_distance_by_road,
-      single_load_only: state.single_load_only ?? false,
+      ferry_flight: state.ferry_flight ?? false,
       additional_loads: Math.max(0, Math.floor(Number(state.additional_loads) || 0)),
       primary_landing_area: toLandingAreaPayload(state.primary_landing_area),
       secondary_landing_area: toLandingAreaPayload(state.secondary_landing_area),
@@ -1561,11 +1565,11 @@ const InnhoppDetailPage = () => {
             </div>
             <label className="form-field form-field-full-span innhopp-detail-checkbox-field">
               <span className="innhopp-detail-checkbox-row">
-                <span className="innhopp-detail-checkbox-label">Single Load Only</span>
+                <span className="innhopp-detail-checkbox-label">Ferry Flight</span>
                 <input
                   type="checkbox"
-                  checked={form.single_load_only ?? false}
-                  onChange={(e) => setForm((prev) => ({ ...prev, single_load_only: e.target.checked }))}
+                  checked={form.ferry_flight ?? false}
+                  onChange={(e) => setForm((prev) => ({ ...prev, ferry_flight: e.target.checked }))}
                 />
               </span>
             </label>
@@ -1592,6 +1596,7 @@ const InnhoppDetailPage = () => {
         </div>
       </article>
 
+        {!form.ferry_flight ? (
         <article className="card">
           <div className="form-field form-field-full-span innhopp-detail-gallery-title">
             <span>Image gallery</span>
@@ -1812,6 +1817,7 @@ const InnhoppDetailPage = () => {
             </button>
           </div>
         </article>
+        ) : null}
 
         <article className="card">
           <div className="form-grid">
@@ -2280,6 +2286,7 @@ const InnhoppDetailPage = () => {
           </div>
         </article>
 
+        {!form.ferry_flight ? (
         <article className="card">
           <div className="form-grid innhopp-landing-grid innhopp-detail-auto-grid">
             <div className="form-field form-field-full-span">
@@ -2407,7 +2414,9 @@ const InnhoppDetailPage = () => {
             </button>
           </div>
         </article>
+        ) : null}
 
+        {!form.ferry_flight ? (
         <article className="card">
           <div className="form-grid">
             <label className={`form-field ${missingRequired.hospital ? 'field-missing' : ''}`}>
@@ -2503,7 +2512,9 @@ const InnhoppDetailPage = () => {
             </button>
           </div>
         </article>
+        ) : null}
 
+        {!form.ferry_flight ? (
         <article className="card">
           <div className="form-grid">
             <label className="form-field notes-field">
@@ -2522,6 +2533,7 @@ const InnhoppDetailPage = () => {
             </div>
           </div>
         </article>
+        ) : null}
       </form>
       {!isCreateMode && eventId && innhoppId ? (
         <DetailCostCard

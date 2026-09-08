@@ -999,7 +999,7 @@ const EventSchedulePage = () => {
   const buildOrderedEntriesForDay = useCallback(
     (day: DayBucket): Entry[] => {
       const entries: ScheduleEntry[] = [];
-      day.innhopps.forEach((i) => {
+      day.innhopps.filter((i) => !participantOnly || !i.ferry_flight).forEach((i) => {
         const takeoff = airfields.find((af) => af.id === i.takeoff_airfield_id);
         const landing = airfields.find((af) => af.id === i.landing_airfield_id);
         const aircraft = i.aircraft_id ? aircraftByID.get(i.aircraft_id) || null : null;
@@ -1052,6 +1052,7 @@ const EventSchedulePage = () => {
           innhoppRisk: i.risk_assessment || null,
           innhoppMinimumRequirements: i.minimum_requirements || null,
           innhoppRescueBoat: i.rescue_boat ?? null,
+          innhoppFerryFlight: i.ferry_flight ?? false,
           routeDurationLabel: flightDurationLabel,
           scheduledAt: i.scheduled_at
         });
@@ -1929,6 +1930,16 @@ const EventSchedulePage = () => {
     }
   };
 
+  const openCreateFerryFlightFromDayMenu = (dayKey: string) => {
+    if (!eventId) return;
+    navigate(`/events/${eventId}/innhopps/new`, {
+      state: {
+        initialScheduledAt: dayKeyToScheduledAt(dayKey),
+        initialFerryFlight: true
+      }
+    });
+  };
+
   const loadImportSource = async (sourceEventId: string, selectedItemId?: string) => {
     setImportSourceEventId(sourceEventId);
     setImportSourceEvent(null);
@@ -2271,6 +2282,18 @@ const EventSchedulePage = () => {
                         onClick={(e) => {
                           e.stopPropagation();
                           setDayAddMenuOpenKey(null);
+                          openCreateFerryFlightFromDayMenu(day.key);
+                        }}
+                      >
+                        Add Ferry Flight
+                      </button>
+                      <button
+                        type="button"
+                        className="event-schedule-menu-item"
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDayAddMenuOpenKey(null);
                           setImportDayKey(day.key);
                           setImportType('Innhopp');
                           setImportSourceEventId('');
@@ -2313,6 +2336,9 @@ const EventSchedulePage = () => {
               };
 
               const renderEntry = (entry: Entry) => {
+                const isFerryFlight = entry.type === 'Innhopp' && entry.innhoppFerryFlight === true;
+                const typeBadgeLabel = isFerryFlight ? 'FERRY' : entry.type;
+                const typeBadgeClassName = `${typeBadgeClassNames[entry.type]}${isFerryFlight ? ' schedule-type-badge--ferry' : ''}`;
                 const missingCoords = !!entry.missingCoordinates;
                 const rosterItemType = rosterItemTypeForEntry(entry);
                 const rosterItemID = rosterItemIDForEntry(entry);
@@ -2402,10 +2428,10 @@ const EventSchedulePage = () => {
                         {!participantOnly &&
                           (statusBadge || <span className="badge schedule-status-badge schedule-status-badge-placeholder">!</span>)}
                         <span
-                          className={`badge ${typeBadgeClassNames[entry.type]}`}
-                          aria-label={entry.type}
+                          className={`badge ${typeBadgeClassName}`}
+                          aria-label={typeBadgeLabel}
                         >
-                          {entry.type}
+                          {typeBadgeLabel}
                         </span>
                       </div>
                     </div>
@@ -2491,6 +2517,8 @@ const EventSchedulePage = () => {
               ) : (
                 <ul className="status-list schedule-list event-schedule-list">
                   {orderedEntries.map((item, idx) => {
+                    const isFerryFlight = item.type === 'Innhopp' && item.innhoppFerryFlight === true;
+                    const typeBadgeLabel = isFerryFlight ? 'FERRY' : item.type;
                     const isHighlighted = item.id === highlightId;
                     const isTimeEditing = timePicker?.entry.id === item.id;
                     const isReady = getEntryReadiness(item);
@@ -2545,11 +2573,11 @@ const EventSchedulePage = () => {
                           </div>
                           <div className="event-schedule-mobile-badges">
                             <span
-                              className={`badge ${typeBadgeClassNames[item.type]} event-schedule-mobile-type-badge`}
-                              aria-label={item.type}
-                              title={item.type}
+                              className={`badge ${typeBadgeClassNames[item.type]}${isFerryFlight ? ' schedule-type-badge--ferry' : ''} event-schedule-mobile-type-badge`}
+                              aria-label={typeBadgeLabel}
+                              title={typeBadgeLabel}
                             >
-                              <span className="material-symbols-outlined" aria-hidden="true">{mobileTypeGlyphs[item.type]}</span>
+                              {isFerryFlight ? 'FERRY' : <span className="material-symbols-outlined" aria-hidden="true">{mobileTypeGlyphs[item.type]}</span>}
                             </span>
                             {!participantOnly ? (
                               <span

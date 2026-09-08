@@ -5818,6 +5818,13 @@ button.ghost.event-route-preview-overlay-button {
     1px 1px 0 rgba(0, 0, 0, 0.45);
 }
 
+.schedule-type-badge--ferry {
+  background-color: #74c69d;
+  color: #fff;
+  text-shadow: -1px -1px 0 rgba(0, 0, 0, 0.45), 1px -1px 0 rgba(0, 0, 0, 0.45), -1px 1px 0 rgba(0, 0, 0, 0.45),
+    1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+
 .schedule-type-badge--transport {
   background-color: #e6b84a;
   color: #fff;

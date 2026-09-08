@@ -351,7 +351,7 @@ type eventAircraftInnhopp struct {
 	TakeoffAirfieldID      int64
 	LandingAirfieldID      int64
 	LandingDistanceByAirKm *float64
-	SingleLoadOnly         bool
+	FerryFlight            bool
 	AdditionalLoads        int
 	AircraftID             *int64
 	AircraftName           string
@@ -424,7 +424,7 @@ func aircraftLoadCount(item eventAircraftInnhopp, participantCount int) int {
 			loadCount = int(math.Ceil(float64(participantCount) / float64(seats)))
 		}
 	}
-	if item.SingleLoadOnly && loadCount > 0 {
+	if item.FerryFlight && loadCount > 0 {
 		loadCount = 1
 	}
 	return loadCount + max(item.AdditionalLoads, 0)
@@ -474,7 +474,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 	rows, err := h.db.Query(
 		ctx,
 		`SELECT i.id, COALESCE(i.sequence, 0), COALESCE(i.name, ''), i.scheduled_at,
-		        i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air, i.single_load_only, COALESCE(i.additional_loads, 0),
+		        i.distance_by_air, COALESCE(i.takeoff_airfield_id, 0), COALESCE(i.landing_airfield_id, 0), i.landing_distance_by_air, i.ferry_flight, COALESCE(i.additional_loads, 0),
                 i.aircraft_id, COALESCE(a.name, ''), COALESCE(a.pricing_model, ''), COALESCE(a.rate_currency, 'EUR'),
                 COALESCE(a.capacity, 14), COALESCE(a.crew_on_load_count, 2), a.rate_per_minute, a.cruising_speed_kmh, a.minimum_load_duration, a.price_per_slot
          FROM event_innhopps i
@@ -511,7 +511,7 @@ func (h *Handler) fetchAircraftInnhopps(ctx context.Context, eventID int64) ([]e
 			&item.TakeoffAirfieldID,
 			&item.LandingAirfieldID,
 			&landingDistanceByAir,
-			&item.SingleLoadOnly,
+			&item.FerryFlight,
 			&item.AdditionalLoads,
 			&aircraftID,
 			&item.AircraftName,
@@ -731,8 +731,12 @@ func computeAircraftScenarioTotalsFromItems(items []eventAircraftInnhopp, partic
 		cost += metric.BaseCost
 		minutes += metric.AirMinutes
 		distance += metric.AirDistanceKm
-		crewLoads := aircraftLoadCount(item, participantCount)
-		crewForInnhopp := crewLoads * max(item.CrewOnLoadCount, 0)
+		// A ferry flight uses the aircraft but does not require event-payable crew.
+		crewForInnhopp := 0
+		if !item.FerryFlight {
+			crewLoads := aircraftLoadCount(item, participantCount)
+			crewForInnhopp = crewLoads * max(item.CrewOnLoadCount, 0)
+		}
 		if item.ServiceDate != nil {
 			dayKey := item.ServiceDate.UTC().Format("2006-01-02")
 			if crewForInnhopp > crewCountByDay[dayKey] {

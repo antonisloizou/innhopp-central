@@ -486,7 +486,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     distance_by_road NUMERIC,
     landing_distance_by_air NUMERIC,
     landing_distance_by_road NUMERIC,
-    single_load_only BOOLEAN NOT NULL DEFAULT FALSE,
+    ferry_flight BOOLEAN NOT NULL DEFAULT FALSE,
     additional_loads INTEGER NOT NULL DEFAULT 0 CHECK (additional_loads >= 0),
     primary_landing_area_name TEXT,
     primary_landing_area_description TEXT,
@@ -521,7 +521,26 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS distance_by_road NUMERIC`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS landing_distance_by_air NUMERIC`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS landing_distance_by_road NUMERIC`,
-		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS single_load_only BOOLEAN NOT NULL DEFAULT FALSE`,
+		`DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'event_innhopps' AND column_name = 'single_load_only'
+            ) THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'event_innhopps' AND column_name = 'ferry_flight'
+                ) THEN
+                    ALTER TABLE event_innhopps RENAME COLUMN single_load_only TO ferry_flight;
+                ELSE
+                    UPDATE event_innhopps
+                    SET ferry_flight = TRUE
+                    WHERE single_load_only = TRUE;
+                    ALTER TABLE event_innhopps DROP COLUMN single_load_only;
+                END IF;
+            END IF;
+        END $$`,
+		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS ferry_flight BOOLEAN NOT NULL DEFAULT FALSE`,
 		`ALTER TABLE event_innhopps ADD COLUMN IF NOT EXISTS additional_loads INTEGER NOT NULL DEFAULT 0`,
 		`DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'event_innhopps_additional_loads_nonnegative') THEN

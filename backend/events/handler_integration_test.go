@@ -363,7 +363,7 @@ func ensureEventTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 			distance_by_road NUMERIC,
 			landing_distance_by_air NUMERIC,
 			landing_distance_by_road NUMERIC,
-			single_load_only BOOLEAN NOT NULL DEFAULT FALSE,
+			ferry_flight BOOLEAN NOT NULL DEFAULT FALSE,
 			additional_loads INTEGER NOT NULL DEFAULT 0,
 			primary_landing_area_name TEXT NOT NULL DEFAULT '',
 			primary_landing_area_description TEXT NOT NULL DEFAULT '',

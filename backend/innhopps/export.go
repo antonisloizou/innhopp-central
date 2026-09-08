@@ -52,7 +52,7 @@ func (h *Handler) exportInnhopp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRow(r.Context(), `SELECT id, event_id, sequence, name, aircraft_id, coordinates, takeoff_airfield_id, landing_airfield_id, elevation, scheduled_at, notes,
-                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, single_load_only,
+                reason_for_choice, adjust_altimeter_aad, notam, distance_by_air, distance_by_road, landing_distance_by_air, landing_distance_by_road, ferry_flight,
                 primary_landing_area_name, primary_landing_area_description, primary_landing_area_size, primary_landing_area_obstacles,
                 secondary_landing_area_name, secondary_landing_area_description, secondary_landing_area_size, secondary_landing_area_obstacles,
                 risk_assessment, safety_precautions, jumprun, hospital, rescue_boat, minimum_requirements, image_files, land_owners, land_owner_permission, created_at
