@@ -916,24 +916,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     }
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadEvents = async () => {
-      try {
-        const resp = await listEvents();
-        if (!cancelled && Array.isArray(resp)) {
-          setAllEvents(resp);
-        }
-      } catch {
-        // ignore event list errors for dropdown grouping
-      }
-    };
-    loadEvents();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleCreateOtherInline = async () => {
     if (!eventId) return;
     if (!otherForm.name.trim() || !otherForm.coordinates.trim()) return;
@@ -959,6 +941,20 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       setMessage(err instanceof Error ? err.message : 'Failed to create entry');
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    void listEvents()
+      .then((events) => {
+        if (!cancelled && Array.isArray(events)) setAllEvents(events);
+      })
+      .catch(() => {
+        // The airfield selector remains usable from the event's attached airfields.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1156,31 +1152,27 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
   const availableAirfields = airfields.filter((a) => !airfieldIds.includes(a.id));
   const groupedTakeoffAirfields = useMemo(() => {
-    const groups = new Map<string, { label: string; options: { key: string; value: number; label: string }[] }>();
-    airfields.forEach((af) => {
-      const relatedEvents = allEvents.filter((ev) => Array.isArray(ev.airfield_ids) && ev.airfield_ids.includes(af.id));
-      const locations = relatedEvents.length
-        ? [...new Set(relatedEvents.map((ev) => ev.location || 'Location TBD'))]
-        : ['Unassigned location'];
-      locations.forEach((loc) => {
-        const label = loc || 'Location TBD';
-        if (!groups.has(label)) {
-          groups.set(label, { label, options: [] });
-        }
-        groups.get(label)!.options.push({
-          key: `${af.id}-${label}`,
-          value: af.id,
-          label: `${af.name}${af.elevation != null ? ` (${af.elevation} m)` : ''}`
-        });
-      });
-    });
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        options: group.options.sort((a, b) => a.label.localeCompare(b.label, 'nb'))
+    const eventLocation = (eventForm.location || eventData?.location || '').trim();
+    const eventAirfieldIDs = new Set(airfieldIds);
+    const options = airfields
+      .filter((airfield) => {
+        if (!eventLocation) return eventAirfieldIDs.has(airfield.id);
+        return allEvents.some(
+          (event) =>
+            event.location?.trim() === eventLocation &&
+            Array.isArray(event.airfield_ids) &&
+            event.airfield_ids.includes(airfield.id)
+        );
+      })
+      .map((airfield) => ({
+        key: String(airfield.id),
+        value: airfield.id,
+        label: `${airfield.name}${airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}`
       }))
       .sort((a, b) => a.label.localeCompare(b.label, 'nb'));
-  }, [airfields, allEvents]);
+
+    return options.length ? [{ label: eventLocation || 'This event', options }] : [];
+  }, [airfields, airfieldIds, allEvents, eventData?.location, eventForm.location]);
 
   useEffect(() => {
     if (saved && currentSignature !== lastSavedSignature) {
@@ -2895,17 +2887,13 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
             >
               <option value="">Choose an airfield</option>
               <option value="__new__">Create new airfield…</option>
-              {groupedTakeoffAirfields.map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.options
-                    .filter((opt) => availableAirfields.some((af) => af.id === opt.value))
-                    .map((opt) => (
-                      <option key={opt.key} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
+              {availableAirfields
+                .sort((a, b) => a.name.localeCompare(b.name, 'nb'))
+                .map((airfield) => (
+                  <option key={airfield.id} value={airfield.id}>
+                    {airfield.name}{airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}
+                  </option>
+                ))}
             </select>
           </label>
           <div className="form-actions event-detail-inline-actions">

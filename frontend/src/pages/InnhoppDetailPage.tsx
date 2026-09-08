@@ -302,33 +302,27 @@ const InnhoppDetailPage = () => {
     return takeoffElevation - form.elevation;
   }, [form.elevation, form.takeoff_airfield_id, airfields]);
   const groupedTakeoffAirfields = useMemo(() => {
-    const groups = new Map<string, { label: string; options: { key: string; value: number; label: string }[] }>();
-    airfields.forEach((airfield) => {
-      const relatedEvents = allEvents.filter(
-        (evt) => Array.isArray(evt.airfield_ids) && evt.airfield_ids.includes(airfield.id)
-      );
-      const locations = relatedEvents.length
-        ? [...new Set(relatedEvents.map((evt) => evt.location || 'Location TBD'))]
-        : ['Unassigned location'];
-      locations.forEach((locationLabel) => {
-        const label = locationLabel || 'Location TBD';
-        if (!groups.has(label)) {
-          groups.set(label, { label, options: [] });
-        }
-        groups.get(label)!.options.push({
-          key: `${airfield.id}-${label}`,
-          value: airfield.id,
-          label: `${airfield.name}${airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}`
-        });
-      });
-    });
-    return Array.from(groups.values())
-      .map((group) => ({
-        ...group,
-        options: group.options.sort((a, b) => a.label.localeCompare(b.label, 'nb'))
+    const eventLocation = eventData?.location?.trim();
+    const eventAirfieldIDs = new Set(eventData?.airfield_ids || []);
+    const options = airfields
+      .filter((airfield) => {
+        if (!eventLocation) return eventAirfieldIDs.has(airfield.id);
+        return allEvents.some(
+          (event) =>
+            event.location?.trim() === eventLocation &&
+            Array.isArray(event.airfield_ids) &&
+            event.airfield_ids.includes(airfield.id)
+        );
+      })
+      .map((airfield) => ({
+        key: String(airfield.id),
+        value: airfield.id,
+        label: `${airfield.name}${airfield.elevation != null ? ` (${airfield.elevation} m)` : ''}`
       }))
       .sort((a, b) => a.label.localeCompare(b.label, 'nb'));
-  }, [airfields, allEvents]);
+
+    return options.length ? [{ label: eventLocation || 'This event', options }] : [];
+  }, [airfields, allEvents, eventData?.airfield_ids, eventData?.location]);
 
   const galleryImages = useMemo(
     () =>
@@ -431,9 +425,9 @@ const InnhoppDetailPage = () => {
 
   const loadAirfieldContext = useCallback(async () => {
     try {
-      const [airfieldData, eventData] = await Promise.all([listAirfields(), listEvents()]);
+      const [airfieldData, events] = await Promise.all([listAirfields(), listEvents()]);
       setAirfields(Array.isArray(airfieldData) ? airfieldData : []);
-      setAllEvents(Array.isArray(eventData) ? eventData : []);
+      setAllEvents(Array.isArray(events) ? events : []);
     } catch {
       // ignore load errors
     }
