@@ -490,9 +490,8 @@ func (h *Handler) postLoginPath(ctx context.Context, accountID int64, requestedP
 	return defaultPostLoginPath, nil
 }
 
-// findLiveEventForAccount returns the most recently started live event the
-// account is assigned to. event_participants contains both ordinary
-// participants and staff, so no role filter is needed here.
+// findLiveEventForAccount returns the most recently started live event with
+// an active registration for the account's participant profile.
 func (h *Handler) findLiveEventForAccount(ctx context.Context, accountID int64) (int64, error) {
 	if accountID <= 0 {
 		return 0, nil
@@ -502,9 +501,11 @@ func (h *Handler) findLiveEventForAccount(ctx context.Context, accountID int64) 
 	err := h.db.QueryRow(ctx, `
 		SELECT e.id
 		FROM events e
-		JOIN event_participants ep ON ep.event_id = e.id
-		JOIN participant_profiles p ON p.id = ep.participant_id
+		JOIN event_registrations r ON r.event_id = e.id
+		JOIN participant_profiles p ON p.id = r.participant_id
 		WHERE p.account_id = $1
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
 		  AND e.status <> 'draft'
 		  AND e.starts_at <= NOW()
 		  AND COALESCE(e.ends_at, e.starts_at) >= NOW()

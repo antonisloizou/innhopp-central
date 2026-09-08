@@ -825,11 +825,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := replaceEventParticipantsTx(ctx, tx, event.ID, participantIDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
-		return
-	}
-	if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, event.ID, participantIDs, "event_roster"); err != nil {
+	if err := registrations.SyncEventRosterToRegistrationsTx(ctx, tx, event.ID, participantIDs, "event_roster"); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync registrations")
 		return
 	}
@@ -1087,11 +1083,7 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if replaceParticipants {
-		if err := replaceEventParticipantsTx(ctx, tx, eventID, participantIDs); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "failed to save participants")
-			return
-		}
-		if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, eventID, participantIDs, "event_roster"); err != nil {
+		if err := registrations.SyncEventRosterToRegistrationsTx(ctx, tx, eventID, participantIDs, "event_roster"); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to sync registrations")
 			return
 		}
@@ -1307,11 +1299,7 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := replaceEventParticipantsTx(ctx, tx, created.ID, original.ParticipantIDs); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to copy participants")
-		return
-	}
-	if err := registrations.SyncEventParticipantsToRegistrationsTx(ctx, tx, created.ID, original.ParticipantIDs, "event_roster"); err != nil {
+	if err := registrations.SyncEventRosterToRegistrationsTx(ctx, tx, created.ID, original.ParticipantIDs, "event_roster"); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy registrations")
 		return
 	}
@@ -2688,11 +2676,13 @@ func (h *Handler) fetchParticipantsForEvents(ctx context.Context, eventIDs []int
 	result := make(map[int64][]int64, len(eventIDs))
 	participantCounts := make(map[int64]int, len(eventIDs))
 	rows, err := h.db.Query(ctx,
-		`SELECT ep.event_id, ep.participant_id, p.roles
-		 FROM event_participants ep
-		 JOIN participant_profiles p ON p.id = ep.participant_id
-		 WHERE ep.event_id = ANY($1)
-		 ORDER BY ep.event_id, ep.participant_id`,
+		`SELECT r.event_id, r.participant_id, p.roles
+		 FROM event_registrations r
+		 JOIN participant_profiles p ON p.id = r.participant_id
+		 WHERE r.event_id = ANY($1)
+		   AND r.cancelled_at IS NULL
+		   AND r.expired_at IS NULL
+		 ORDER BY r.event_id, r.participant_id`,
 		eventIDs,
 	)
 	if err != nil {
@@ -4419,29 +4409,6 @@ func normalizeAircraftPayloads(raw []aircraftPayload) ([]aircraftInput, error) {
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func replaceEventParticipantsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM event_participants WHERE event_id = $1`, eventID); err != nil {
-		return err
-	}
-	if len(participantIDs) == 0 {
-		return nil
-	}
-
-	batch := &pgx.Batch{}
-	for _, participantID := range participantIDs {
-		batch.Queue(`INSERT INTO event_participants (event_id, participant_id) VALUES ($1, $2)`, eventID, participantID)
-	}
-
-	br := tx.SendBatch(ctx, batch)
-	defer br.Close()
-	for range participantIDs {
-		if _, err := br.Exec(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func replaceEventAirfieldsTx(ctx context.Context, tx pgx.Tx, eventID int64, airfieldIDs []int64) error {

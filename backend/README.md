@@ -46,7 +46,7 @@ On startup the server creates these tables if they do not already exist:
 - `seasons` – defines the operational season calendar.
 - `events` – jump events linked to a season with start/end timestamps.
 - `events` also store commercial registration settings such as public slugs, registration windows, payment deadlines, pricing, currency, and deposit thresholds.
-- `event_participants` – associations between events and participant profiles.
+- `event_registrations` – the event attendee roster and its commercial registration lifecycle.
 - `event_innhopps` – ordered jump sequences planned within an event.
 - `manifests` – scheduled aircraft loads for an event.
 - `participant_profiles` – canonical roster of all flyers and staff.

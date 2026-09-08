@@ -205,9 +205,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO roster_check_in_entries (roster_check_in_id,participant_id,participant_name_snapshot,roles_snapshot,is_present,distance_from_target_meters,updated_at)
         SELECT $1,p.id,p.full_name,p.roles,COALESCE(old.is_present,FALSE),CASE WHEN $2='innhopp' THEN old.distance_from_target_meters ELSE NULL END,NOW()
-        FROM event_participants ep JOIN participant_profiles p ON p.id=ep.participant_id
-        LEFT JOIN roster_check_in_entries old ON old.roster_check_in_id=$3 AND old.participant_id=p.id
-        WHERE ep.event_id=$4 AND ($2 <> 'innhopp' OR p.roles @> ARRAY['Skydiver']::TEXT[])
+		FROM event_registrations r JOIN participant_profiles p ON p.id=r.participant_id
+		LEFT JOIN roster_check_in_entries old ON old.roster_check_in_id=$3 AND old.participant_id=p.id
+		WHERE r.event_id=$4 AND r.cancelled_at IS NULL AND r.expired_at IS NULL AND ($2 <> 'innhopp' OR p.roles @> ARRAY['Skydiver']::TEXT[])
         ORDER BY p.full_name,p.id`, id, typ, previousID, eventID)
 	if err != nil {
 		httpx.Error(w, 500, "failed to snapshot roster")

@@ -593,26 +593,6 @@ func activeRegistrationExists(ctx context.Context, q interface {
 	return existingID > 0, nil
 }
 
-func registrationExists(ctx context.Context, q interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}, eventID, participantID int64) (bool, error) {
-	var existingID int64
-	err := q.QueryRow(ctx, `
-		SELECT id
-		FROM event_registrations
-		WHERE event_id = $1
-		  AND participant_id = $2
-		LIMIT 1
-	`, eventID, participantID).Scan(&existingID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return existingID > 0, nil
-}
-
 func loadRegistrationEventSettings(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, eventID int64) (*registrationEventSettings, error) {
@@ -643,15 +623,6 @@ func loadRegistrationEventSettings(ctx context.Context, q interface {
 		event.Currency = "EUR"
 	}
 	return &event, nil
-}
-
-func ensureEventParticipantTx(ctx context.Context, tx pgx.Tx, eventID, participantID int64) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO event_participants (event_id, participant_id)
-		VALUES ($1, $2)
-		ON CONFLICT (event_id, participant_id) DO NOTHING
-	`, eventID, participantID)
-	return err
 }
 
 func registrationStatusFromEventSettings(event *registrationEventSettings) string {
@@ -690,7 +661,11 @@ func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID i
 	if strings.TrimSpace(event.DepositAmount) != "" && event.DepositAmount != "0" && event.DepositAmount != "0.00" {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
-			VALUES ($1, 'deposit', $2::numeric, $3, 'pending', $4, $5)
+			SELECT $1, 'deposit', $2::numeric, $3, 'pending', $4, $5
+			WHERE NOT EXISTS (
+				SELECT 1 FROM registration_payments
+				WHERE registration_id = $1 AND kind = 'deposit'
+			)
 		`, registrationID, event.DepositAmount, event.Currency, depositDueAt, note); err != nil {
 			return err
 		}
@@ -698,7 +673,11 @@ func createDefaultPaymentRowsTx(ctx context.Context, tx pgx.Tx, registrationID i
 	if strings.TrimSpace(event.MainInvoiceAmount) != "" && event.MainInvoiceAmount != "0" && event.MainInvoiceAmount != "0.00" {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO registration_payments (registration_id, kind, amount, currency, status, due_at, notes)
-			VALUES ($1, 'main_invoice', $2::numeric, $3, 'pending', $4, $5)
+			SELECT $1, 'main_invoice', $2::numeric, $3, 'pending', $4, $5
+			WHERE NOT EXISTS (
+				SELECT 1 FROM registration_payments
+				WHERE registration_id = $1 AND kind = 'main_invoice'
+			)
 		`, registrationID, event.MainInvoiceAmount, event.Currency, mainInvoiceDueAt, note); err != nil {
 			return err
 		}
@@ -802,7 +781,7 @@ func ensureStaffRegistrationCompletedTx(ctx context.Context, tx pgx.Tx, registra
 	}, accountID)
 }
 
-func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.Tx, event *registrationEventSettings, participantID int64, source, note string) error {
+func createMissingRegistrationForEventRosterTx(ctx context.Context, tx pgx.Tx, event *registrationEventSettings, participantID int64, source, note string) error {
 	if event == nil || participantID <= 0 {
 		return nil
 	}
@@ -815,7 +794,7 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 			return err
 		}
 	}
-	exists, err := registrationExists(ctx, tx, event.ID, participantID)
+	exists, err := activeRegistrationExists(ctx, tx, event.ID, participantID)
 	if err != nil || exists {
 		return err
 	}
@@ -828,14 +807,35 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 	}
 
 	var registrationID int64
-	if err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
+		UPDATE event_registrations
+		SET status = $3,
+			source = $4,
+			cancelled_at = NULL,
+			expired_at = NULL,
+			deposit_due_at = COALESCE(deposit_due_at, $5),
+			main_invoice_due_at = COALESCE(main_invoice_due_at, $6),
+			updated_at = NOW()
+		WHERE id = (
+			SELECT id
+			FROM event_registrations
+			WHERE event_id = $1 AND participant_id = $2
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		)
+		RETURNING id
+	`, event.ID, participantID, status, strings.TrimSpace(source), depositDueAt, mainInvoiceDueAt).Scan(&registrationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx, `
 		INSERT INTO event_registrations (
 			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at, tags, internal_notes
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], ''
 		)
 		RETURNING id
-	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID); err != nil {
+		`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID)
+	}
+	if err != nil {
 		return err
 	}
 
@@ -857,11 +857,14 @@ func createMissingRegistrationForEventParticipantTx(ctx context.Context, tx pgx.
 	return syncRegistrationPaymentMarkersTx(ctx, tx, registrationID)
 }
 
-func SyncEventParticipantsToRegistrationsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64, source string) error {
+// SyncEventRosterToRegistrationsTx treats active registrations as the event
+// roster. Event Details can therefore add and remove attendees without a
+// second event_participants association that needs keeping in sync.
+func SyncEventRosterToRegistrationsTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64, source string) error {
 	if eventID <= 0 {
 		return nil
 	}
-	if err := deleteRemovedStaffRegistrationsForEventTx(ctx, tx, eventID, participantIDs); err != nil {
+	if err := cancelRegistrationsRemovedFromEventRosterTx(ctx, tx, eventID, participantIDs); err != nil {
 		return err
 	}
 	if len(participantIDs) == 0 {
@@ -875,14 +878,14 @@ func SyncEventParticipantsToRegistrationsTx(ctx context.Context, tx pgx.Tx, even
 		if participantID <= 0 {
 			continue
 		}
-		if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, participantID, source, "Registration created from event participant roster"); err != nil {
+		if err := createMissingRegistrationForEventRosterTx(ctx, tx, event, participantID, source, "Registration created from event roster"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func deleteRemovedStaffRegistrationsForEventTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64) error {
+func cancelRegistrationsRemovedFromEventRosterTx(ctx context.Context, tx pgx.Tx, eventID int64, participantIDs []int64) error {
 	if eventID <= 0 {
 		return nil
 	}
@@ -896,45 +899,46 @@ func deleteRemovedStaffRegistrationsForEventTx(ctx context.Context, tx pgx.Tx, e
 
 	if len(keepParticipantIDs) == 0 {
 		_, err := tx.Exec(ctx, `
-			DELETE FROM event_registrations r
-			USING participant_profiles p
-			WHERE r.participant_id = p.id
-			  AND r.event_id = $1
-			  AND r.cancelled_at IS NULL
-			  AND r.expired_at IS NULL
-			  AND 'Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
+			UPDATE event_registrations
+			SET status = 'cancelled',
+				cancelled_at = COALESCE(cancelled_at, NOW()),
+				updated_at = NOW()
+			WHERE event_id = $1
+			  AND cancelled_at IS NULL
+			  AND expired_at IS NULL
 		`, eventID)
 		return err
 	}
 
 	_, err := tx.Exec(ctx, `
-		DELETE FROM event_registrations r
-		USING participant_profiles p
-		WHERE r.participant_id = p.id
-		  AND r.event_id = $1
-		  AND r.cancelled_at IS NULL
-		  AND r.expired_at IS NULL
-		  AND 'Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[]))
-		  AND NOT (r.participant_id = ANY($2))
+		UPDATE event_registrations
+		SET status = 'cancelled',
+			cancelled_at = COALESCE(cancelled_at, NOW()),
+			updated_at = NOW()
+		WHERE event_id = $1
+		  AND cancelled_at IS NULL
+		  AND expired_at IS NULL
+		  AND NOT (participant_id = ANY($2))
 	`, eventID, keepParticipantIDs)
 	return err
 }
 
-func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
+// MigrateLegacyEventParticipants imports the old one-to-one event roster
+// table into event_registrations, then removes the obsolete table. The check
+// lets fresh installations skip this migration entirely.
+func MigrateLegacyEventParticipants(ctx context.Context, db *pgxpool.Pool) error {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO event_participants (event_id, participant_id)
-		SELECT r.event_id, r.participant_id
-		FROM event_registrations r
-		WHERE r.cancelled_at IS NULL AND r.expired_at IS NULL
-		ON CONFLICT (event_id, participant_id) DO NOTHING
-	`); err != nil {
+	var legacyTable string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.event_participants')::TEXT, '')`).Scan(&legacyTable); err != nil {
 		return err
+	}
+	if legacyTable == "" {
+		return tx.Commit(ctx)
 	}
 
 	rows, err := tx.Query(ctx, `
@@ -968,6 +972,7 @@ func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
 
 	eventCache := make(map[int64]*registrationEventSettings)
 	for _, item := range missing {
@@ -979,9 +984,12 @@ func BackfillEventRosterSync(ctx context.Context, db *pgxpool.Pool) error {
 			}
 			eventCache[item.eventID] = event
 		}
-		if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, item.participantID, "event_roster_backfill", "Registration created by event roster backfill"); err != nil {
+		if err := createMissingRegistrationForEventRosterTx(ctx, tx, event, item.participantID, "event_roster_backfill", "Registration created by legacy event roster migration"); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(ctx, `DROP TABLE event_participants`); err != nil {
+		return err
 	}
 
 	return tx.Commit(ctx)
@@ -1074,10 +1082,12 @@ func EnsureStaffParticipantRegistrations(ctx context.Context, db *pgxpool.Pool, 
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT ep.event_id
-		FROM event_participants ep
-		WHERE ep.participant_id = $1
-		ORDER BY ep.event_id ASC
+		SELECT event_id
+		FROM event_registrations
+		WHERE participant_id = $1
+		  AND cancelled_at IS NULL
+		  AND expired_at IS NULL
+		ORDER BY event_id ASC
 	`, participantID)
 	if err != nil {
 		return err
@@ -1117,7 +1127,7 @@ func EnsureStaffParticipantRegistrations(ctx context.Context, db *pgxpool.Pool, 
 			LIMIT 1
 		`, eventID, participantID).Scan(&registrationID, &registeredAt, &depositDueAt, &mainInvoiceDueAt)
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err := createMissingRegistrationForEventParticipantTx(ctx, tx, event, participantID, "staff_role_sync", "Registration created from staff role assignment"); err != nil {
+			if err := createMissingRegistrationForEventRosterTx(ctx, tx, event, participantID, "staff_role_sync", "Registration normalized from staff role assignment"); err != nil {
 				return err
 			}
 			continue
@@ -1149,6 +1159,12 @@ func ExpireOverdueRegistrations(ctx context.Context, db *pgxpool.Pool) (int64, e
 		WHERE cancelled_at IS NULL
 		  AND expired_at IS NULL
 		  AND status <> 'expired'
+		  AND EXISTS (
+			SELECT 1
+			FROM events e
+			WHERE e.id = event_registrations.event_id
+			  AND COALESCE(e.ends_at, e.starts_at)::date >= CURRENT_DATE
+		  )
 		  AND (
 			(deposit_due_at IS NOT NULL AND deposit_paid_at IS NULL AND deposit_due_at < CURRENT_DATE)
 			OR
@@ -1473,9 +1489,6 @@ func createPublicRegistrationTx(ctx context.Context, tx pgx.Tx, event *PublicReg
 		)
 		RETURNING id
 	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID); err != nil {
-		return 0, err
-	}
-	if err := ensureEventParticipantTx(ctx, tx, event.ID, participantID); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1948,10 +1961,6 @@ func (h *Handler) createRegistration(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, "failed to create registration")
-		return
-	}
-	if err := ensureEventParticipantTx(ctx, tx, eventID, payload.ParticipantID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "failed to sync event participant")
 		return
 	}
 	if err := createDefaultPaymentRowsTx(ctx, tx, registrationID, eventSettings, depositDueAt, mainInvoiceDueAt, "Created from staff registration"); err != nil {

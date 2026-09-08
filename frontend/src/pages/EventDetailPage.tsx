@@ -39,8 +39,6 @@ import {
   formatEventLocal,
   formatEventLocalDate,
   formatEventLocalDateInput,
-  getEventLocalDateKey,
-  getEventLocalDateKeyFromDate,
   formatEventLocalInputFromDate,
   formatEventLocalPickerDateTime,
   fromEventLocalDateInput,
@@ -185,23 +183,6 @@ const badgeClassForRegistrationStatus = (status?: string | null) => {
   }
   if (status === 'cancelled' || status === 'expired') return 'badge danger';
   return 'badge neutral';
-};
-
-const badgeClassForPaymentState = (state: 'paid' | 'pending' | 'overdue' | 'none') => {
-  if (state === 'paid') return 'badge success';
-  if (state === 'overdue') return 'badge danger';
-  return 'badge neutral';
-};
-
-const computePaymentState = (
-  paidAt?: string | null,
-  dueAt?: string | null,
-  registrationStatus?: string | null
-): 'paid' | 'pending' | 'overdue' | 'none' => {
-  if (paidAt) return 'paid';
-  if (!dueAt) return 'none';
-  if (registrationStatus === 'cancelled') return 'none';
-  return getEventLocalDateKey(dueAt) < getEventLocalDateKeyFromDate(new Date()) ? 'overdue' : 'pending';
 };
 
 const emptyLandingArea = (): LandingAreaForm => ({
@@ -1108,24 +1089,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     if (!registration) {
       return <div className="muted">No registration record yet.</div>;
     }
-    const depositState = computePaymentState(
-      registration.deposit_paid_at,
-      registration.deposit_due_at,
-      registration.status
-    );
-    const mainInvoiceState = computePaymentState(
-      registration.main_invoice_paid_at,
-      registration.main_invoice_due_at,
-      registration.status
-    );
     return (
       <>
         <div className="event-detail-role-badges event-detail-registration-badges">
           <span className={badgeClassForRegistrationStatus(registration.status)}>
             {registration.status.replace(/_/g, ' ')}
           </span>
-          <span className={badgeClassForPaymentState(depositState)}>Deposit {depositState}</span>
-          <span className={badgeClassForPaymentState(mainInvoiceState)}>Main Invoice {mainInvoiceState}</span>
         </div>
         <div className="event-detail-registration-meta">
           <span>Registered {formatDateTime24h(registration.registered_at) || 'Unknown'}</span>

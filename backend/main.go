@@ -65,8 +65,8 @@ func main() {
 	if err := logistics.BackfillMissingRouteDurations(backfillCtx, pool); err != nil {
 		log.Printf("route duration backfill failed: %v", err)
 	}
-	if err := registrations.BackfillEventRosterSync(backfillCtx, pool); err != nil {
-		log.Printf("event/registration sync backfill failed: %v", err)
+	if err := registrations.MigrateLegacyEventParticipants(backfillCtx, pool); err != nil {
+		log.Printf("legacy event participant migration failed: %v", err)
 	}
 	if err := registrations.BackfillStaffRegistrations(backfillCtx, pool); err != nil {
 		log.Printf("staff registration backfill failed: %v", err)
@@ -409,12 +409,6 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`UPDATE participant_profiles
 		 SET hss_qualities = array_remove(hss_qualities, 'Experiment with drugs')
 		 WHERE hss_qualities @> ARRAY['Experiment with drugs']::TEXT[]`,
-		`CREATE TABLE IF NOT EXISTS event_participants (
-    event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
-    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (event_id, participant_id)
-)`,
 		`CREATE TABLE IF NOT EXISTS airfields (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,

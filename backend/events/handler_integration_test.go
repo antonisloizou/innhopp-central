@@ -294,11 +294,6 @@ func ensureEventTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 			cancelled_at TIMESTAMPTZ,
 			expired_at TIMESTAMPTZ
 		)`,
-		`CREATE TABLE IF NOT EXISTS event_participants (
-			event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-			participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
-			PRIMARY KEY (event_id, participant_id)
-		)`,
 		`CREATE TABLE IF NOT EXISTS event_airfields (
 			event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
 			airfield_id INTEGER NOT NULL,
