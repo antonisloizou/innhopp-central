@@ -16,7 +16,8 @@ const statusOptions: { value: EventStatus; label: string }[] = [
   { value: 'scouted', label: 'Scouted' },
   { value: 'launched', label: 'Launched' },
   { value: 'live', label: 'Live' },
-  { value: 'past', label: 'Past' }
+  { value: 'past', label: 'Past' },
+  { value: 'cancelled', label: 'Cancelled' }
 ];
 
 const commercialStatusOptions: { value: EventCommercialStatus; label: string }[] = [

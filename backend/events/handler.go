@@ -31,14 +31,15 @@ import (
 
 var (
 	validEventStatuses = map[string]struct{}{
-		"draft":    {},
-		"planned":  {},
-		"launched": {},
-		"scouted":  {},
-		"live":     {},
-		"past":     {},
+		"draft":     {},
+		"planned":   {},
+		"launched":  {},
+		"scouted":   {},
+		"live":      {},
+		"past":      {},
+		"cancelled": {},
 	}
-	eventStatusValues       = []string{"draft", "planned", "launched", "scouted", "live", "past"}
+	eventStatusValues       = []string{"draft", "planned", "launched", "scouted", "live", "past", "cancelled"}
 	validCommercialStatuses = map[string]struct{}{
 		"draft":              {},
 		"registration_open":  {},
@@ -3522,6 +3523,12 @@ func (h *Handler) syncEventStatuses(ctx context.Context, events []Event) error {
 }
 
 func deriveEventStatus(event Event, now time.Time) string {
+	// Cancelled is an explicit terminal state and must not be replaced by the
+	// time-based live/past status synchronisation.
+	if event.Status == "cancelled" {
+		return event.Status
+	}
+
 	end := event.StartsAt
 	if event.EndsAt != nil {
 		end = *event.EndsAt

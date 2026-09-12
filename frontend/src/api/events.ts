@@ -1,6 +1,6 @@
 import { apiRequest } from './client';
 
-export type EventStatus = 'draft' | 'planned' | 'scouted' | 'launched' | 'live' | 'past';
+export type EventStatus = 'draft' | 'planned' | 'scouted' | 'launched' | 'live' | 'past' | 'cancelled';
 export type EventCommercialStatus =
   | 'draft'
   | 'registration_open'

@@ -803,6 +803,11 @@ body { padding: 0; }
   color: var(--neutral);
 }
 
+.print-badge.status-cancelled {
+  background: #fecaca;
+  color: #991b1b;
+}
+
 .type-innhopp,
 .type-transport,
 .type-ground-crew,

@@ -42,6 +42,7 @@ const ParticipantOnboardingPage = () => {
     return rolesParam ? rolesParam.split(',').filter(Boolean) : [];
   });
   const [nameQuery, setNameQuery] = useState<string>(() => searchParams.get('q') || '');
+  const [emailQuery, setEmailQuery] = useState<string>(() => searchParams.get('email') || '');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [impersonatingNewUser, setImpersonatingNewUser] = useState(false);
@@ -71,8 +72,9 @@ const ParticipantOnboardingPage = () => {
     if (selectedEvent) next.set('event', selectedEvent);
     if (selectedRoles.length) next.set('roles', selectedRoles.join(','));
     if (nameQuery) next.set('q', nameQuery);
+    if (emailQuery) next.set('email', emailQuery);
     setSearchParams(next, { replace: true });
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, setSearchParams]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +143,11 @@ const ParticipantOnboardingPage = () => {
       const fullName = profile?.full_name || '';
       return fullName.toLowerCase().includes(nameQuery.trim().toLowerCase());
     };
+    const matchesEmail = (profile?: ParticipantProfile | null) => {
+      if (!emailQuery.trim()) return true;
+      const email = profile?.email || '';
+      return email.toLowerCase().includes(emailQuery.trim().toLowerCase());
+    };
 
     const addParticipant = (id: number, acc: ParticipantCard[], seen: Set<number>) => {
       if (seen.has(id)) return;
@@ -148,6 +155,7 @@ const ParticipantOnboardingPage = () => {
       const profile = participantLookup.get(id);
       if (!matchesSelectedRoles(profile)) return;
       if (!matchesName(profile)) return;
+      if (!matchesEmail(profile)) return;
       const eventCount = participantEventsMap.get(id)?.length || 0;
       acc.push({
         id,
@@ -188,6 +196,7 @@ const ParticipantOnboardingPage = () => {
     selectedSeason,
     selectedRoles,
     nameQuery,
+    emailQuery,
     events,
     filteredEvents,
     participants,
@@ -201,9 +210,10 @@ const ParticipantOnboardingPage = () => {
     if (selectedEvent) params.set('event', selectedEvent);
     if (selectedRoles.length) params.set('roles', selectedRoles.join(','));
     if (nameQuery) params.set('q', nameQuery);
+    if (emailQuery) params.set('email', emailQuery);
     const serialized = params.toString();
     return serialized ? `?${serialized}` : '';
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery]);
 
   return (
     <section className="stack">
@@ -283,6 +293,15 @@ const ParticipantOnboardingPage = () => {
               placeholder="Search by name"
               value={nameQuery}
               onChange={(e) => setNameQuery(e.target.value)}
+            />
+          </label>
+          <label className="form-field">
+            <span>Email</span>
+            <input
+              type="text"
+              placeholder="Search by email"
+              value={emailQuery}
+              onChange={(e) => setEmailQuery(e.target.value)}
             />
           </label>
           <div className="form-field participant-onboarding-roles-field">

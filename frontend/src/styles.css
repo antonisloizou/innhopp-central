@@ -4102,6 +4102,11 @@ button.ghost {
   color: #111827;
 }
 
+.badge.status-cancelled {
+  background: #fecaca;
+  color: #991b1b;
+}
+
 .badge.success {
   background: #bbf7d0;
   color: #166534;
