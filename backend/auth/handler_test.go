@@ -76,7 +76,7 @@ func TestCollectRolesMergesExistingAndParticipantRoles(t *testing.T) {
 func TestPostLoginPathPreservesRequestedRoute(t *testing.T) {
 	h := &Handler{}
 
-	path, err := h.postLoginPath(context.Background(), 42, "/events/9/innhopps/4")
+	path, err := h.postLoginPath(context.Background(), &Account{ID: 42}, []string{"participant"}, "/events/9/innhopps/4")
 	if err != nil {
 		t.Fatalf("postLoginPath() returned an error: %v", err)
 	}
@@ -85,14 +85,45 @@ func TestPostLoginPathPreservesRequestedRoute(t *testing.T) {
 	}
 }
 
-func TestPostLoginPathFallsBackToEventListWithoutAccount(t *testing.T) {
+func TestPostLoginPathSendsNewParticipantToProfile(t *testing.T) {
 	h := &Handler{}
 
-	path, err := h.postLoginPath(context.Background(), 0, "")
+	path, err := h.postLoginPath(context.Background(), &Account{ID: 42, IsNew: true}, []string{"participant"}, "")
+	if err != nil {
+		t.Fatalf("postLoginPath() returned an error: %v", err)
+	}
+	if path != profilePostLoginPath {
+		t.Fatalf("postLoginPath() = %q, want %q", path, profilePostLoginPath)
+	}
+}
+
+func TestPostLoginPathKeepsStaffOnEventList(t *testing.T) {
+	h := &Handler{}
+
+	path, err := h.postLoginPath(context.Background(), &Account{ID: 42, IsNew: true}, []string{"staff"}, "")
 	if err != nil {
 		t.Fatalf("postLoginPath() returned an error: %v", err)
 	}
 	if path != defaultPostLoginPath {
 		t.Fatalf("postLoginPath() = %q, want %q", path, defaultPostLoginPath)
+	}
+}
+
+func TestIsParticipantOnly(t *testing.T) {
+	tests := []struct {
+		roles []string
+		want  bool
+	}{
+		{roles: []string{"participant"}, want: true},
+		{roles: []string{"Participant"}, want: true},
+		{roles: []string{"participant", "staff"}, want: false},
+		{roles: []string{"staff"}, want: false},
+		{roles: nil, want: false},
+	}
+
+	for _, tt := range tests {
+		if got := isParticipantOnly(tt.roles); got != tt.want {
+			t.Fatalf("isParticipantOnly(%v) = %t, want %t", tt.roles, got, tt.want)
+		}
 	}
 }

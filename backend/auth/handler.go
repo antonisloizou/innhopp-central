@@ -63,7 +63,10 @@ type Handler struct {
 	disabled   bool
 }
 
-const defaultPostLoginPath = "/events"
+const (
+	defaultPostLoginPath = "/events"
+	profilePostLoginPath = "/profile"
+)
 
 // ensureParticipantProfileSQL creates the default self-service profile that
 // accompanies a newly authenticated account. Keeping the statement in one
@@ -273,7 +276,7 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Roles:     finalRoles,
 		Token:     rawToken,
 	}
-	postLoginPath, err := h.postLoginPath(r.Context(), account.ID, redirectPath)
+	postLoginPath, err := h.postLoginPath(r.Context(), account, finalRoles, redirectPath)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to determine post-login destination")
 		return
@@ -471,28 +474,36 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
-// postLoginPath preserves an explicitly requested protected route. When there
-// is no requested route, it sends a person assigned to a live event (as either
-// a participant or staff member) straight to that event's schedule.
-func (h *Handler) postLoginPath(ctx context.Context, accountID int64, requestedPath string) (string, error) {
+// postLoginPath preserves an explicitly requested protected route. Participant-
+// only accounts are sent to their profile on their first login, then to the
+// schedule for their next registered event. Staff retain the event-list landing
+// page.
+func (h *Handler) postLoginPath(ctx context.Context, account *Account, roles []string, requestedPath string) (string, error) {
 	if redirectPath := sanitizePostLoginPath(requestedPath); redirectPath != "" {
 		return redirectPath, nil
 	}
 
-	liveEventID, err := h.findLiveEventForAccount(ctx, accountID)
+	if account == nil || !isParticipantOnly(roles) {
+		return defaultPostLoginPath, nil
+	}
+	if account.IsNew {
+		return profilePostLoginPath, nil
+	}
+
+	nextEventID, err := h.findNextRegisteredEventForAccount(ctx, account.ID)
 	if err != nil {
 		return "", err
 	}
-	if liveEventID > 0 {
-		return fmt.Sprintf("/events/%d", liveEventID), nil
+	if nextEventID > 0 {
+		return fmt.Sprintf("/events/%d", nextEventID), nil
 	}
 
-	return defaultPostLoginPath, nil
+	return profilePostLoginPath, nil
 }
 
-// findLiveEventForAccount returns the most recently started live event with
-// an active registration for the account's participant profile.
-func (h *Handler) findLiveEventForAccount(ctx context.Context, accountID int64) (int64, error) {
+// findNextRegisteredEventForAccount returns the next upcoming event with an
+// active registration for the account's participant profile.
+func (h *Handler) findNextRegisteredEventForAccount(ctx context.Context, accountID int64) (int64, error) {
 	if accountID <= 0 {
 		return 0, nil
 	}
@@ -507,9 +518,8 @@ func (h *Handler) findLiveEventForAccount(ctx context.Context, accountID int64) 
 		  AND r.cancelled_at IS NULL
 		  AND r.expired_at IS NULL
 		  AND e.status <> 'draft'
-		  AND e.starts_at <= NOW()
-		  AND COALESCE(e.ends_at, e.starts_at) >= NOW()
-		ORDER BY e.starts_at DESC, e.id DESC
+		  AND e.starts_at >= NOW()
+		ORDER BY e.starts_at ASC, e.id ASC
 		LIMIT 1
 	`, accountID).Scan(&eventID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -630,12 +640,12 @@ func (h *Handler) ensureAccount(ctx context.Context, claims *idTokenClaims) (*Ac
          VALUES ($1, $2, $3)
          ON CONFLICT (subject)
          DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name
-         RETURNING id, subject, email, full_name`,
+		 RETURNING id, subject, email, full_name, (xmax = 0) AS is_new`,
 		claims.Subject, strings.ToLower(claims.Email), claims.Name,
 	)
 
 	var account Account
-	if err := row.Scan(&account.ID, &account.Subject, &account.Email, &account.FullName); err != nil {
+	if err := row.Scan(&account.ID, &account.Subject, &account.Email, &account.FullName, &account.IsNew); err != nil {
 		return nil, err
 	}
 
@@ -858,6 +868,18 @@ func hasRole(roles []string, expected string) bool {
 	return false
 }
 
+func isParticipantOnly(roles []string) bool {
+	if len(roles) == 0 {
+		return false
+	}
+	for _, role := range roles {
+		if !strings.EqualFold(strings.TrimSpace(role), string(rbac.RoleParticipant)) {
+			return false
+		}
+	}
+	return true
+}
+
 func cloneImpersonatorClaims(claims *Claims) *ImpersonatorClaims {
 	if claims == nil {
 		return nil
@@ -900,6 +922,7 @@ type Account struct {
 	Email    string
 	FullName string
 	Roles    []string
+	IsNew    bool
 }
 
 type providerMetadata struct {
