@@ -5,20 +5,8 @@ import { listMyRegistrations } from '../api/registrations';
 import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
 import { budgetsV1Enabled } from '../config/flags';
+import { incompleteProfileWarning, isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 import AppHeader from './AppHeader';
-
-const hasText = (value?: string | number | null) => String(value ?? '').trim().length > 0;
-
-const isProfileCompleteForRegistration = (profile: Awaited<ReturnType<typeof getMyParticipantProfile>>) =>
-  hasText(profile.full_name) &&
-  hasText(profile.email) &&
-  hasText(profile.whatsapp) &&
-  hasText(profile.license) &&
-  hasText(profile.main_canopy) &&
-  hasText(profile.wingload) &&
-  typeof profile.years_in_sport === 'number' &&
-  typeof profile.jump_count === 'number' &&
-  typeof profile.recent_jump_count === 'number';
 
 const Layout = () => {
   const { logout, stopImpersonating, user } = useAuth();
@@ -37,7 +25,7 @@ const Layout = () => {
       : [
         { to: '/events', label: 'Events' },
         { to: '/checklists', label: 'Operational Checks' },
-        { to: '/participants', label: 'Participants' },
+        { to: '/participants', label: 'The Innhopp Family' },
         { to: '/logistics', label: 'Logistics' },
         ...(budgetsV1Enabled ? [{ to: '/finance', label: 'Finance' }] : []),
         { to: '/communications', label: 'Communications' }
@@ -205,12 +193,12 @@ const Layout = () => {
                     className="nav-user-warning"
                     title={
                       profileIncomplete
-                        ? 'Complete your profile to be able to register to events'
+                        ? incompleteProfileWarning
                         : 'Pending deposit payments require attention'
                     }
                     aria-label={
                       profileIncomplete
-                        ? 'Complete your profile to be able to register to events'
+                        ? incompleteProfileWarning
                         : 'Pending deposit payments require attention'
                     }
                   >

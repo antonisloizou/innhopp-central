@@ -4,6 +4,7 @@ import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { useAuth } from '../auth/AuthProvider';
 import { parseEventLocal } from '../utils/eventDate';
+import { incompleteProfileWarning, isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 import { roleOptions } from '../utils/roles';
 
 type ParticipantCard = {
@@ -14,6 +15,8 @@ type ParticipantCard = {
   experience_level?: string;
   emergency_contact?: string;
   eventCount: number;
+  isStaff: boolean;
+  profileIncomplete: boolean;
 };
 
 const sortSeasonsDesc = (seasons: Season[]) =>
@@ -46,6 +49,7 @@ const ParticipantOnboardingPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [impersonatingNewUser, setImpersonatingNewUser] = useState(false);
+  const [openSections, setOpenSections] = useState({ participants: true, staff: true });
 
   const canImpersonateNewUser =
     (user?.roles?.includes('admin') ?? false) &&
@@ -164,7 +168,9 @@ const ParticipantOnboardingPage = () => {
         phone: profile?.phone,
         experience_level: profile?.experience_level,
         emergency_contact: profile?.emergency_contact,
-        eventCount
+        eventCount,
+        isStaff: Array.isArray(profile?.roles) && profile.roles.includes('Staff'),
+        profileIncomplete: !profile || !isProfileCompleteForRegistration(profile)
       });
     };
 
@@ -204,6 +210,19 @@ const ParticipantOnboardingPage = () => {
     participantEventsMap
   ]);
 
+  const participantCards = useMemo(
+    () => filteredParticipants.filter((participant) => !participant.isStaff),
+    [filteredParticipants]
+  );
+
+  const staffCards = useMemo(
+    () => filteredParticipants.filter((participant) => participant.isStaff),
+    [filteredParticipants]
+  );
+
+  const toggleSection = (section: keyof typeof openSections) =>
+    setOpenSections((previous) => ({ ...previous, [section]: !previous[section] }));
+
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     if (selectedSeason) params.set('season', selectedSeason);
@@ -219,7 +238,7 @@ const ParticipantOnboardingPage = () => {
     <section className="stack">
       <header className="page-header participant-onboarding-header">
         <div>
-          <h2>Participants</h2>
+          <h2>The Innhopp Family</h2>
         </div>
         <div className="participant-onboarding-actions">
           {canImpersonateNewUser && (
@@ -349,43 +368,76 @@ const ParticipantOnboardingPage = () => {
         )}
       </article>
 
-      <article className="card">
-        <header className="card-header">
-          <div>
-            <h3>Participants</h3>
-          </div>
-          <span className="badge neutral">
-            {filteredParticipants.length} {filteredParticipants.length === 1 ? 'participant' : 'participants'}
-          </span>
-        </header>
-        {loading ? (
-          <p className="muted">Loading participants…</p>
-        ) : error ? (
-          <p className="error-text">{error}</p>
-        ) : filteredParticipants.length === 0 ? (
-          <p className="muted">No participants match the selected filters.</p>
-        ) : (
-          <ul className="status-list">
-            {filteredParticipants.map((p) => (
-              <li key={p.id}>
-                <Link
-                  to={{ pathname: `/participants/${p.id}`, search: queryString }}
-                  className="card-link participant-onboarding-card-link"
+      <div className="participant-onboarding-results">
+        {([
+          { key: 'participants' as const, title: 'Participants', people: participantCards },
+          { key: 'staff' as const, title: 'Staff', people: staffCards }
+        ]).map(({ key, title, people }) => (
+          <article key={key} className="card">
+            <header
+              className="card-header event-detail-section-header"
+              onClick={() => toggleSection(key)}
+            >
+              <div className="event-detail-section-header-main">
+                <button
+                  className="ghost"
+                  type="button"
+                  aria-label={`${openSections[key] ? 'Collapse' : 'Expand'} ${title}`}
+                  aria-expanded={openSections[key]}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleSection(key);
+                  }}
                 >
-                  <strong>{highlightName(p.full_name)}</strong>
-                  <div className="muted">{p.email || 'No email on file'}</div>
-                  <div className="muted">
-                    Experience: {p.experience_level || 'Not provided'}
-                  </div>
-                </Link>
-                <span className="badge neutral">
-                  {p.eventCount} {p.eventCount === 1 ? 'event' : 'events'}
-                </span>
-              </li>
+                  {openSections[key] ? '▾' : '▸'}
+                </button>
+                <h3 className="event-detail-section-title">{title}</h3>
+              </div>
+              <span className="badge neutral">
+                {people.length} {people.length === 1 ? title.toLowerCase().slice(0, -1) : title.toLowerCase()}
+              </span>
+            </header>
+            {openSections[key] && (loading ? (
+              <p className="muted">Loading {title.toLowerCase()}…</p>
+            ) : error ? (
+              <p className="error-text">{error}</p>
+            ) : people.length === 0 ? (
+              <p className="muted">No {title.toLowerCase()} match the selected filters.</p>
+            ) : (
+              <ul className="status-list">
+                {people.map((p) => (
+                  <li key={p.id}>
+                    <Link
+                      to={{ pathname: `/participants/${p.id}`, search: queryString }}
+                      className="card-link participant-onboarding-card-link"
+                    >
+                      <strong>
+                        {highlightName(p.full_name)}
+                        {p.profileIncomplete && (
+                          <span
+                            className="nav-user-warning participant-onboarding-profile-warning"
+                            title={incompleteProfileWarning}
+                            aria-label={incompleteProfileWarning}
+                          >
+                            !
+                          </span>
+                        )}
+                      </strong>
+                      <div className="muted">{p.email || 'No email on file'}</div>
+                      <div className="muted">
+                        Experience: {p.experience_level || 'Not provided'}
+                      </div>
+                    </Link>
+                    <span className="badge neutral">
+                      {p.eventCount} {p.eventCount === 1 ? 'event' : 'events'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             ))}
-          </ul>
-        )}
-      </article>
+          </article>
+        ))}
+      </div>
     </section>
   );
 };

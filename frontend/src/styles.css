@@ -2432,6 +2432,17 @@ button.ghost {
   flex: 1;
 }
 
+.participant-onboarding-profile-warning {
+  margin-left: 0.35rem;
+}
+
+.participant-onboarding-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  align-items: start;
+}
+
 .event-create-registration-toggle {
   display: flex;
   align-items: center;
@@ -3379,6 +3390,10 @@ button.ghost {
     position: static;
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .participant-onboarding-results {
+    grid-template-columns: 1fr;
   }
 }
 
