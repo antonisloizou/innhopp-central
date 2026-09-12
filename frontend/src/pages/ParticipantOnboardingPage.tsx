@@ -370,9 +370,9 @@ const ParticipantOnboardingPage = () => {
 
       <div className="participant-onboarding-results">
         {([
-          { key: 'participants' as const, title: 'Participants', people: participantCards },
-          { key: 'staff' as const, title: 'Staff', people: staffCards }
-        ]).map(({ key, title, people }) => (
+          { key: 'participants' as const, title: 'Participants', singular: 'participant', people: participantCards },
+          { key: 'staff' as const, title: 'Staff', singular: 'staff', people: staffCards }
+        ]).map(({ key, title, singular, people }) => (
           <article key={key} className="card">
             <header
               className="card-header event-detail-section-header"
@@ -394,7 +394,7 @@ const ParticipantOnboardingPage = () => {
                 <h3 className="event-detail-section-title">{title}</h3>
               </div>
               <span className="badge neutral">
-                {people.length} {people.length === 1 ? title.toLowerCase().slice(0, -1) : title.toLowerCase()}
+                {people.length} {people.length === 1 ? singular : title.toLowerCase()}
               </span>
             </header>
             {openSections[key] && (loading ? (
