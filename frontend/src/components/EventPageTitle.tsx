@@ -37,7 +37,7 @@ const EventPageTitle = ({
       {(showStatusBadge && event.status) || showSlots ? (
         <div className="event-detail-header-badges">
           {showStatusBadge && event.status ? <span className={`badge status-${event.status}`}>{event.status}</span> : null}
-          {showSlots ? <span className={`badge ${isFull ? 'danger' : 'success'}`}>{isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}</span> : null}
+          {showSlots ? <span className={`badge ${isFull ? 'danger' : 'success'}`}>{isFull ? 'FULL' : `${remaining} SLOTS`}</span> : null}
         </div>
       ) : null}
       {actions ? <div className="event-detail-header-actions">{actions}</div> : null}

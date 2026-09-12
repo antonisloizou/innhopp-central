@@ -544,7 +544,7 @@ const EventCalendarPage = () => {
                             </span>
                             {!past && (
                               <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                                {isFull ? 'FULL' : `${remaining} SLOTS AVAILABLE`}
+                                {isFull ? 'FULL' : `${remaining} SLOTS`}
                               </span>
                             )}
                           </div>

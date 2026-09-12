@@ -120,7 +120,7 @@ const PublicEventRegistrationPage = () => {
               <p className="event-location">{event.location || 'Location TBD'}</p>
               <div className="event-detail-header-badges">
                 <span className={`badge ${isFull ? 'danger' : 'success'}`}>
-                  {isFull ? 'FULL' : `${remainingSlots} SLOTS AVAILABLE`}
+                  {isFull ? 'FULL' : `${remainingSlots} SLOTS`}
                 </span>
               </div>
             </div>
