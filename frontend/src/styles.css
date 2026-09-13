@@ -1513,6 +1513,13 @@ button.ghost {
   cursor: pointer;
 }
 
+.participant-events-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 .participant-profile-card-title {
   margin: 0;
   flex: 1;

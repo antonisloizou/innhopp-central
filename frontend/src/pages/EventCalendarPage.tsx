@@ -5,6 +5,7 @@ import { canManageEvents } from '../auth/access';
 import { Event, Season, deleteSeason, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { formatEventLocal, parseEventLocal } from '../utils/eventDate';
+import { isPastEvent } from '../utils/eventStatus';
 import { countVisibleParticipants } from '../utils/eventParticipants';
 import { getInnhoppSequenceCount } from '../utils/innhoppSequenceCount';
 import { useResourceStream } from '../hooks/useResourceStream';
@@ -265,15 +266,6 @@ const EventCalendarPage = () => {
       document.removeEventListener('keydown', handleEscape);
     };
   }, [seasonMenuOpen]);
-
-  const isPastEvent = (event: Event) => {
-    if (event.status === 'past') return true;
-    const ends = parseEventLocal(event.ends_at);
-    const starts = parseEventLocal(event.starts_at);
-    if (ends) return ends.getTime() < Date.now();
-    if (starts) return starts.getTime() < Date.now();
-    return false;
-  };
 
   const eventCalendarEvents = useMemo(
     () =>

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getEventLeaderboardParticipant, getMyEventLeaderboardParticipant, listEvents } from '../api/events';
 import { listEventRegistrations, type Registration } from '../api/registrations';
 import type { Event } from '../api/events';
 import { formatEventLocalDate } from '../utils/eventDate';
+import { isPastEvent } from '../utils/eventStatus';
 import { useResourceStream } from '../hooks/useResourceStream';
 import LeaderboardScoreCardOverlay from './LeaderboardScoreCardOverlay';
 
@@ -37,6 +38,7 @@ const ParticipantEventsCard = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [showPastEvents, setShowPastEvents] = useState<boolean | null>(null);
   const [scoreCardEvent, setScoreCardEvent] = useState<Event | null>(null);
   const [openingRegistrationEventId, setOpeningRegistrationEventId] = useState<number | null>(null);
   const [registrationError, setRegistrationError] = useState<{ eventId: number; message: string } | null>(null);
@@ -80,6 +82,18 @@ const ParticipantEventsCard = ({
     onMessage: () => { void loadEvents(); }
   });
 
+  const pastEventCount = useMemo(
+    () => events.filter((event) => isPastEvent(event)).length,
+    [events]
+  );
+
+  const pastEventsVisible = showPastEvents ?? (events.length > 0 && pastEventCount === events.length);
+
+  const visibleEvents = useMemo(
+    () => (pastEventsVisible ? events : events.filter((event) => !isPastEvent(event))),
+    [events, pastEventsVisible]
+  );
+
   const openRegistration = async (event: Event) => {
     setOpeningRegistrationEventId(event.id);
     setRegistrationError(null);
@@ -121,13 +135,29 @@ const ParticipantEventsCard = ({
             </button>
             <h3 className="participant-profile-card-title">Events</h3>
           </div>
-          <span className="badge neutral">{events.length} {events.length === 1 ? 'event' : 'events'}</span>
+          <div className="participant-events-card-controls">
+            {open ? (
+              <button
+                className="ghost"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                setShowPastEvents(!pastEventsVisible);
+              }}
+            >
+                {pastEventsVisible
+                  ? `Hide past events (${pastEventCount})`
+                  : `Show past events (${pastEventCount})`}
+              </button>
+            ) : null}
+            <span className="badge neutral">{events.length} {events.length === 1 ? 'event' : 'events'}</span>
+          </div>
         </header>
-        {open && (loading ? <p className="muted">Loading events…</p> : error ? <p className="error-text">{error}</p> : events.length === 0 ? (
-          <p className="muted">No events scheduled yet.</p>
+        {open && (loading ? <p className="muted">Loading events…</p> : error ? <p className="error-text">{error}</p> : visibleEvents.length === 0 ? (
+          <p className="muted">{pastEventsVisible ? 'No events scheduled yet.' : 'No future events scheduled.'}</p>
         ) : (
           <div className="stack">
-            {events.map((event) => (
+            {visibleEvents.map((event) => (
               <article
                 key={event.id}
                 className="card event-summary-card my-profile-event-card"

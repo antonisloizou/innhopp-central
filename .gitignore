@@ -10,4 +10,4 @@ frontend/.env
 innhopp_live.dump
 /.cache
 /.tmp
-
+/audit/
