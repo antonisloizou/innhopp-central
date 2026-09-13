@@ -580,11 +580,10 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, roles := sanitizePayload(&payload, "", "")
-	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email is required")
 		return
 	}
-
 	row := h.db.QueryRow(r.Context(), `
 		INSERT INTO participant_profiles (
 			full_name,
@@ -782,11 +781,10 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, _ := sanitizePayload(&payload, claims.FullName, claims.Email)
-	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email is required")
 		return
 	}
-
 	var existingID int64
 	var existingRoles []string
 	var existingAccountRoles []string
@@ -1036,11 +1034,10 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName, email, roles := sanitizePayload(&payload, "", "")
-	if fullName == "" || email == "" || payload.EmergencyContactName == "" || payload.EmergencyContactPhone == "" {
-		httpx.Error(w, http.StatusBadRequest, "full_name, email, emergency_contact_name, and emergency_contact_phone are required")
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email is required")
 		return
 	}
-
 	tag, execErr := h.db.Exec(r.Context(), `
 		UPDATE participant_profiles
 		SET

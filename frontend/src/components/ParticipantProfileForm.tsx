@@ -383,7 +383,6 @@ const ParticipantProfileForm = ({
               type="text"
               value={form.full_name}
               onChange={(event) => updateField('full_name', event.target.value)}
-              required
             />
           </label>
           <label className={`form-field ${missingRequired.email ? 'field-missing' : ''}`}>
@@ -696,7 +695,6 @@ const ParticipantProfileForm = ({
                   type="text"
                   value={form.emergency_contact_name || ''}
                   onChange={(event) => updateField('emergency_contact_name', event.target.value)}
-                  required
                 />
               </label>
               <label className={`form-field ${missingRequired.emergency_contact_phone ? 'field-missing' : ''}`}>
@@ -705,7 +703,6 @@ const ParticipantProfileForm = ({
                   type="tel"
                   value={form.emergency_contact_phone || ''}
                   onChange={(event) => updateField('emergency_contact_phone', event.target.value)}
-                  required
                 />
               </label>
             </div>
