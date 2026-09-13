@@ -1832,22 +1832,26 @@ const EventBudgetPage = () => {
               </div>
             </div>
             <div className="card-actions budget-overview-actions">
-              <button
-                type="button"
-                className="primary"
-                disabled={isSubmitForReviewDisabled(budget.status, summary, submittingReview)}
-                onClick={() => void onSubmitForReview()}
-              >
-                {submittingReview ? 'Submitting…' : 'Submit for review'}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                disabled={isApproveDisabled(budget.status, summary, approvingBudget)}
-                onClick={() => void onApproveBudget()}
-              >
-                {approvingBudget ? 'Approving…' : 'Approve'}
-              </button>
+              {budget.status === 'draft' && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={isSubmitForReviewDisabled(budget.status, summary, submittingReview)}
+                  onClick={() => void onSubmitForReview()}
+                >
+                  {submittingReview ? 'Submitting…' : 'Submit for review'}
+                </button>
+              )}
+              {budget.status === 'review' && (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={isApproveDisabled(budget.status, summary, approvingBudget)}
+                  onClick={() => void onApproveBudget()}
+                >
+                  {approvingBudget ? 'Approving…' : 'Approve'}
+                </button>
+              )}
             </div>
               </>
             )}
