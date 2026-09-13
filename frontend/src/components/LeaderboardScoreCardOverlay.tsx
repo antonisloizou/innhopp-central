@@ -4,6 +4,7 @@ import { EventLeaderboardJump, getEventLeaderboardParticipant, getMyEventLeaderb
 
 type Props = {
   eventId: number;
+  eventName: string;
   participantId?: number;
   participantName: string;
   onClose: () => void;
@@ -14,6 +15,7 @@ const formatDistance = (distance: number) => distance.toLocaleString(undefined, 
 
 const LeaderboardScoreCardOverlay = ({
   eventId,
+  eventName,
   participantId,
   participantName,
   onClose,
@@ -90,7 +92,7 @@ const LeaderboardScoreCardOverlay = ({
     <div className="leaderboard-detail-backdrop" role="presentation" onClick={onClose}>
       <section className="card leaderboard-detail-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-detail-title" onClick={(event) => event.stopPropagation()}>
         <button className="overlay-close-button leaderboard-detail-close" type="button" aria-label="Close jump details" onClick={onClose}>×</button>
-        <header><p className="leaderboard-eyebrow">Completed Innhopps</p><h3 id="leaderboard-detail-title">{participantName}</h3></header>
+        <header><p className="leaderboard-eyebrow">{eventName}: Completed Innhopps</p><h3 id="leaderboard-detail-title">{participantName}</h3></header>
         {loading ? <p className="muted">Loading jumps…</p> : error ? <p className="error-text">{error}</p> : (
           <>
             {jumps.length === 0 ? <p className="muted">No scores recorded</p> : (

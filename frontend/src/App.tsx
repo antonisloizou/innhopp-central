@@ -41,6 +41,7 @@ import InnhoppCsvPage from './pages/InnhoppCsvPage';
 import PublicEventRegistrationPage from './pages/PublicEventRegistrationPage';
 import EventRegistrationsPage from './pages/EventRegistrationsPage';
 import RegistrationDetailPage from './pages/RegistrationDetailPage';
+import MyRegistrationDetailPage from './pages/MyRegistrationDetailPage';
 import EventCommsPage from './pages/EventCommsPage';
 import CommunicationsPage from './pages/CommunicationsPage';
 import EventRoutePlannerPage from './pages/EventRoutePlannerPage';
@@ -90,6 +91,7 @@ const App = () => (
             </>
           ) : null}
           <Route path="registrations/:registrationId" element={<ParticipantRouteGuard><RegistrationDetailPage /></ParticipantRouteGuard>} />
+          <Route path="my-registrations/:registrationId" element={<MyRegistrationDetailPage />} />
           <Route path="events/:eventId/accommodations/:accommodationId" element={<ParticipantRouteGuard eventParam="eventId"><AccommodationDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/new" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />
           <Route path="events/:eventId/innhopps/:innhoppId" element={<ParticipantRouteGuard eventParam="eventId"><InnhoppDetailPage /></ParticipantRouteGuard>} />

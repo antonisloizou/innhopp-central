@@ -179,6 +179,12 @@ const ParticipantDetailPage = () => {
         </div>
       </header>
 
+      <ParticipantEventsCard
+        participantId={profile.id}
+        participantName={profile.full_name}
+        registrationAccess="staff"
+        onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
+      />
       <ParticipantProfileForm
         form={form}
         onChange={(next) => {
@@ -193,11 +199,6 @@ const ParticipantDetailPage = () => {
         roleMode="editable"
         showAdminRoleControl={canManageAccountRoles}
         canEditAdminRole={canManageAccountRoles}
-      />
-      <ParticipantEventsCard
-        participantId={profile.id}
-        participantName={profile.full_name}
-        onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
       />
       {lockNotice}
     </section>

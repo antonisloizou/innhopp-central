@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { listEvents, listSeasons } from '../api/events';
-import type { Event, Season } from '../api/events';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getEventLeaderboardParticipant, getMyEventLeaderboardParticipant, listEvents } from '../api/events';
+import { listEventRegistrations, type Registration } from '../api/registrations';
+import type { Event } from '../api/events';
 import { formatEventLocalDate } from '../utils/eventDate';
 import { useResourceStream } from '../hooks/useResourceStream';
 import LeaderboardScoreCardOverlay from './LeaderboardScoreCardOverlay';
@@ -9,6 +11,8 @@ type Props = {
   participantId: number;
   participantName: string;
   useOwnScores?: boolean;
+  registrations?: Registration[];
+  registrationAccess?: 'own' | 'staff';
   onGoToEvent: (eventId: number) => void;
 };
 
@@ -19,25 +23,47 @@ const compareEventsChronologically = (a: Event, b: Event) => {
   return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 };
 
-const ParticipantEventsCard = ({ participantId, participantName, useOwnScores = false, onGoToEvent }: Props) => {
+const ParticipantEventsCard = ({
+  participantId,
+  participantName,
+  useOwnScores = false,
+  registrations = [],
+  registrationAccess = 'own',
+  onGoToEvent
+}: Props) => {
+  const navigate = useNavigate();
   const [events, setEvents] = useState<Event[]>([]);
-  const [seasons, setSeasons] = useState<Season[]>([]);
+  const [scoredEventIds, setScoredEventIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [scoreCardEvent, setScoreCardEvent] = useState<Event | null>(null);
+  const [openingRegistrationEventId, setOpeningRegistrationEventId] = useState<number | null>(null);
+  const [registrationError, setRegistrationError] = useState<{ eventId: number; message: string } | null>(null);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [eventResponse, seasonResponse] = await Promise.all([listEvents(), listSeasons()]);
-      setEvents(
+      const eventResponse = await listEvents();
+      const participantEvents =
         (Array.isArray(eventResponse) ? eventResponse : [])
           .filter((event) => Array.isArray(event.participant_ids) && event.participant_ids.includes(participantId))
-          .sort(compareEventsChronologically)
+          .sort(compareEventsChronologically);
+      setEvents(participantEvents);
+      const scoreAvailability = await Promise.all(
+        participantEvents.map(async (event) => {
+          try {
+            const jumps = useOwnScores
+              ? await getMyEventLeaderboardParticipant(event.id)
+              : await getEventLeaderboardParticipant(event.id, participantId);
+            return [event.id, jumps.some((jump) => jump.distance_meters != null)] as const;
+          } catch {
+            return [event.id, false] as const;
+          }
+        })
       );
-      setSeasons(Array.isArray(seasonResponse) ? seasonResponse : []);
+      setScoredEventIds(new Set(scoreAvailability.filter(([, hasScore]) => hasScore).map(([eventId]) => eventId)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load events');
     } finally {
@@ -54,7 +80,27 @@ const ParticipantEventsCard = ({ participantId, participantName, useOwnScores = 
     onMessage: () => { void loadEvents(); }
   });
 
-  const seasonNames = useMemo(() => new Map(seasons.map((season) => [season.id, season.name])), [seasons]);
+  const openRegistration = async (event: Event) => {
+    setOpeningRegistrationEventId(event.id);
+    setRegistrationError(null);
+    try {
+      const registration = registrationAccess === 'staff'
+        ? (await listEventRegistrations(event.id)).find((item) => item.participant_id === participantId)
+        : registrations.find((item) => item.event_id === event.id && item.participant_id === participantId);
+      if (!registration) {
+        setRegistrationError({ eventId: event.id, message: 'No registration was found for this participant.' });
+        return;
+      }
+      navigate(registrationAccess === 'staff' ? `/registrations/${registration.id}` : `/my-registrations/${registration.id}`);
+    } catch (err) {
+      setRegistrationError({
+        eventId: event.id,
+        message: err instanceof Error ? err.message : 'Failed to open registration.'
+      });
+    } finally {
+      setOpeningRegistrationEventId(null);
+    }
+  };
 
   return (
     <>
@@ -85,28 +131,44 @@ const ParticipantEventsCard = ({ participantId, participantName, useOwnScores = 
               <article
                 key={event.id}
                 className="card event-summary-card my-profile-event-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => setScoreCardEvent(event)}
-                onKeyDown={(keyboardEvent) => {
-                  if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                    keyboardEvent.preventDefault();
-                    setScoreCardEvent(event);
-                  }
-                }}
               >
-                <header className="card-header event-card-header">
-                  <div>
-                    <h3>{event.name}</h3>
-                    <p className="muted event-location">{event.location || 'Location TBD'}</p>
-                  </div>
-                  <span className={`badge status-${event.status}`}>{event.status}</span>
-                </header>
-                <dl className="card-details">
-                  <div><dt>Season</dt><dd>{seasonNames.get(event.season_id) || `Season ${event.season_id}`}</dd></div>
-                  <div><dt>Starts</dt><dd>{formatEventLocalDate(event.starts_at)}</dd></div>
-                  <div><dt>Ends</dt><dd>{event.ends_at ? formatEventLocalDate(event.ends_at) : 'TBD'}</dd></div>
-                </dl>
+                <div>
+                  <header className="card-header event-card-header">
+                    <div>
+                      <div className="my-profile-event-title">
+                        <h3>{event.name}</h3>
+                        <span className={`badge status-${event.status}`}>{event.status}</span>
+                      </div>
+                      <p className="muted event-location">{event.location || 'Location TBD'}</p>
+                    </div>
+                  </header>
+                  <dl className="card-details">
+                    <div><dt>Starts</dt><dd>{formatEventLocalDate(event.starts_at)}</dd></div>
+                    <div><dt>Ends</dt><dd>{event.ends_at ? formatEventLocalDate(event.ends_at) : 'TBD'}</dd></div>
+                    <div><dt>Innhopps</dt><dd>{Array.isArray(event.innhopps) ? event.innhopps.length : 0}</dd></div>
+                  </dl>
+                </div>
+                <div className="card-actions my-profile-event-actions">
+                  <button className="ghost my-profile-event-schedule-action" type="button" onClick={() => onGoToEvent(event.id)}>
+                    Event Schedule
+                  </button>
+                  <button
+                    className="ghost"
+                    type="button"
+                    disabled={openingRegistrationEventId === event.id}
+                    onClick={() => void openRegistration(event)}
+                  >
+                    {openingRegistrationEventId === event.id ? 'Opening…' : 'Registration'}
+                  </button>
+                  {scoredEventIds.has(event.id) ? (
+                    <button className="ghost" type="button" onClick={() => setScoreCardEvent(event)}>
+                      Score Card
+                    </button>
+                  ) : null}
+                  {registrationError?.eventId === event.id ? (
+                    <p className="error-text">{registrationError.message}</p>
+                  ) : null}
+                </div>
               </article>
             ))}
           </div>
@@ -115,6 +177,7 @@ const ParticipantEventsCard = ({ participantId, participantName, useOwnScores = 
       {scoreCardEvent ? (
         <LeaderboardScoreCardOverlay
           eventId={scoreCardEvent.id}
+          eventName={scoreCardEvent.name}
           participantId={useOwnScores ? undefined : participantId}
           participantName={participantName}
           onClose={() => setScoreCardEvent(null)}

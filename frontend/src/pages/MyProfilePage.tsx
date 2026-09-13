@@ -166,9 +166,9 @@ const MyProfilePage = () => {
     return <p className="muted">Loading profile…</p>;
   }
 
-  const pendingDepositPayments = registrations.flatMap((registration) =>
+  const pendingPayments = registrations.flatMap((registration) =>
     (registration.payments || [])
-      .filter((payment) => payment.kind === 'deposit' && payment.status === 'pending')
+      .filter((payment) => payment.status === 'pending')
       .map((payment) => ({ registration, payment }))
   );
 
@@ -182,20 +182,20 @@ const MyProfilePage = () => {
 
       {error ? <p className="error-text">{error}</p> : null}
       {claimingRegistration ? <p className="muted">Creating your registration…</p> : null}
-      {pendingDepositPayments.length > 0 ? (
+      {pendingPayments.length > 0 ? (
         <section className="card stack pending-payment-card-warning">
           <header className="card-header">
             <div>
-              <h3>Pending deposits</h3>
+              <h3>Pending payments</h3>
             </div>
           </header>
           <div className="stack pending-payment-list">
-            {pendingDepositPayments.map(({ registration, payment }) => (
+            {pendingPayments.map(({ registration, payment }) => (
               <article key={payment.id} className="pending-payment-item">
                 <div>
                   <strong>{registration.event_name || `Event #${registration.event_id}`}</strong>
                   <p className="muted pending-payment-meta">
-                    Deposit {payment.amount} {payment.currency}
+                    {payment.kind === 'main_invoice' ? 'Main invoice' : payment.kind.replace(/_/g, ' ')} {payment.amount} {payment.currency}
                     {payment.due_at ? ` · Due ${formatEventLocalDate(payment.due_at)}` : ''}
                   </p>
                 </div>
@@ -216,6 +216,15 @@ const MyProfilePage = () => {
           </div>
         </section>
       ) : null}
+      {profile ? (
+        <ParticipantEventsCard
+          participantId={profile.id}
+          participantName={profile.full_name || user?.full_name || 'My score'}
+          useOwnScores
+          registrations={registrations}
+          onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
+        />
+      ) : null}
       <ParticipantProfileForm
         form={form}
         onChange={(next) => {
@@ -232,14 +241,6 @@ const MyProfilePage = () => {
         canEditAdminRole={canUseManagedUpdate}
         canSelfRemoveElevatedRoles={!canUseManagedUpdate}
       />
-      {profile ? (
-        <ParticipantEventsCard
-          participantId={profile.id}
-          participantName={profile.full_name || user?.full_name || 'My score'}
-          useOwnScores
-          onGoToEvent={(eventId) => navigate(`/events/${eventId}`)}
-        />
-      ) : null}
     </section>
   );
 };

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Event, listEventSummaries } from '../api/events';
 import { getMyParticipantProfile } from '../api/participants';
 import { listMyRegistrations } from '../api/registrations';
 import { useAuth } from '../auth/AuthProvider';
@@ -13,7 +14,8 @@ const Layout = () => {
   const [navOpen, setNavOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
-  const [hasPendingDeposits, setHasPendingDeposits] = useState(false);
+  const [hasPendingPayments, setHasPendingPayments] = useState(false);
+  const [registeredEvents, setRegisteredEvents] = useState<Event[]>([]);
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
@@ -35,6 +37,17 @@ const Layout = () => {
     const stored = window.localStorage.getItem('innhopp-theme');
     return stored === 'light' ? 'light' : 'dark';
   });
+
+  const registeredUpcomingEvents = useMemo(
+    () =>
+      registeredEvents
+        .filter((event) => event.status !== 'past' && event.status !== 'cancelled')
+        .sort((a, b) => {
+          const byStart = new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime();
+          return byStart || a.id - b.id;
+        }),
+    [registeredEvents]
+  );
 
   useEffect(() => {
     const selectNumberInputValue = (event: FocusEvent | MouseEvent) => {
@@ -90,7 +103,7 @@ const Layout = () => {
     const loadProfileCompletion = async () => {
       if (!user) {
         setProfileIncomplete(false);
-        setHasPendingDeposits(false);
+        setHasPendingPayments(false);
         return;
       }
       try {
@@ -100,9 +113,9 @@ const Layout = () => {
         ]);
         if (!cancelled) {
           setProfileIncomplete(!isProfileCompleteForRegistration(profile));
-          setHasPendingDeposits(
+          setHasPendingPayments(
             registrations.some((registration) =>
-              (registration.payments || []).some((payment) => payment.kind === 'deposit' && payment.status === 'pending')
+              (registration.payments || []).some((payment) => payment.status === 'pending')
             )
           );
         }
@@ -110,7 +123,7 @@ const Layout = () => {
         if (cancelled) return;
         const status = (error as Error & { status?: number })?.status;
         setProfileIncomplete(status === 404);
-        setHasPendingDeposits(false);
+        setHasPendingPayments(false);
       }
     };
 
@@ -124,6 +137,35 @@ const Layout = () => {
       window.removeEventListener('participant-profile-updated', handleProfileUpdated);
     };
   }, [user?.email, user?.account_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRegisteredEvents = async () => {
+      if (!participantOnly) {
+        setRegisteredEvents([]);
+        return;
+      }
+
+      try {
+        const [registrations, events] = await Promise.all([listMyRegistrations(), listEventSummaries()]);
+        if (cancelled) return;
+        const activeRegistrationEventIds = new Set(
+          registrations
+            .filter((registration) => registration.status !== 'cancelled' && registration.status !== 'expired')
+            .map((registration) => registration.event_id)
+        );
+        setRegisteredEvents(events.filter((event) => activeRegistrationEventIds.has(event.id)));
+      } catch {
+        if (!cancelled) setRegisteredEvents([]);
+      }
+    };
+
+    void loadRegisteredEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [participantOnly, user?.account_id]);
 
   const handleNavClick = () => setNavOpen(false);
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -176,6 +218,55 @@ const Layout = () => {
                 >
                   {item.label}
                 </NavLink>
+                {participantOnly && item.to === '/events' && registeredUpcomingEvents.length > 0 && (
+                  <ul className="nav-event-links" aria-label="Your upcoming events">
+                    {registeredUpcomingEvents.map((event) => (
+                      <li key={event.id}>
+                        <NavLink
+                          to={`/events/${event.id}`}
+                          reloadDocument={forceDocumentNavigation}
+                          className={({ isActive }) =>
+                            isActive ? 'nav-link nav-event-link active' : 'nav-link nav-event-link'
+                          }
+                          onClick={handleNavClick}
+                        >
+                          {event.name}
+                        </NavLink>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {participantOnly && item.to === '/events' && (
+                  <NavLink
+                    to="/profile"
+                    reloadDocument={forceDocumentNavigation}
+                    className={({ isActive }) =>
+                      isActive ? 'nav-link nav-profile-link active' : 'nav-link nav-profile-link'
+                    }
+                    onClick={handleNavClick}
+                  >
+                    <span className="nav-user-label">
+                      <span>My Profile</span>
+                      {profileIncomplete || hasPendingPayments ? (
+                        <span
+                          className="nav-user-warning"
+                          title={
+                            profileIncomplete
+                              ? incompleteProfileWarning
+                              : 'Pending payments require attention'
+                          }
+                          aria-label={
+                            profileIncomplete
+                              ? incompleteProfileWarning
+                              : 'Pending payments require attention'
+                          }
+                        >
+                          !
+                        </span>
+                      ) : null}
+                    </span>
+                  </NavLink>
+                )}
               </li>
             ))}
           </ul>
@@ -188,18 +279,18 @@ const Layout = () => {
             >
               <span className="nav-user-label">
                 <span>{user?.full_name || user?.email}</span>
-                {profileIncomplete || hasPendingDeposits ? (
+                {profileIncomplete || hasPendingPayments ? (
                   <span
                     className="nav-user-warning"
                     title={
                       profileIncomplete
                         ? incompleteProfileWarning
-                        : 'Pending deposit payments require attention'
+                        : 'Pending payments require attention'
                     }
                     aria-label={
                       profileIncomplete
                         ? incompleteProfileWarning
-                        : 'Pending deposit payments require attention'
+                        : 'Pending payments require attention'
                     }
                   >
                     !

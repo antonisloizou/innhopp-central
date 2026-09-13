@@ -519,7 +519,7 @@ const RegistrationDetailPage = () => {
             <section key={payment.id} className="registration-payment-card">
               <div className="registration-payment-card-header">
                 <div className="registration-payment-card-title">
-                  <strong>{payment.kind}</strong>
+                  <strong>{formatTitleCase(payment.kind)}</strong>
                   <span className={paymentBadgeClass(payment.status)}>{payment.status}</span>
                 </div>
                 <button

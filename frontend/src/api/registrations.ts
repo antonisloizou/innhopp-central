@@ -153,6 +153,9 @@ export const listEventRegistrations = (eventId: number) =>
 export const listMyRegistrations = () =>
   apiRequest<Registration[]>('/registrations/me');
 
+export const getMyRegistration = (registrationId: number) =>
+  apiRequest<Registration>(`/registrations/me/${registrationId}`);
+
 export const createEventRegistration = (eventId: number, payload: CreateRegistrationPayload) =>
   apiRequest<Registration>(`/registrations/events/${eventId}`, {
     method: 'POST',

@@ -205,7 +205,7 @@ const EventLeaderboardPage = () => {
         </>
       )}
       <button className="ghost leaderboard-back" type="button" onClick={() => navigate(`/events/${event.id}`)}>Back to event</button>
-      {selectedEntry ? <LeaderboardScoreCardOverlay eventId={eventId} participantId={selectedEntry.id} participantName={selectedEntry.name} onClose={() => setSelectedEntry(null)} /> : null}
+      {selectedEntry ? <LeaderboardScoreCardOverlay eventId={eventId} eventName={event.name} participantId={selectedEntry.id} participantName={selectedEntry.name} onClose={() => setSelectedEntry(null)} /> : null}
     </section>
   );
 };

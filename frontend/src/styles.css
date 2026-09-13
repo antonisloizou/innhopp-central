@@ -1545,17 +1545,9 @@ button.ghost {
   margin-top: 1rem;
 }
 
-.my-profile-events-card {
+.card.my-profile-events-card {
   margin-top: 1.5rem;
-}
-
-.my-profile-event-card {
-  cursor: pointer;
-}
-
-.my-profile-event-card:focus-visible {
-  outline: 2px solid var(--accent, #3985a5);
-  outline-offset: 3px;
+  margin-bottom: 2.5rem;
 }
 
 .participant-profile-save-action {
@@ -1873,6 +1865,22 @@ button.ghost {
 .nav-link.active {
   background: #2563eb;
   color: #fff;
+}
+
+.app-nav .nav-event-links {
+  margin: 0.4rem 0 0;
+  padding-left: 1rem;
+  gap: 0.4rem;
+  position: static;
+}
+
+.nav-event-link {
+  padding: 0.55rem 0.75rem;
+  font-size: 1rem;
+}
+
+.nav-event-links + .nav-profile-link {
+  margin-top: 0.75rem;
 }
 
 .nav-bottom {
@@ -3443,6 +3451,48 @@ button.ghost {
   line-height: 1.35;
   color: var(--text-muted);
   text-align: left;
+}
+
+.my-profile-event-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.my-profile-event-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.my-profile-event-actions {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+
+.my-profile-event-actions > * {
+  justify-content: center;
+  text-align: center;
+}
+
+/* The wider Schedule label has a lower apparent x-height at the shared size. */
+.my-profile-event-schedule-action {
+  font-size: 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .my-profile-event-card {
+    grid-template-columns: 1fr;
+  }
+
+  .my-profile-event-actions {
+    align-items: stretch;
+  }
+
 }
 
 .card-actions {

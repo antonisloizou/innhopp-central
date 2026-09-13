@@ -75,6 +75,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.Post("/public/events/{slug}/register", h.createPublicRegistration)
 	r.Post("/public/events/{slug}/claim", h.createClaimedPublicRegistration)
 	r.Get("/me", h.listOwnRegistrations)
+	r.Get("/me/{registrationID}", h.getOwnRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/events/{eventID}", h.listEventRegistrations)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/events/{eventID}", h.createRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}/stream", h.streamRegistration)
@@ -1800,6 +1801,64 @@ func (h *Handler) listOwnRegistrations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, registrations)
+}
+
+// getOwnRegistration gives an authenticated participant access to one of their
+// registrations without granting access to the staff registration endpoints.
+func (h *Handler) getOwnRegistration(w http.ResponseWriter, r *http.Request) {
+	registrationID, err := strconv.ParseInt(chi.URLParam(r, "registrationID"), 10, 64)
+	if err != nil || registrationID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid registration id")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	if email == "" {
+		httpx.Error(w, http.StatusBadRequest, "email claim missing")
+		return
+	}
+
+	var owned bool
+	err = h.db.QueryRow(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1
+			FROM event_registrations r
+			JOIN participant_profiles p ON p.id = r.participant_id
+			WHERE r.id = $1
+			  AND (($2 > 0 AND p.account_id = $2) OR lower(p.email) = $3)
+		)
+	`, registrationID, claims.AccountID, email).Scan(&owned)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to verify registration access")
+		return
+	}
+	if !owned {
+		httpx.Error(w, http.StatusNotFound, "registration not found")
+		return
+	}
+
+	registration, err := h.loadRegistration(r.Context(), registrationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "registration not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
+		return
+	}
+	// These fields are staff-only operational data; participant access is
+	// deliberately read-only and excludes staff notes and activity.
+	registration.InternalNotes = ""
+	registration.Tags = nil
+	registration.Activities = nil
+	for i := range registration.Payments {
+		registration.Payments[i].Notes = ""
+	}
+	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 
 func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request) {
