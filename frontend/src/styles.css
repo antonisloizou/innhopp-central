@@ -1565,6 +1565,12 @@ button.ghost {
   grid-column: 1 / -1;
 }
 
+.participant-profile-preferences-divider {
+  grid-column: 1 / -1;
+  width: 100%;
+  border-top: 1px solid var(--panel-input-border);
+}
+
 .form-field-full-span {
   grid-column: 1 / -1;
 }

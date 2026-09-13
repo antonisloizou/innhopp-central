@@ -59,33 +59,3 @@ jobs:
           tags: |
             ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:${{ steps.vars.outputs.sha_tag }}
             ${{ steps.vars.outputs.registry }}/${{ env.ECR_FRONTEND }}:latest
-
-      - name: Upload compose file
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "deploy/docker-compose.ec2.yml"
-          target: "/home/ec2-user/app"
-
-      - name: Deploy on EC2
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            set -e
-            mkdir -p /home/ec2-user/app
-            cat <<'EOF' > /home/ec2-user/app/.env
-            ${{ secrets.EC2_APP_ENV }}
-            GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}
-            EOF
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
-              | docker login --username AWS --password-stdin \
-                ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
-            export IMAGE_TAG=${{ steps.vars.outputs.sha_tag }}
-            export ECR_REGISTRY=${{ steps.vars.outputs.registry }}
-            docker-compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml pull
-            docker-compose -f /home/ec2-user/app/deploy/docker-compose.ec2.yml up -d --force-recreate

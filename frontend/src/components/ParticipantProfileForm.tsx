@@ -753,6 +753,7 @@ const ParticipantProfileForm = ({
               ))}
             </select>
           </label>
+          <div className="participant-profile-preferences-divider" aria-hidden="true" />
           <MultiSelectField
             label="High Sensation Seeker"
             values={form.hss_qualities}
