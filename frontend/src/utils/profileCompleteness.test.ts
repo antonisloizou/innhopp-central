@@ -16,6 +16,9 @@ const completeProfile: ParticipantProfile = {
   main_canopy: 'Sabre 3',
   wingload: '1.2',
   license: 'C',
+  uses_packer: 'Sometimes',
+  accommodation: 'Shared (usually 2 per room)',
+  accommodation_roommate: 'Alan Turing',
   roles: ['Participant'],
   ratings: [],
   disciplines: [],
@@ -31,5 +34,10 @@ describe('isProfileCompleteForRegistration', () => {
   it('keeps a profile incomplete when emergency contact details are missing', () => {
     expect(isProfileCompleteForRegistration({ ...completeProfile, emergency_contact_name: '' })).toBe(false);
     expect(isProfileCompleteForRegistration({ ...completeProfile, emergency_contact_phone: '' })).toBe(false);
+  });
+
+  it('requires packer preference but not an optional roommate preference', () => {
+    expect(isProfileCompleteForRegistration({ ...completeProfile, uses_packer: '' })).toBe(false);
+    expect(isProfileCompleteForRegistration({ ...completeProfile, accommodation_roommate: '' })).toBe(true);
   });
 });

@@ -2428,18 +2428,20 @@ button.ghost {
   min-width: 160px;
 }
 
-.form-field input.participant-onboarding-completed-checkbox {
+.participant-onboarding-event-count-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 0.5rem;
+}
+
+.participant-onboarding-event-count-controls > * {
+  min-width: 0;
+}
+
+.participant-onboarding-newsletter-checkbox {
   width: auto;
   padding: 0;
   accent-color: #2563eb;
-}
-
-.participant-onboarding-profile-completed-field {
-  display: flex;
-  align-items: center;
-  align-self: end;
-  gap: 0.6rem;
-  margin-bottom: 0.55rem;
 }
 
 .participant-onboarding-roles-field {

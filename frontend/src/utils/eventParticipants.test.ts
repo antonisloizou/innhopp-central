@@ -12,6 +12,7 @@ const participant = (id: number, roles: string[]): ParticipantProfile => ({
   disciplines: [],
   other_air_sports: [],
   dietary_restrictions: [],
+  accommodation: 'Shared (usually 2 per room)',
   medical_expertise: [],
   hss_qualities: [],
   account_roles: [],

@@ -15,6 +15,7 @@ export const landingAreaPreferenceOptions = [
 export const tshirtSizeOptions = ['XS', 'S', 'M', 'L', 'XL', 'XXL'] as const;
 export const tshirtGenderOptions = ['Male', 'Female'] as const;
 export const licenseOptions = ['Non jumper', 'A', 'B', 'C', 'D'] as const;
+export const usesPackerOptions = ['Yes', 'No', 'Sometimes'] as const;
 export const ratingOptions = ['AFF', 'Tandem', 'PRO / DEMO', 'Rigger', 'Video'] as const;
 export const disciplineOptions = ['FS', 'FF', 'CP', 'WS', 'CRW', 'XRW'] as const;
 export const otherAirSportOptions = ['Speedflying', 'BASE', 'Paragliding'] as const;
@@ -26,6 +27,7 @@ export const dietaryRestrictionOptions = [
   'Halal',
   'Gluten-free'
 ] as const;
+export const accommodationOptions = ['Shared (usually 2 per room)', 'Single Room (additional cost)'] as const;
 export const medicalExpertiseOptions = [
   'Doctor',
   'Paramedic',
@@ -261,6 +263,7 @@ export const createParticipantFormState = (
     main_canopy: profile?.main_canopy ?? seed?.main_canopy ?? '',
     wingload: profile?.wingload ?? seed?.wingload ?? '',
     license: profile?.license ?? seed?.license ?? '',
+    uses_packer: profile?.uses_packer ?? seed?.uses_packer ?? '',
     roles,
     ratings: profile?.ratings ?? seed?.ratings ?? [],
     disciplines: profile?.disciplines ?? seed?.disciplines ?? [],
@@ -270,6 +273,8 @@ export const createParticipantFormState = (
     tshirt_size: profile?.tshirt_size ?? seed?.tshirt_size ?? '',
     tshirt_gender: profile?.tshirt_gender ?? seed?.tshirt_gender ?? '',
     dietary_restrictions: profile?.dietary_restrictions ?? seed?.dietary_restrictions ?? [],
+    accommodation: profile?.accommodation ?? seed?.accommodation ?? accommodationOptions[0],
+    accommodation_roommate: profile?.accommodation_roommate ?? seed?.accommodation_roommate ?? '',
     medical_conditions: profile?.medical_conditions ?? seed?.medical_conditions ?? '',
     medical_expertise: profile?.medical_expertise ?? seed?.medical_expertise ?? [],
     hss_qualities: profile?.hss_qualities ?? seed?.hss_qualities ?? [],
@@ -296,6 +301,7 @@ export const toParticipantPayload = (form: CreateParticipantPayload): CreatePart
   main_canopy: form.main_canopy?.trim() || undefined,
   wingload: form.wingload?.trim() || undefined,
   license: form.license?.trim() === 'Non jumper' ? undefined : form.license?.trim() || undefined,
+  uses_packer: form.uses_packer?.trim() || undefined,
   roles: normalizeList(form.roles).length ? normalizeList(form.roles) : ['Participant'],
   ratings: normalizeList(form.ratings),
   disciplines: normalizeList(form.disciplines),
@@ -305,6 +311,8 @@ export const toParticipantPayload = (form: CreateParticipantPayload): CreatePart
   tshirt_size: form.tshirt_size?.trim() || undefined,
   tshirt_gender: form.tshirt_gender?.trim() || undefined,
   dietary_restrictions: normalizeList(form.dietary_restrictions),
+  accommodation: form.accommodation || accommodationOptions[0],
+  accommodation_roommate: form.accommodation_roommate?.trim() || undefined,
   medical_conditions: form.medical_conditions?.trim() || undefined,
   medical_expertise: normalizeList(form.medical_expertise),
   hss_qualities: normalizeList(form.hss_qualities),
@@ -327,6 +335,7 @@ const ParticipantProfileForm = ({
     basic: false,
     skydiving: false,
     medical: false,
+    mealsAccommodation: false,
     preferences: false
   });
   const updateField = <K extends keyof CreateParticipantPayload>(key: K, value: CreateParticipantPayload[K]) => {
@@ -353,6 +362,7 @@ const ParticipantProfileForm = ({
     license: !isNonJumper && !hasText(form.license),
     main_canopy: !isNonJumper && !hasText(form.main_canopy),
     wingload: !isNonJumper && !hasText(form.wingload),
+    uses_packer: !isNonJumper && !hasText(form.uses_packer),
     years_in_sport: !isNonJumper && typeof form.years_in_sport !== 'number',
     jump_count: !isNonJumper && typeof form.jump_count !== 'number',
     recent_jump_count: !isNonJumper && typeof form.recent_jump_count !== 'number',
@@ -576,7 +586,8 @@ const ParticipantProfileForm = ({
           missingRequired.wingload ||
           missingRequired.years_in_sport ||
           missingRequired.jump_count ||
-          missingRequired.recent_jump_count
+          missingRequired.recent_jump_count ||
+          missingRequired.uses_packer
         }
       >
         <div className="form-grid participant-profile-grid">
@@ -639,6 +650,20 @@ const ParticipantProfileForm = ({
                   value={readNumberValue(form.recent_jump_count)}
                   onChange={(event) => updateField('recent_jump_count', parseOptionalNumber(event.target.value))}
                 />
+              </label>
+              <label className={`form-field participant-profile-full-span participant-profile-max-320 ${missingRequired.uses_packer ? 'field-missing' : ''}`}>
+                <span>Do you use a packer?</span>
+                <select
+                  value={form.uses_packer || ''}
+                  onChange={(event) => updateField('uses_packer', event.target.value)}
+                >
+                  <option value="">Select one</option>
+                  {usesPackerOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </label>
               <MultiSelectField
                 label="Ratings"
@@ -724,15 +749,6 @@ const ParticipantProfileForm = ({
             />
           </label>
           <MultiSelectField
-            label="Dietary restrictions"
-            values={form.dietary_restrictions}
-            options={dietaryRestrictionOptions}
-            onToggle={(value, checked) =>
-              updateField('dietary_restrictions', toggleValue(form.dietary_restrictions, value, checked))
-            }
-            customLabel="Add another restriction"
-          />
-          <MultiSelectField
             label="Medical expertise"
             values={form.medical_expertise}
             options={medicalExpertiseOptions}
@@ -741,6 +757,49 @@ const ParticipantProfileForm = ({
             }
             customLabel="Add another expertise"
           />
+        </div>
+        <CardSaveAction submitting={submitting} saved={saved} error={error} />
+      </CollapsibleCard>
+
+      <CollapsibleCard
+        title="Meals and Accommodation"
+        open={expandedCards.mealsAccommodation}
+        onToggle={() => toggleCard('mealsAccommodation')}
+        hasMissingRequired={!hasText(form.accommodation)}
+      >
+        <div className="form-grid">
+          <MultiSelectField
+            label="Dietary restrictions"
+            values={form.dietary_restrictions}
+            options={dietaryRestrictionOptions}
+            onToggle={(value, checked) =>
+              updateField('dietary_restrictions', toggleValue(form.dietary_restrictions, value, checked))
+            }
+            customLabel="Add another restriction"
+          />
+          <label className={`form-field participant-profile-full-span participant-profile-max-420 ${!hasText(form.accommodation) ? 'field-missing' : ''}`}>
+            <span>Accommodation</span>
+            <select
+              value={form.accommodation || accommodationOptions[0]}
+              onChange={(event) => updateField('accommodation', event.target.value)}
+            >
+              {accommodationOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          {form.accommodation === accommodationOptions[0] ? (
+            <label className="form-field participant-profile-full-span participant-profile-max-420">
+              <span>I would like to share a room with</span>
+              <input
+                type="text"
+                value={form.accommodation_roommate || ''}
+                onChange={(event) => updateField('accommodation_roommate', event.target.value)}
+              />
+            </label>
+          ) : null}
         </div>
         <CardSaveAction submitting={submitting} saved={saved} error={error} />
       </CollapsibleCard>

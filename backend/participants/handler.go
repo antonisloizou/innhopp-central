@@ -62,6 +62,7 @@ type Profile struct {
 	MainCanopy            string    `json:"main_canopy,omitempty"`
 	Wingload              string    `json:"wingload,omitempty"`
 	License               string    `json:"license,omitempty"`
+	UsesPacker            string    `json:"uses_packer,omitempty"`
 	Roles                 []string  `json:"roles"`
 	Ratings               []string  `json:"ratings"`
 	Disciplines           []string  `json:"disciplines"`
@@ -71,6 +72,8 @@ type Profile struct {
 	TshirtSize            string    `json:"tshirt_size,omitempty"`
 	TshirtGender          string    `json:"tshirt_gender,omitempty"`
 	DietaryRestrictions   []string  `json:"dietary_restrictions"`
+	Accommodation         string    `json:"accommodation"`
+	AccommodationRoommate string    `json:"accommodation_roommate,omitempty"`
 	MedicalConditions     string    `json:"medical_conditions,omitempty"`
 	MedicalExpertise      []string  `json:"medical_expertise"`
 	HSSQualities          []string  `json:"hss_qualities"`
@@ -97,6 +100,7 @@ type profilePayload struct {
 	MainCanopy            string   `json:"main_canopy"`
 	Wingload              string   `json:"wingload"`
 	License               string   `json:"license"`
+	UsesPacker            string   `json:"uses_packer"`
 	Roles                 []string `json:"roles"`
 	Ratings               []string `json:"ratings"`
 	Disciplines           []string `json:"disciplines"`
@@ -106,6 +110,8 @@ type profilePayload struct {
 	TshirtSize            string   `json:"tshirt_size"`
 	TshirtGender          string   `json:"tshirt_gender"`
 	DietaryRestrictions   []string `json:"dietary_restrictions"`
+	Accommodation         string   `json:"accommodation"`
+	AccommodationRoommate string   `json:"accommodation_roommate"`
 	MedicalConditions     string   `json:"medical_conditions"`
 	MedicalExpertise      []string `json:"medical_expertise"`
 	HSSQualities          []string `json:"hss_qualities"`
@@ -132,6 +138,7 @@ const profileSelectColumns = `
 	COALESCE(main_canopy, ''),
 	COALESCE(wingload, ''),
 	COALESCE(license, ''),
+	COALESCE(uses_packer, ''),
 	COALESCE(roles, ARRAY['Participant']::TEXT[]),
 	COALESCE(ratings, ARRAY[]::TEXT[]),
 	COALESCE(disciplines, ARRAY[]::TEXT[]),
@@ -142,6 +149,8 @@ const profileSelectColumns = `
 	COALESCE(tshirt_gender, ''),
 	COALESCE(account_roles, ARRAY[]::TEXT[]),
 	COALESCE(dietary_restrictions, ARRAY[]::TEXT[]),
+	COALESCE(accommodation, 'Shared (usually 2 per room)'),
+	COALESCE(accommodation_roommate, ''),
 	COALESCE(medical_conditions, ''),
 	COALESCE(medical_expertise, ARRAY[]::TEXT[]),
 	COALESCE(hss_qualities, ARRAY[]::TEXT[]),
@@ -386,6 +395,7 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 		&profile.MainCanopy,
 		&profile.Wingload,
 		&profile.License,
+		&profile.UsesPacker,
 		&profile.Roles,
 		&profile.Ratings,
 		&profile.Disciplines,
@@ -396,6 +406,8 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 		&profile.TshirtGender,
 		&profile.AccountRoles,
 		&profile.DietaryRestrictions,
+		&profile.Accommodation,
+		&profile.AccommodationRoommate,
 		&profile.MedicalConditions,
 		&profile.MedicalExpertise,
 		&profile.HSSQualities,
@@ -508,10 +520,16 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	payload.MainCanopy = normalizeOptionalString(payload.MainCanopy)
 	payload.Wingload = normalizeOptionalString(payload.Wingload)
 	payload.License = normalizeOptionalString(payload.License)
+	payload.UsesPacker = normalizeOptionalString(payload.UsesPacker)
 	payload.CanopyCourse = normalizeOptionalString(payload.CanopyCourse)
 	payload.LandingAreaPreference = normalizeOptionalString(payload.LandingAreaPreference)
 	payload.TshirtSize = normalizeOptionalString(payload.TshirtSize)
 	payload.TshirtGender = normalizeOptionalString(payload.TshirtGender)
+	payload.Accommodation = normalizeOptionalString(payload.Accommodation)
+	if payload.Accommodation == "" {
+		payload.Accommodation = "Shared (usually 2 per room)"
+	}
+	payload.AccommodationRoommate = normalizeOptionalString(payload.AccommodationRoommate)
 	payload.MedicalConditions = normalizeOptionalString(payload.MedicalConditions)
 	payload.YearsInSport = normalizeOptionalInt(payload.YearsInSport)
 	payload.JumpCount = normalizeOptionalInt(payload.JumpCount)
@@ -617,7 +635,10 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			medical_expertise,
 			hss_qualities,
 			emergency_contact_name,
-			emergency_contact_phone
+			emergency_contact_phone,
+			accommodation,
+			accommodation_roommate,
+			uses_packer
 		)
 		VALUES (
 			$1,
@@ -651,7 +672,10 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			$28,
 			$29,
 			$30,
-			$31
+			$31,
+			$32,
+			$33,
+			$34
 		)
 		RETURNING `+profileSelectColumns,
 		fullName,
@@ -685,6 +709,9 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 		payload.HSSQualities,
 		payload.EmergencyContactName,
 		payload.EmergencyContactPhone,
+		payload.Accommodation,
+		payload.AccommodationRoommate,
+		payload.UsesPacker,
 	)
 
 	profile, err := scanProfile(row)
@@ -846,11 +873,14 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 				medical_expertise,
 				hss_qualities,
 				emergency_contact_name,
-				emergency_contact_phone
+				emergency_contact_phone,
+				accommodation,
+				accommodation_roommate,
+				uses_packer
 			)
 			VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-				$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32
+				$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35
 			)
 			RETURNING `+profileSelectColumns,
 			fullName,
@@ -885,6 +915,9 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			payload.HSSQualities,
 			payload.EmergencyContactName,
 			payload.EmergencyContactPhone,
+			payload.Accommodation,
+			payload.AccommodationRoommate,
+			payload.UsesPacker,
 		)
 
 		profile, insertErr := scanProfile(row)
@@ -921,7 +954,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		SET
 			full_name = $1,
 			email = $2,
-			account_id = COALESCE($33, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
+			account_id = COALESCE($36, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
 			phone = $3,
 			notes = $4,
 			emergency_contact = $5,
@@ -950,8 +983,11 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			medical_expertise = $28,
 			hss_qualities = $29,
 			emergency_contact_name = $30,
-			emergency_contact_phone = $31
-		WHERE id = $32
+			emergency_contact_phone = $31,
+			accommodation = $32,
+			accommodation_roommate = $33,
+			uses_packer = $34
+		WHERE id = $35
 	`,
 		fullName,
 		email,
@@ -984,6 +1020,9 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		payload.HSSQualities,
 		payload.EmergencyContactName,
 		payload.EmergencyContactPhone,
+		payload.Accommodation,
+		payload.AccommodationRoommate,
+		payload.UsesPacker,
 		existingID,
 		nullableAccountID(claims.AccountID),
 	)
@@ -1072,8 +1111,11 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 			medical_expertise = $28,
 			hss_qualities = $29,
 			emergency_contact_name = $30,
-			emergency_contact_phone = $31
-		WHERE id = $32
+			emergency_contact_phone = $31,
+			accommodation = $32,
+			accommodation_roommate = $33,
+			uses_packer = $34
+		WHERE id = $35
 	`,
 		fullName,
 		email,
@@ -1106,6 +1148,9 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		payload.HSSQualities,
 		payload.EmergencyContactName,
 		payload.EmergencyContactPhone,
+		payload.Accommodation,
+		payload.AccommodationRoommate,
+		payload.UsesPacker,
 		profileID,
 	)
 	if execErr != nil {

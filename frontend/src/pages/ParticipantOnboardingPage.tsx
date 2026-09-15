@@ -93,7 +93,15 @@ const ParticipantOnboardingPage = () => {
   const [nameQuery, setNameQuery] = useState<string>(() => searchParams.get('q') || '');
   const [emailQuery, setEmailQuery] = useState<string>(() => searchParams.get('email') || '');
   const [eventCountQuery, setEventCountQuery] = useState<string>(() => searchParams.get('event_count') || '');
-  const [profileCompletedOnly, setProfileCompletedOnly] = useState(() => searchParams.get('profile_completed') === 'true');
+  const [eventCountMode, setEventCountMode] = useState<'at_least' | 'exactly'>(
+    () => searchParams.get('event_count_mode') === 'exactly' ? 'exactly' : 'at_least'
+  );
+  const [profileCompletionFilter, setProfileCompletionFilter] = useState<'any' | 'complete' | 'incomplete'>(
+    () => {
+      const value = searchParams.get('profile_completed');
+      return value === 'incomplete' ? 'incomplete' : value === 'complete' || value === 'true' ? 'complete' : 'any';
+    }
+  );
   const [excludeNewsletterSubscribersOnly, setExcludeNewsletterSubscribersOnly] = useState(
     () => searchParams.get('exclude_newsletter_subscribers_only') !== 'false'
   );
@@ -133,10 +141,11 @@ const ParticipantOnboardingPage = () => {
     if (nameQuery) next.set('q', nameQuery);
     if (emailQuery) next.set('email', emailQuery);
     if (eventCountQuery) next.set('event_count', eventCountQuery);
-    if (profileCompletedOnly) next.set('profile_completed', 'true');
+    if (eventCountMode === 'exactly') next.set('event_count_mode', 'exactly');
+    if (profileCompletionFilter !== 'any') next.set('profile_completed', profileCompletionFilter);
     if (!excludeNewsletterSubscribersOnly) next.set('exclude_newsletter_subscribers_only', 'false');
     setSearchParams(next, { replace: true });
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, profileCompletedOnly, excludeNewsletterSubscribersOnly, setSearchParams]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,7 +222,8 @@ const ParticipantOnboardingPage = () => {
     const matchesEventCount = (eventCount: number) => {
       if (!eventCountQuery.trim()) return true;
       const count = Number(eventCountQuery);
-      return Number.isInteger(count) && count >= 0 && eventCount === count;
+      if (!Number.isInteger(count) || count < 0) return false;
+      return eventCountMode === 'exactly' ? eventCount === count : eventCount >= count;
     };
 
     const addParticipant = (id: number, acc: ParticipantCard[], seen: Set<number>) => {
@@ -223,7 +233,9 @@ const ParticipantOnboardingPage = () => {
       if (!matchesSelectedRoles(profile)) return;
       if (!matchesName(profile)) return;
       if (!matchesEmail(profile)) return;
-      if (profileCompletedOnly && (!profile || !isProfileCompleteForRegistration(profile))) return;
+      const profileComplete = Boolean(profile && isProfileCompleteForRegistration(profile));
+      if (profileCompletionFilter === 'complete' && !profileComplete) return;
+      if (profileCompletionFilter === 'incomplete' && profileComplete) return;
       const eventCount = participantEventsMap.get(id)?.length || 0;
       if (!matchesEventCount(eventCount)) return;
       if (excludeNewsletterSubscribersOnly && profile && isNewsletterSubscriberOnly(profile, eventCount)) return;
@@ -272,7 +284,8 @@ const ParticipantOnboardingPage = () => {
     nameQuery,
     emailQuery,
     eventCountQuery,
-    profileCompletedOnly,
+    eventCountMode,
+    profileCompletionFilter,
     excludeNewsletterSubscribersOnly,
     events,
     filteredEvents,
@@ -352,11 +365,12 @@ const ParticipantOnboardingPage = () => {
     if (nameQuery) params.set('q', nameQuery);
     if (emailQuery) params.set('email', emailQuery);
     if (eventCountQuery) params.set('event_count', eventCountQuery);
-    if (profileCompletedOnly) params.set('profile_completed', 'true');
+    if (eventCountMode === 'exactly') params.set('event_count_mode', 'exactly');
+    if (profileCompletionFilter !== 'any') params.set('profile_completed', profileCompletionFilter);
     if (!excludeNewsletterSubscribersOnly) params.set('exclude_newsletter_subscribers_only', 'false');
     const serialized = params.toString();
     return serialized ? `?${serialized}` : '';
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, profileCompletedOnly, excludeNewsletterSubscribersOnly]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly]);
 
   return (
     <section className="stack">
@@ -448,24 +462,37 @@ const ParticipantOnboardingPage = () => {
             />
           </label>
           <label className="form-field">
-            <span>Number of events registered</span>
-            <input
-              type="number"
-              min="0"
-              step="1"
-              placeholder="Any"
-              value={eventCountQuery}
-              onChange={(e) => setEventCountQuery(e.target.value)}
-            />
+            <span>Number of events</span>
+            <div className="participant-onboarding-event-count-controls">
+              <select
+                value={eventCountMode}
+                onChange={(e) => setEventCountMode(e.target.value as 'at_least' | 'exactly')}
+                aria-label="Event count match type"
+              >
+                <option value="at_least">At Least</option>
+                <option value="exactly">Exactly</option>
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Any"
+                value={eventCountQuery}
+                onChange={(e) => setEventCountQuery(e.target.value)}
+                aria-label="Number of events"
+              />
+            </div>
           </label>
-          <label className="form-field participant-onboarding-profile-completed-field">
+          <label className="form-field">
             <span>Profile completed</span>
-            <input
-              type="checkbox"
-              className="participant-onboarding-completed-checkbox"
-              checked={profileCompletedOnly}
-              onChange={(e) => setProfileCompletedOnly(e.target.checked)}
-            />
+            <select
+              value={profileCompletionFilter}
+              onChange={(e) => setProfileCompletionFilter(e.target.value as 'any' | 'complete' | 'incomplete')}
+            >
+              <option value="any">Any</option>
+              <option value="complete">Complete</option>
+              <option value="incomplete">Incomplete</option>
+            </select>
           </label>
           <div className="form-field participant-onboarding-roles-field">
             <span>Roles</span>
@@ -510,7 +537,7 @@ const ParticipantOnboardingPage = () => {
             <span>Hide Only Newsletter Subscribers</span>
             <input
               type="checkbox"
-              className="participant-onboarding-completed-checkbox"
+              className="participant-onboarding-newsletter-checkbox"
               checked={excludeNewsletterSubscribersOnly}
               onChange={(e) => setExcludeNewsletterSubscribersOnly(e.target.checked)}
             />

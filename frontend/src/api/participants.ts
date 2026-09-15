@@ -20,6 +20,7 @@ export interface ParticipantProfile {
   main_canopy?: string;
   wingload?: string;
   license?: string;
+  uses_packer?: string;
   roles: string[];
   ratings: string[];
   disciplines: string[];
@@ -29,6 +30,8 @@ export interface ParticipantProfile {
   tshirt_size?: string;
   tshirt_gender?: string;
   dietary_restrictions: string[];
+  accommodation: string;
+  accommodation_roommate?: string;
   medical_conditions?: string;
   medical_expertise: string[];
   hss_qualities: string[];
@@ -58,6 +61,7 @@ export interface CreateParticipantPayload {
   main_canopy?: string;
   wingload?: string;
   license?: string;
+  uses_packer?: string;
   roles?: string[];
   ratings?: string[];
   disciplines?: string[];
@@ -67,6 +71,8 @@ export interface CreateParticipantPayload {
   tshirt_size?: string;
   tshirt_gender?: string;
   dietary_restrictions?: string[];
+  accommodation?: string;
+  accommodation_roommate?: string;
   medical_conditions?: string;
   medical_expertise?: string[];
   hss_qualities?: string[];
