@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useState } from 'react';
 import { CreateParticipantPayload, ParticipantProfile } from '../api/participants';
 import { roleOptions } from '../utils/roles';
+import { citizenshipOptions } from '../utils/citizenships';
 
 export const canopyCourseOptions = [
   'Attended 1 or more canopy courses',
@@ -431,11 +432,18 @@ const ParticipantProfileForm = ({
           </label>
           <label className="form-field">
             <span>Citizenship</span>
-            <input
-              type="text"
+            <select
               value={form.citizenship || ''}
               onChange={(event) => updateField('citizenship', event.target.value)}
-            />
+            >
+              <option value="">Select citizenship</option>
+              {citizenshipOptions.map(({ code, name }) => (
+                <option key={code} value={code}>{name}</option>
+              ))}
+            </select>
+            {form.citizenship && !citizenshipOptions.some(({ code }) => code === form.citizenship) ? (
+              <small className="muted">Current legacy value: {form.citizenship}</small>
+            ) : null}
           </label>
           <label className="form-field participant-profile-full-span">
             <span>Notes</span>

@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode, Ref } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { copyEvent, deleteEvent, Event, getEvent, listEvents } from '../api/events';
 import {
   AudienceFilter,
@@ -39,6 +39,11 @@ type BodyLinkEntry = {
 
 type CommunicationsPageProps = {
   fixedEventId?: number;
+};
+
+type CommunicationsNavigationState = {
+  includedRegistrationIds?: number[];
+  excludedRegistrationIds?: number[];
 };
 
 type BodyLinkEditorState = {
@@ -965,6 +970,7 @@ const addableRecipientOptionLabel = (recipient: AudienceRecipientWithEvent, even
 
 const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const eventScoped = Number.isFinite(fixedEventId);
   const [eventData, setEventData] = useState<Event | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
@@ -987,9 +993,20 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
   const [selectedEventIds, setSelectedEventIds] = useState<number[]>(() =>
     fixedEventId ? [fixedEventId] : []
   );
-  const [filter, setFilter] = useState<AudienceFilter>(
-    defaultAudienceRoles.length > 0 ? { roles: defaultAudienceRoles } : {}
-  );
+  const [filter, setFilter] = useState<AudienceFilter>(() => {
+    const navigationState = location.state as CommunicationsNavigationState | null;
+    const includedRegistrationIds = Array.isArray(navigationState?.includedRegistrationIds)
+      ? navigationState.includedRegistrationIds.filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+    const excludedRegistrationIds = Array.isArray(navigationState?.excludedRegistrationIds)
+      ? navigationState.excludedRegistrationIds.filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+    return {
+      ...(defaultAudienceRoles.length > 0 ? { roles: defaultAudienceRoles } : {}),
+      ...(includedRegistrationIds.length ? { included_registration_ids: includedRegistrationIds } : {}),
+      ...(excludedRegistrationIds.length ? { excluded_registration_ids: excludedRegistrationIds } : {})
+    };
+  });
   const [templateForm, setTemplateForm] = useState<TemplateForm>(initialTemplateForm);
   const [bodyLinkEditor, setBodyLinkEditor] = useState<BodyLinkEditorState>({
     open: false,
@@ -1324,7 +1341,6 @@ const insertIntoActiveTemplateField = (snippet: string) => {
         );
         if (nextTemplates.length > 0) {
           setSelectedTemplateId(String(nextTemplates[0].id));
-          setSelectedTemplateEditorId(String(nextTemplates[0].id));
         }
       } catch (err) {
         if (!cancelled) {

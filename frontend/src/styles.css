@@ -83,6 +83,11 @@ body.nav-open {
   height: 100vh;
 }
 
+body.event-participants-overlay-open {
+  overflow: hidden;
+  height: 100vh;
+}
+
 body::-webkit-scrollbar {
   width: 10px;
   background: transparent;
@@ -2594,6 +2599,513 @@ button.ghost {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.5rem;
   align-items: start;
+}
+
+.event-participants-summary,
+.event-participants-charts {
+  display: grid;
+  gap: 1rem;
+}
+
+.event-participants-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.event-participants-summary .registration-stat-label,
+.event-participants-chart-card .registration-stat-label {
+  font-size: 0.8rem;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+}
+
+.event-participants-summary-card {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1.5rem;
+}
+
+.event-participants-summary-card .event-participants-total-card {
+  justify-items: center;
+  text-align: center;
+}
+
+.event-participants-profile-completion-card {
+  justify-items: center;
+  text-align: center;
+}
+
+.event-participants-profile-completion-pie {
+  width: 6rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+
+.event-participants-profile-completion-pie::before {
+  content: '';
+  position: absolute;
+  inset: 1rem;
+  border-radius: 50%;
+  background: var(--panel-strong);
+}
+
+.event-participants-profile-completion-pie strong {
+  position: relative;
+  font-size: 1.1rem;
+}
+
+.event-participants-donut {
+  width: 6rem;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+
+.event-participants-donut svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.event-participants-donut > strong {
+  position: relative;
+  z-index: 1;
+  font-size: 1.1rem;
+}
+
+.event-participants-donut-slice {
+  cursor: pointer;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+  transition: filter 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+.event-participants-donut-slice:hover,
+.event-participants-donut-slice.is-hovered,
+.event-participants-donut-slice:focus-visible {
+  filter: brightness(1.2) drop-shadow(0 0 4px rgba(96, 165, 250, 0.9));
+  outline: none;
+  transform: scale(1.08);
+}
+
+.event-participants-status-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--panel-border);
+}
+
+.event-participants-total-card {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.event-participants-total-card > span,
+.event-participants-total-card > small {
+  color: var(--text-muted);
+}
+
+.event-participants-total-card > strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.event-participants-charts {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.event-participants-skydiving-card > .card-header {
+  margin-bottom: 0;
+}
+
+.event-participants-skydiving-card > .card-header + .event-participants-charts {
+  margin-top: 1rem;
+}
+
+.event-participants-general-info-card > .card-header,
+.event-participants-meals-accommodation-card > .card-header,
+.event-participants-hss-card > .card-header {
+  margin-bottom: 0;
+}
+
+.event-participants-general-info-card > .card-header + .event-participants-charts,
+.event-participants-meals-accommodation-card > .card-header + .event-participants-charts,
+.event-participants-hss-card > .card-header + .event-participants-charts {
+  margin-top: 1rem;
+}
+
+.event-participants-hss-options-card .event-participants-bars > :is(div, button) {
+  grid-template-columns: minmax(9rem, 0.85fr) minmax(4rem, 1.2fr) auto;
+}
+
+.event-participants-hss-count-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.event-participants-hss-count-card .event-participants-bars {
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  align-items: center;
+}
+
+.event-participants-dietary-card {
+  grid-column: span 2;
+}
+
+.event-participants-dietary-card .event-participants-bars {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1.25rem;
+}
+
+.event-participants-citizenship-card {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  justify-items: center;
+  gap: 0.5rem;
+  text-align: center;
+}
+
+.event-participants-citizenship-total {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.event-participants-citizenship-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));
+  align-self: stretch;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 0;
+  margin-top: 0.25rem;
+}
+
+.event-participants-citizenship-list button {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.5rem;
+  background: transparent;
+  color: inherit;
+}
+
+.event-participants-citizenship-list button > .event-participants-country-flag {
+  font-size: 2rem;
+}
+
+.event-participants-citizenship-list button > .registration-stat-label {
+  display: -webkit-box;
+  max-width: 8rem;
+  overflow: hidden;
+  font-weight: 400;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.event-participants-citizenship-list.country-count-1 button > .event-participants-country-flag { font-size: 4rem; }
+.event-participants-citizenship-list.country-count-2 button > .event-participants-country-flag { font-size: 3.5rem; }
+.event-participants-citizenship-list.country-count-3 button > .event-participants-country-flag { font-size: 3rem; }
+.event-participants-citizenship-list.country-count-4 button > .event-participants-country-flag { font-size: 2.6rem; }
+
+.event-participants-citizenship-list.is-country-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 0.25rem;
+  overflow-y: auto;
+  padding: 0.2rem 0.35rem;
+}
+
+.event-participants-citizenship-list.is-country-list button {
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  align-items: center;
+  justify-items: start;
+  gap: 0.55rem;
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+}
+
+.event-participants-citizenship-list.is-country-list button > .event-participants-country-flag,
+.event-participants-citizenship-list.is-country-list.country-count-1 button > .event-participants-country-flag,
+.event-participants-citizenship-list.is-country-list.country-count-2 button > .event-participants-country-flag,
+.event-participants-citizenship-list.is-country-list.country-count-3 button > .event-participants-country-flag,
+.event-participants-citizenship-list.is-country-list.country-count-4 button > .event-participants-country-flag {
+  font-size: 1.35rem;
+}
+
+.event-participants-citizenship-list.is-country-list button > .registration-stat-label {
+  display: block;
+  max-width: none;
+  overflow: visible;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: unset;
+}
+
+.event-participants-citizenship-list button:hover,
+.event-participants-citizenship-list button:focus-visible {
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.event-participants-chart-card h3 {
+  margin-top: 0;
+}
+
+.event-participants-type-chart-card {
+  align-self: stretch;
+  display: grid;
+  align-content: center;
+}
+
+.event-participants-choice-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.event-participants-choice-card .event-participants-type-pie-layout {
+  align-self: center;
+}
+
+.event-participants-license-card {
+  align-self: stretch;
+}
+
+.event-participants-license-card .event-participants-bars {
+  width: 100%;
+}
+
+.event-participants-license-card .event-participants-bars .registration-stat-label {
+  white-space: nowrap;
+}
+
+.event-participants-distribution-card {
+  align-self: stretch;
+}
+
+.event-participants-distribution-card:not(.event-participants-hss-count-card) {
+  display: grid;
+  align-content: center;
+}
+
+.event-participants-distribution-card h3 {
+  text-align: center;
+  font-weight: 400;
+}
+
+.event-participants-type-pie-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+}
+
+.event-participants-type-legend {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-participants-type-legend li {
+  display: grid;
+  grid-template-columns: 0.75rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.event-participants-type-legend i {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #2b8a3e;
+}
+
+.event-participants-type-legend li:nth-child(2) i {
+  background: #d97706;
+}
+
+.event-participants-bars {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+}
+
+.event-participants-bars > :is(div, button) {
+  display: grid;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.event-participants-bars > :is(div, button) {
+  grid-template-columns: minmax(5.25rem, 0.55fr) minmax(4rem, 1.5fr) auto;
+}
+
+.event-participants-bars > :is(div, button) > div {
+  height: 1.05rem;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid rgba(43, 138, 62, 0.22);
+  background: rgba(43, 138, 62, 0.22);
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.14);
+}
+
+.event-participants-bars i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  position: relative;
+  overflow: hidden;
+  background: #2b8a3e;
+  box-shadow: 0 2px 6px rgba(43, 138, 62, 0.42);
+}
+
+.event-participants-chart-filter {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.event-participants-chart-filter:hover > div,
+.event-participants-chart-filter:focus-visible > div {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.event-participants-chart-filter:hover,
+.event-participants-chart-filter:focus-visible {
+  background: rgba(37, 99, 235, 0.16);
+  border-radius: 0.4rem;
+  outline: 0;
+}
+
+.event-participants-interactive-donut {
+  cursor: pointer;
+}
+
+.event-participants-interactive-donut:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(2) i {
+  background: #74c69d;
+  box-shadow: 0 2px 6px rgba(116, 198, 157, 0.42);
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(3) i {
+  background: #e6b84a;
+  box-shadow: 0 2px 6px rgba(230, 184, 74, 0.42);
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(4) i {
+  background: #d97706;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.42);
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(5) i {
+  background: #0d6efd;
+  box-shadow: 0 2px 6px rgba(13, 110, 253, 0.42);
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(6) i {
+  background: #7e22ce;
+  box-shadow: 0 2px 6px rgba(126, 34, 206, 0.42);
+}
+
+.event-participants-distribution-card .event-participants-bars > :is(div, button):nth-child(7) i {
+  background: #64748b;
+  box-shadow: 0 2px 6px rgba(100, 116, 139, 0.42);
+}
+
+.event-participants-filters {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.participant-list-toolbar {
+  margin-bottom: 1rem;
+}
+
+.participant-list-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.participant-list-header-actions .primary {
+  white-space: nowrap;
+}
+
+.event-participants-filter-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  overflow: auto;
+  padding: 1.5rem;
+  background: rgba(7, 16, 31, 0.9);
+}
+
+.event-participants-filter-overlay-panel {
+  width: min(100%, 90rem);
+  margin: 0 auto;
+}
+
+.event-participants-filter-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  color: #f8fafc;
+}
+
+.event-participants-filter-overlay-header h2 {
+  margin: 0;
+  color: inherit;
+}
+
+@media (max-width: 900px) {
+  .event-participants-summary,
+  .event-participants-charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .event-participants-dietary-card .event-participants-bars {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .event-participants-summary,
+  .event-participants-charts,
+  .event-participants-filters,
+  .event-participants-status-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .event-participants-dietary-card {
+    grid-column: span 1;
+  }
 }
 
 .event-create-registration-toggle {

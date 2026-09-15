@@ -23,7 +23,8 @@ export type EventGearMenuPage =
   | 'manifest'
   | 'communications'
   | 'checklists'
-  | 'leaderboard';
+  | 'leaderboard'
+  | 'participants';
 
 type EventGearMenuProps = {
   eventId: number;
@@ -36,16 +37,21 @@ type EventGearMenuProps = {
   onDelete?: (event: MouseEvent<HTMLButtonElement>) => void | Promise<void>;
 };
 
-const eventMenuPages: Array<{ key: EventGearMenuPage; label: string; path: (eventId: number) => string }> = [
+type EventMenuPage = { key: EventGearMenuPage; label: string; path: (eventId: number) => string };
+
+const eventMenuPages: EventMenuPage[] = [
   { key: 'schedule', label: 'Schedule', path: (eventId) => `/events/${eventId}` },
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
   { key: 'checklists', label: 'Operational Checks', path: (eventId) => `/events/${eventId}/checklists` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
-  { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
-  { key: 'accounting', label: 'Accounting', path: (eventId) => `/events/${eventId}/accounting` },
-  { key: 'registrations', label: 'Registrations', path: (eventId) => `/events/${eventId}/registrations` },
   { key: 'manifest', label: 'Manifest', path: (eventId) => `/manifests?eventId=${eventId}` },
   { key: 'communications', label: 'Communications', path: (eventId) => `/events/${eventId}/comms` }
+];
+
+const financeMenuPages: EventMenuPage[] = [
+  { key: 'budget', label: 'Budget', path: (eventId) => `/events/${eventId}/budget` },
+  { key: 'registrations', label: 'Registrations', path: (eventId) => `/events/${eventId}/registrations` },
+  { key: 'accounting', label: 'Accounting', path: (eventId) => `/events/${eventId}/accounting` }
 ];
 
 const EventGearMenu = ({
@@ -68,6 +74,7 @@ const EventGearMenu = ({
   const [driverSummaryExporting, setDriverSummaryExporting] = useState(false);
   const [kmlExporting, setKmlExporting] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [financeMenuOpen, setFinanceMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const navigateTo = (path: string) => {
@@ -188,12 +195,15 @@ const EventGearMenu = ({
       if (!menuRef.current.contains(target)) {
         setOpen(false);
         setExportMenuOpen(false);
+        setFinanceMenuOpen(false);
       }
     };
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (exportMenuOpen) {
           setExportMenuOpen(false);
+        } else if (financeMenuOpen) {
+          setFinanceMenuOpen(false);
         } else {
           setOpen(false);
         }
@@ -205,7 +215,11 @@ const EventGearMenu = ({
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [open, exportMenuOpen]);
+  }, [open, exportMenuOpen, financeMenuOpen]);
+
+  const visibleFinanceMenuPages = financeMenuPages
+    .filter((item) => budgetsV1Enabled || (item.key !== 'budget' && item.key !== 'accounting'))
+    .filter((item) => item.key !== currentPage);
 
   return (
     <div className="event-schedule-actions" ref={menuRef}>
@@ -218,6 +232,7 @@ const EventGearMenu = ({
         onClick={() => {
           setOpen((current) => !current);
           setExportMenuOpen(false);
+          setFinanceMenuOpen(false);
         }}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -228,7 +243,7 @@ const EventGearMenu = ({
         <div className="event-schedule-menu" id={menuId} role="menu">
           {eventMenuPages
             .filter((item) => !participantOnly || item.key === 'schedule' || item.key === 'route')
-            .filter((item) => (budgetsV1Enabled ? true : item.key !== 'budget' && item.key !== 'accounting'))
+            .filter((item) => item.key !== 'communications')
             .filter((item) => item.key !== currentPage)
             .map((item) => (
               <button
@@ -244,25 +259,79 @@ const EventGearMenu = ({
                 {item.label}
               </button>
             ))}
-          {onPrint ? (
-            <button
-              className="event-schedule-menu-item"
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                if (forceDocumentNavigation) {
-                  window.location.assign(`/events/${eventId}/print`);
-                  return;
-                }
-                onPrint();
-              }}
-            >
-              Print
-            </button>
-          ) : null}
           {!participantOnly ? (
             <>
+              {canViewLeaderboard ? <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  navigateTo(`/events/${eventId}/participants`);
+                }}
+              >
+                Participants
+              </button> : null}
+              {canViewLeaderboard ? <button
+                className="event-schedule-menu-item"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  navigateTo(`/events/${eventId}/leaderboard`);
+                }}
+              >
+                Leaderboard
+              </button> : null}
+              {currentPage !== 'communications' ? (
+                <button
+                  className="event-schedule-menu-item"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    navigateTo(`/events/${eventId}/comms`);
+                  }}
+                >
+                  Communications
+                </button>
+              ) : null}
+              {visibleFinanceMenuPages.length > 0 ? (
+                <div className="event-schedule-submenu">
+                  <button
+                    className="event-schedule-menu-item event-schedule-submenu-trigger"
+                    type="button"
+                    role="menuitem"
+                    aria-haspopup="menu"
+                    aria-expanded={financeMenuOpen}
+                    onClick={() => {
+                      setFinanceMenuOpen((current) => !current);
+                      setExportMenuOpen(false);
+                    }}
+                  >
+                    Finance <span aria-hidden="true">›</span>
+                  </button>
+                  {financeMenuOpen ? (
+                    <div className="event-schedule-menu event-schedule-submenu-panel" role="menu" aria-label="Finance">
+                      {visibleFinanceMenuPages.map((item) => (
+                        <button
+                          key={item.key}
+                          className="event-schedule-menu-item"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setOpen(false);
+                            setFinanceMenuOpen(false);
+                            navigateTo(item.path(eventId));
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="event-schedule-submenu">
                 <button
                   className="event-schedule-menu-item event-schedule-submenu-trigger"
@@ -270,12 +339,33 @@ const EventGearMenu = ({
                   role="menuitem"
                   aria-haspopup="menu"
                   aria-expanded={exportMenuOpen}
-                  onClick={() => setExportMenuOpen((current) => !current)}
+                  onClick={() => {
+                    setExportMenuOpen((current) => !current);
+                    setFinanceMenuOpen(false);
+                  }}
                 >
                   Export <span aria-hidden="true">›</span>
                 </button>
                 {exportMenuOpen ? (
                   <div className="event-schedule-menu event-schedule-submenu-panel" role="menu" aria-label="Export">
+                    {onPrint ? (
+                      <button
+                        className="event-schedule-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setOpen(false);
+                          setExportMenuOpen(false);
+                          if (forceDocumentNavigation) {
+                            window.location.assign(`/events/${eventId}/print`);
+                            return;
+                          }
+                          onPrint();
+                        }}
+                      >
+                        Print
+                      </button>
+                    ) : null}
                     <button
                       className="event-schedule-menu-item"
                       type="button"
@@ -330,17 +420,6 @@ const EventGearMenu = ({
                   </div>
                 ) : null}
               </div>
-              {canViewLeaderboard ? <button
-                className="event-schedule-menu-item"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  navigateTo(`/events/${eventId}/leaderboard`);
-                }}
-              >
-                Leaderboard
-              </button> : null}
               {onCopy ? <button
                 className="event-schedule-menu-item"
                 type="button"

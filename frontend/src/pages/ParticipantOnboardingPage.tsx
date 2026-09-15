@@ -3,26 +3,12 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { useAuth } from '../auth/AuthProvider';
-import { formatEventLocalDate, parseEventLocal } from '../utils/eventDate';
-import { incompleteProfileWarning, isProfileCompleteForRegistration } from '../utils/profileCompleteness';
+import ParticipantList, { ParticipantListItem, ParticipantListSort, ParticipantListSortField } from '../components/ParticipantList';
+import { parseEventLocal } from '../utils/eventDate';
+import { isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 import { roleOptions } from '../utils/roles';
 
-type ParticipantCard = {
-  id: number;
-  full_name: string;
-  email?: string;
-  phone?: string;
-  jump_count?: number;
-  years_in_sport?: number;
-  emergency_contact?: string;
-  eventCount: number;
-  registeredAt: string;
-  isStaff: boolean;
-  profileIncomplete: boolean;
-};
-
-type ParticipantSortField = 'name' | 'registrationDate' | 'eventCount';
-type ParticipantSort = { field: ParticipantSortField; direction: 'asc' | 'desc' };
+type ParticipantCard = ParticipantListItem & { isStaff: boolean };
 
 const isNewsletterSubscriberOnly = (profile: ParticipantProfile, eventCount: number) => {
   const normalize = (value: string) => value.trim().toLowerCase();
@@ -105,7 +91,7 @@ const ParticipantOnboardingPage = () => {
   const [excludeNewsletterSubscribersOnly, setExcludeNewsletterSubscribersOnly] = useState(
     () => searchParams.get('exclude_newsletter_subscribers_only') !== 'false'
   );
-  const [sectionSorts, setSectionSorts] = useState<Record<'participants' | 'staff', ParticipantSort>>({
+  const [sectionSorts, setSectionSorts] = useState<Record<'participants' | 'staff', ParticipantListSort>>({
     participants: { field: 'name', direction: 'asc' },
     staff: { field: 'name', direction: 'asc' }
   });
@@ -243,10 +229,8 @@ const ParticipantOnboardingPage = () => {
         id,
         full_name: profile?.full_name || `Participant #${id}`,
         email: profile?.email,
-        phone: profile?.phone,
         jump_count: profile?.jump_count,
         years_in_sport: profile?.years_in_sport,
-        emergency_contact: profile?.emergency_contact,
         eventCount,
         registeredAt: profile?.created_at || '',
         isStaff: Array.isArray(profile?.roles) && profile.roles.includes('Staff'),
@@ -329,7 +313,7 @@ const ParticipantOnboardingPage = () => {
   const toggleSection = (section: keyof typeof openSections) =>
     setOpenSections((previous) => ({ ...previous, [section]: !previous[section] }));
 
-  const sortBy = (section: 'participants' | 'staff', field: ParticipantSortField) => {
+  const sortBy = (section: 'participants' | 'staff', field: ParticipantListSortField) => {
     setSectionSorts((previous) => {
       const current = previous[section];
       return {
@@ -341,21 +325,6 @@ const ParticipantOnboardingPage = () => {
       };
     });
   };
-
-  const SortIcon = ({ section, field }: { section: 'participants' | 'staff'; field: ParticipantSortField }) => (
-    <span className="participant-onboarding-sort-icon" aria-hidden="true">
-      <span
-        className={`material-symbols-outlined ${sectionSorts[section].field === field && sectionSorts[section].direction === 'asc' ? 'is-active' : ''}`}
-      >
-        keyboard_arrow_up
-      </span>
-      <span
-        className={`material-symbols-outlined ${sectionSorts[section].field === field && sectionSorts[section].direction === 'desc' ? 'is-active' : ''}`}
-      >
-        keyboard_arrow_down
-      </span>
-    </span>
-  );
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -553,103 +522,20 @@ const ParticipantOnboardingPage = () => {
           { key: 'participants' as const, title: 'Participants', singular: 'participant', people: participantCards },
           { key: 'staff' as const, title: 'Staff', singular: 'staff', people: staffCards }
         ]).map(({ key, title, singular, people }) => (
-          <article key={key} className="card">
-            <header
-              className="card-header event-detail-section-header"
-              onClick={() => toggleSection(key)}
-            >
-              <div className="event-detail-section-header-main">
-                <button
-                  className="ghost"
-                  type="button"
-                  aria-label={`${openSections[key] ? 'Collapse' : 'Expand'} ${title}`}
-                  aria-expanded={openSections[key]}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleSection(key);
-                  }}
-                >
-                  {openSections[key] ? '▾' : '▸'}
-                </button>
-                <h3 className="event-detail-section-title">{title}</h3>
-              </div>
-              <span className="badge neutral participant-onboarding-event-count">
-                {people.length} {people.length === 1 ? singular : title.toLowerCase()}
-              </span>
-            </header>
-            {openSections[key] && (
-              <>
-                <div className="participant-onboarding-table-header">
-                  <button
-                    className="ghost participant-onboarding-sort-button"
-                    type="button"
-                    onClick={() => sortBy(key, 'name')}
-                    aria-label={`Sort by name${sectionSorts[key].field === 'name' ? `, currently ${sectionSorts[key].direction === 'asc' ? 'A to Z' : 'Z to A'}` : ''}`}
-                  >
-                    Name <SortIcon section={key} field="name" />
-                  </button>
-                  <button
-                    className="ghost participant-onboarding-sort-button"
-                    type="button"
-                    onClick={() => sortBy(key, 'registrationDate')}
-                    aria-label={`Sort by registration date${sectionSorts[key].field === 'registrationDate' ? `, currently ${sectionSorts[key].direction === 'asc' ? 'oldest first' : 'newest first'}` : ''}`}
-                  >
-                    Registration date <SortIcon section={key} field="registrationDate" />
-                  </button>
-                  <button
-                    className="ghost participant-onboarding-sort-button participant-onboarding-events-sort-button"
-                    type="button"
-                    onClick={() => sortBy(key, 'eventCount')}
-                    aria-label={`Sort by number of events${sectionSorts[key].field === 'eventCount' ? `, currently ${sectionSorts[key].direction === 'asc' ? 'fewest first' : 'most first'}` : ''}`}
-                  >
-                    Events <SortIcon section={key} field="eventCount" />
-                  </button>
-                </div>
-                {loading ? (
-                  <p className="muted">Loading {title.toLowerCase()}…</p>
-                ) : error ? (
-                  <p className="error-text">{error}</p>
-                ) : people.length === 0 ? (
-                  <p className="muted">No {title.toLowerCase()} match the selected filters.</p>
-                ) : (
-                  <ul className="status-list">
-                {people.map((p) => (
-                  <li key={p.id}>
-                    <Link
-                      to={{ pathname: `/participants/${p.id}`, search: queryString }}
-                      className="card-link participant-onboarding-card-link"
-                    >
-                      <strong>
-                        {highlightName(p.full_name)}
-                        {p.profileIncomplete && (
-                          <span
-                            className="nav-user-warning participant-onboarding-profile-warning"
-                            title={incompleteProfileWarning}
-                            aria-label={incompleteProfileWarning}
-                          >
-                            !
-                          </span>
-                        )}
-                      </strong>
-                      <div className="muted">{p.email || 'No email on file'}</div>
-                      <div className="muted">
-                        Jumps: {typeof p.jump_count === 'number' ? p.jump_count : '-'} · Years in sport:{' '}
-                        {typeof p.years_in_sport === 'number' ? p.years_in_sport : '-'}
-                      </div>
-                    </Link>
-                    <time className="muted participant-onboarding-registration-date" dateTime={p.registeredAt}>
-                      {p.registeredAt ? formatEventLocalDate(p.registeredAt) : 'Unknown'}
-                    </time>
-                    <span className="badge neutral participant-onboarding-event-count">
-                      {p.eventCount} {p.eventCount === 1 ? 'event' : 'events'}
-                    </span>
-                  </li>
-                ))}
-                  </ul>
-                )}
-              </>
-            )}
-          </article>
+          <ParticipantList
+            key={key}
+            title={title}
+            singular={singular}
+            people={people}
+            open={openSections[key]}
+            onToggle={() => toggleSection(key)}
+            sort={sectionSorts[key]}
+            onSort={(field) => sortBy(key, field)}
+            loading={loading}
+            error={error}
+            participantLink={(participant) => ({ pathname: `/participants/${participant.id}`, search: queryString })}
+            renderName={highlightName}
+          />
         ))}
       </div>
     </section>
