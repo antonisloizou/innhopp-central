@@ -11,3 +11,4 @@ innhopp_live.dump
 /.cache
 /.tmp
 /audit/
+data/
