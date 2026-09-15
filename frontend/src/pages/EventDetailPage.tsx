@@ -122,7 +122,7 @@ type ParticipantFormState = {
   full_name: string;
   email: string;
   phone: string;
-  experience_level: string;
+  notes: string;
   emergency_contact: string;
   roles: string[];
 };
@@ -338,7 +338,7 @@ const EventDetailPage = () => {
     full_name: '',
     email: '',
     phone: '',
-    experience_level: '',
+    notes: '',
     emergency_contact: '',
     roles: ['Participant', 'Skydiver']
   });
@@ -346,7 +346,7 @@ const EventDetailPage = () => {
     full_name: '',
     email: '',
     phone: '',
-    experience_level: '',
+    notes: '',
     emergency_contact: '',
     roles: ['Participant', 'Staff']
   });
@@ -1085,31 +1085,29 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
   const participantLabel = (id: number) =>
     participants.find((p) => p.id === id)?.full_name || `Participant #${id}`;
 
-  const renderRegistrationSummary = (participantId: number) => {
+  const renderRegistrationStatusBadge = (participantId: number) => {
     const registration = registrationsByParticipantId.get(participantId);
     if (!registration) {
-      return <div className="muted">No registration record yet.</div>;
+      return null;
     }
     return (
-      <>
-        <div className="event-detail-role-badges event-detail-registration-badges">
-          <span className={badgeClassForRegistrationStatus(registration.status)}>
-            {registration.status.replace(/_/g, ' ')}
-          </span>
-        </div>
-        <div className="event-detail-registration-meta">
-          <span>Registered {formatDateTime24h(registration.registered_at) || 'Unknown'}</span>
-          {registration.deposit_due_at && <span>Deposit due {formatEventLocalDate(registration.deposit_due_at)}</span>}
-          {registration.main_invoice_due_at && <span>Main Invoice due {formatEventLocalDate(registration.main_invoice_due_at)}</span>}
-        </div>
-        <Link
-          to={`/registrations/${registration.id}`}
-          className="event-detail-registration-link"
-          onClick={saveDetailState}
-        >
-          Open registration
-        </Link>
-      </>
+      <span className={badgeClassForRegistrationStatus(registration.status)}>
+        {registration.status.replace(/_/g, ' ')}
+      </span>
+    );
+  };
+
+  const renderRegistrationLink = (participantId: number) => {
+    const registration = registrationsByParticipantId.get(participantId);
+    if (!registration) return null;
+    return (
+      <Link
+        to={`/registrations/${registration.id}`}
+        className="event-detail-registration-link"
+        onClick={saveDetailState}
+      >
+        Open registration
+      </Link>
     );
   };
 
@@ -1558,7 +1556,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         full_name: staffForm.full_name.trim(),
         email: staffForm.email.trim(),
         phone: staffForm.phone.trim() || undefined,
-        experience_level: staffForm.experience_level.trim() || undefined,
+        notes: staffForm.notes.trim() || undefined,
         emergency_contact: staffForm.emergency_contact.trim() || undefined,
         roles
       };
@@ -1571,7 +1569,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         full_name: '',
         email: '',
         phone: '',
-        experience_level: '',
+        notes: '',
         emergency_contact: '',
         roles: ['Participant', 'Staff']
       });
@@ -1599,7 +1597,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         full_name: participantForm.full_name.trim(),
         email: participantForm.email.trim(),
         phone: participantForm.phone.trim() || undefined,
-        experience_level: participantForm.experience_level.trim() || undefined,
+        notes: participantForm.notes.trim() || undefined,
         emergency_contact: participantForm.emergency_contact.trim() || undefined,
         roles
       };
@@ -1610,7 +1608,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         full_name: '',
         email: '',
         phone: '',
-        experience_level: '',
+        notes: '',
         emergency_contact: '',
         roles: ['Participant', 'Skydiver']
       });
@@ -3041,26 +3039,37 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                         <strong>{participantLabel(id)}</strong>
                         <div className="muted">{profile.email || 'No email on file'}</div>
                         <div className="muted">
-                          Experience: {profile.experience_level || 'Not provided'}
+                          Jumps: {typeof profile.jump_count === 'number' ? profile.jump_count : '-'} · Years in sport:{' '}
+                          {typeof profile.years_in_sport === 'number' ? profile.years_in_sport : '-'}
                         </div>
-                        {renderRegistrationSummary(id)}
-                        {extraRoles.length > 0 && (
-                          <div className="event-detail-role-badges">
-                            {extraRoles.map((role) => (
-                              <span key={role} className="badge neutral">
-                                {role}
-                              </span>
-                            ))}
-                          </div>
-                        )}
                       </Link>
-                      <button
-                        type="button"
-                        className="ghost danger"
-                        onClick={() => handleRemoveParticipant(id)}
-                      >
-                        Remove
-                      </button>
+                      <div className="event-detail-participant-actions">
+                        <div className="event-detail-participant-badges">
+                          {extraRoles.length > 0 && (
+                            <div className="event-detail-role-badges">
+                              {extraRoles.map((role) => (
+                                <span key={role} className="badge neutral">
+                                  {role}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {renderRegistrationStatusBadge(id)}
+                        </div>
+                        <div className="event-detail-registration-actions">
+                          {renderRegistrationLink(id)}
+                          {registrationsByParticipantId.has(id) && (
+                            <span className="event-detail-registration-action-separator" aria-hidden="true">·</span>
+                          )}
+                          <button
+                            type="button"
+                            className="event-detail-registration-link event-detail-remove-link"
+                            onClick={() => handleRemoveParticipant(id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
                     </li>
                   );
                 })}
@@ -3131,12 +3140,12 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   />
                 </label>
                 <label className="form-field">
-                  <span>Experience level</span>
+                  <span>Notes</span>
                   <input
                     type="text"
-                    value={participantForm.experience_level}
+                    value={participantForm.notes}
                     onChange={(e) =>
-                      setParticipantForm((prev) => ({ ...prev, experience_level: e.target.value }))
+                      setParticipantForm((prev) => ({ ...prev, notes: e.target.value }))
                     }
                     placeholder="Optional"
                   />
@@ -3261,26 +3270,39 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
                   >
                     <strong>{profile.full_name || participantLabel(id)}</strong>
                     <div className="muted">{profile.email || 'No email on file'}</div>
-                    <div className="muted">Experience: {profile.experience_level || 'Not provided'}</div>
-                    {renderRegistrationSummary(id)}
-                    {extraRoles.length > 0 && (
-                      <div className="event-detail-role-badges">
-                        {extraRoles.map((role) => (
-                          <span key={role} className="badge neutral">
-                            {role}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="muted">
+                      Jumps: {typeof profile.jump_count === 'number' ? profile.jump_count : '-'} · Years in sport:{' '}
+                      {typeof profile.years_in_sport === 'number' ? profile.years_in_sport : '-'}
+                    </div>
                   </Link>
-                  <button
-                    type="button"
-                    className="ghost danger"
-                    onClick={() => handleRemoveParticipant(id)}
-                    disabled={saving}
-                  >
-                    Remove
-                  </button>
+                  <div className="event-detail-participant-actions">
+                    <div className="event-detail-participant-badges">
+                      {extraRoles.length > 0 && (
+                        <div className="event-detail-role-badges">
+                          {extraRoles.map((role) => (
+                            <span key={role} className="badge neutral">
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {renderRegistrationStatusBadge(id)}
+                    </div>
+                    <div className="event-detail-registration-actions">
+                      {renderRegistrationLink(id)}
+                      {registrationsByParticipantId.has(id) && (
+                        <span className="event-detail-registration-action-separator" aria-hidden="true">·</span>
+                      )}
+                      <button
+                        type="button"
+                        className="event-detail-registration-link event-detail-remove-link"
+                        onClick={() => handleRemoveParticipant(id)}
+                        disabled={saving}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -3361,11 +3383,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
               />
             </label>
             <label className="form-field">
-              <span>Experience level</span>
+              <span>Notes</span>
               <input
                 type="text"
-                value={staffForm.experience_level}
-                onChange={(e) => setStaffForm((prev) => ({ ...prev, experience_level: e.target.value }))}
+                value={staffForm.notes}
+                onChange={(e) => setStaffForm((prev) => ({ ...prev, notes: e.target.value }))}
                 placeholder="Optional"
               />
             </label>

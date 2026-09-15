@@ -134,7 +134,7 @@ export interface PublicRegistrationPayload {
   full_name: string;
   email: string;
   phone?: string;
-  experience_level?: string;
+  notes?: string;
   emergency_contact?: string;
   whatsapp?: string;
   instagram?: string;

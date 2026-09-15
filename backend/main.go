@@ -350,7 +350,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     full_name TEXT NOT NULL,
     email TEXT NOT NULL UNIQUE,
     phone TEXT,
-    experience_level TEXT,
+    notes TEXT,
     emergency_contact TEXT,
     emergency_contact_name TEXT,
     emergency_contact_phone TEXT,
@@ -381,6 +381,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS roles TEXT[] NOT NULL DEFAULT ARRAY['Participant']`,
+		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS whatsapp TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS instagram TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS citizenship TEXT`,

@@ -246,7 +246,7 @@ export const createParticipantFormState = (
     full_name: profile?.full_name ?? seed?.full_name ?? '',
     email: profile?.email ?? seed?.email ?? '',
     phone: profile?.phone ?? seed?.phone ?? '',
-    experience_level: profile?.experience_level ?? seed?.experience_level ?? '',
+    notes: profile?.notes ?? seed?.notes ?? '',
     emergency_contact: profile?.emergency_contact ?? seed?.emergency_contact ?? '',
     emergency_contact_name: profile?.emergency_contact_name ?? seed?.emergency_contact_name ?? '',
     emergency_contact_phone: profile?.emergency_contact_phone ?? seed?.emergency_contact_phone ?? '',
@@ -281,7 +281,7 @@ export const toParticipantPayload = (form: CreateParticipantPayload): CreatePart
   full_name: form.full_name.trim(),
   email: form.email.trim(),
   phone: form.phone?.trim() || undefined,
-  experience_level: form.experience_level?.trim() || undefined,
+  notes: form.notes?.trim() || undefined,
   emergency_contact: form.emergency_contact?.trim() || undefined,
   emergency_contact_name: form.emergency_contact_name?.trim() || undefined,
   emergency_contact_phone: form.emergency_contact_phone?.trim() || undefined,
@@ -425,6 +425,14 @@ const ParticipantProfileForm = ({
               type="text"
               value={form.citizenship || ''}
               onChange={(event) => updateField('citizenship', event.target.value)}
+            />
+          </label>
+          <label className="form-field participant-profile-full-span">
+            <span>Notes</span>
+            <textarea
+              value={form.notes || ''}
+              onChange={(event) => updateField('notes', event.target.value)}
+              rows={3}
             />
           </label>
           <div className="participant-profile-full-span participant-profile-spacer" />

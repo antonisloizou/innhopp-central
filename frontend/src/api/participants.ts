@@ -5,7 +5,7 @@ export interface ParticipantProfile {
   full_name: string;
   email: string;
   phone?: string;
-  experience_level?: string;
+  notes?: string;
   emergency_contact?: string;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
@@ -43,7 +43,7 @@ export interface CreateParticipantPayload {
   full_name: string;
   email: string;
   phone?: string;
-  experience_level?: string;
+  notes?: string;
   emergency_contact?: string;
   emergency_contact_name?: string;
   emergency_contact_phone?: string;

@@ -47,7 +47,7 @@ type Profile struct {
 	FullName              string    `json:"full_name"`
 	Email                 string    `json:"email"`
 	Phone                 string    `json:"phone,omitempty"`
-	ExperienceLevel       string    `json:"experience_level,omitempty"`
+	Notes                 string    `json:"notes,omitempty"`
 	EmergencyContact      string    `json:"emergency_contact,omitempty"`
 	EmergencyContactName  string    `json:"emergency_contact_name,omitempty"`
 	EmergencyContactPhone string    `json:"emergency_contact_phone,omitempty"`
@@ -82,7 +82,7 @@ type profilePayload struct {
 	FullName              string   `json:"full_name"`
 	Email                 string   `json:"email"`
 	Phone                 string   `json:"phone"`
-	ExperienceLevel       string   `json:"experience_level"`
+	Notes                 string   `json:"notes"`
 	EmergencyContact      string   `json:"emergency_contact"`
 	EmergencyContactName  string   `json:"emergency_contact_name"`
 	EmergencyContactPhone string   `json:"emergency_contact_phone"`
@@ -117,7 +117,7 @@ const profileSelectColumns = `
 	full_name,
 	email,
 	COALESCE(phone, ''),
-	COALESCE(experience_level, ''),
+	COALESCE(notes, ''),
 	COALESCE(emergency_contact, ''),
 	COALESCE(emergency_contact_name, ''),
 	COALESCE(emergency_contact_phone, ''),
@@ -371,7 +371,7 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 		&profile.FullName,
 		&profile.Email,
 		&profile.Phone,
-		&profile.ExperienceLevel,
+		&profile.Notes,
 		&profile.EmergencyContact,
 		&profile.EmergencyContactName,
 		&profile.EmergencyContactPhone,
@@ -497,7 +497,7 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	}
 
 	payload.Phone = normalizeOptionalString(payload.Phone)
-	payload.ExperienceLevel = normalizeOptionalString(payload.ExperienceLevel)
+	payload.Notes = normalizeOptionalString(payload.Notes)
 	payload.EmergencyContact = normalizeOptionalString(payload.EmergencyContact)
 	payload.EmergencyContactName = normalizeOptionalString(payload.EmergencyContactName)
 	payload.EmergencyContactPhone = normalizeOptionalString(payload.EmergencyContactPhone)
@@ -590,7 +590,7 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			email,
 			account_id,
 			phone,
-			experience_level,
+			notes,
 			emergency_contact,
 			whatsapp,
 			instagram,
@@ -657,7 +657,7 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 		fullName,
 		email,
 		payload.Phone,
-		payload.ExperienceLevel,
+		payload.Notes,
 		payload.EmergencyContact,
 		payload.Whatsapp,
 		payload.Instagram,
@@ -819,7 +819,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 				email,
 				account_id,
 				phone,
-				experience_level,
+				notes,
 				emergency_contact,
 				whatsapp,
 				instagram,
@@ -857,7 +857,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			email,
 			nullableAccountID(claims.AccountID),
 			payload.Phone,
-			payload.ExperienceLevel,
+			payload.Notes,
 			payload.EmergencyContact,
 			payload.Whatsapp,
 			payload.Instagram,
@@ -923,7 +923,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			email = $2,
 			account_id = COALESCE($33, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
 			phone = $3,
-			experience_level = $4,
+			notes = $4,
 			emergency_contact = $5,
 			whatsapp = $6,
 			instagram = $7,
@@ -956,7 +956,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		fullName,
 		email,
 		payload.Phone,
-		payload.ExperienceLevel,
+		payload.Notes,
 		payload.EmergencyContact,
 		payload.Whatsapp,
 		payload.Instagram,
@@ -1045,7 +1045,7 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 			email = $2,
 			account_id = COALESCE(account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
 			phone = $3,
-			experience_level = $4,
+			notes = $4,
 			emergency_contact = $5,
 			whatsapp = $6,
 			instagram = $7,
@@ -1078,7 +1078,7 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		fullName,
 		email,
 		payload.Phone,
-		payload.ExperienceLevel,
+		payload.Notes,
 		payload.EmergencyContact,
 		payload.Whatsapp,
 		payload.Instagram,

@@ -236,7 +236,7 @@ type publicRegistrationPayload struct {
 	FullName         string `json:"full_name"`
 	Email            string `json:"email"`
 	Phone            string `json:"phone"`
-	ExperienceLevel  string `json:"experience_level"`
+	Notes            string `json:"notes"`
 	EmergencyContact string `json:"emergency_contact"`
 	Whatsapp         string `json:"whatsapp"`
 	Instagram        string `json:"instagram"`
@@ -1314,7 +1314,7 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 	}
 
 	payload.Phone = normalizeOptionalPublicString(payload.Phone)
-	payload.ExperienceLevel = normalizeOptionalPublicString(payload.ExperienceLevel)
+	payload.Notes = normalizeOptionalPublicString(payload.Notes)
 	payload.EmergencyContact = normalizeOptionalPublicString(payload.EmergencyContact)
 	payload.Whatsapp = normalizeOptionalPublicString(payload.Whatsapp)
 	payload.Instagram = normalizeOptionalPublicString(payload.Instagram)
@@ -1331,7 +1331,7 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 			email,
 			account_id,
 			phone,
-			experience_level,
+			notes,
 			emergency_contact,
 			whatsapp,
 			instagram,
@@ -1363,7 +1363,7 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 			ARRAY['Participant']::TEXT[]
 		)
 		RETURNING id
-	`, fullName, email, payload.Phone, payload.ExperienceLevel, payload.EmergencyContact, payload.Whatsapp, payload.Instagram, payload.Citizenship, payload.DateOfBirth, payload.Jumper, payload.YearsInSport, payload.JumpCount, payload.RecentJumpCount, payload.License).Scan(&participantID)
+	`, fullName, email, payload.Phone, payload.Notes, payload.EmergencyContact, payload.Whatsapp, payload.Instagram, payload.Citizenship, payload.DateOfBirth, payload.Jumper, payload.YearsInSport, payload.JumpCount, payload.RecentJumpCount, payload.License).Scan(&participantID)
 	if err != nil {
 		return 0, err
 	}

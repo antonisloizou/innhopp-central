@@ -44,7 +44,7 @@ const ManifestDetailPage = () => {
     full_name: '',
     email: '',
     phone: '',
-    experience_level: '',
+    notes: '',
     emergency_contact: '',
     roles: ['Participant', 'Skydiver'] as string[]
   });
@@ -52,7 +52,7 @@ const ManifestDetailPage = () => {
     full_name: '',
     email: '',
     phone: '',
-    experience_level: '',
+    notes: '',
     emergency_contact: '',
     roles: ['Participant', 'Skydiver', 'Staff'] as string[]
   });
@@ -292,7 +292,7 @@ const ManifestDetailPage = () => {
         full_name: participantForm.full_name.trim(),
         email: participantForm.email.trim(),
         phone: participantForm.phone.trim() || undefined,
-        experience_level: participantForm.experience_level.trim() || undefined,
+        notes: participantForm.notes.trim() || undefined,
         emergency_contact: participantForm.emergency_contact.trim() || undefined,
         roles
       };
@@ -310,7 +310,7 @@ const ManifestDetailPage = () => {
         full_name: '',
         email: '',
         phone: '',
-        experience_level: '',
+        notes: '',
         emergency_contact: '',
         roles: ['Participant', 'Skydiver']
       });
@@ -336,7 +336,7 @@ const ManifestDetailPage = () => {
         full_name: staffForm.full_name.trim(),
         email: staffForm.email.trim(),
         phone: staffForm.phone.trim() || undefined,
-        experience_level: staffForm.experience_level.trim() || undefined,
+        notes: staffForm.notes.trim() || undefined,
         emergency_contact: staffForm.emergency_contact.trim() || undefined,
         roles
       };
@@ -354,7 +354,7 @@ const ManifestDetailPage = () => {
         full_name: '',
         email: '',
         phone: '',
-        experience_level: '',
+        notes: '',
         emergency_contact: '',
         roles: ['Participant', 'Skydiver', 'Staff']
       });
@@ -482,7 +482,7 @@ const ManifestDetailPage = () => {
                   <Link to={`/participants/${id}`} className="card-link manifest-detail-card-link">
                     <strong>{participantLabel(id)}</strong>
                     <div className="muted">{profile?.email || 'No email on file'}</div>
-                    <div className="muted">Experience: {profile?.experience_level || 'Not provided'}</div>
+                    <div className="muted">Notes: {profile?.notes || 'Not provided'}</div>
                   </Link>
                   <button type="button" className="ghost danger" onClick={() => handleRemoveParticipant(id)} disabled={saving}>
                     Remove
@@ -551,11 +551,11 @@ const ManifestDetailPage = () => {
               />
             </label>
             <label className="form-field">
-              <span>Experience level</span>
+              <span>Notes</span>
               <input
                 type="text"
-                value={participantForm.experience_level}
-                onChange={(e) => setParticipantForm((prev) => ({ ...prev, experience_level: e.target.value }))}
+                value={participantForm.notes}
+                onChange={(e) => setParticipantForm((prev) => ({ ...prev, notes: e.target.value }))}
                 placeholder="Optional"
               />
             </label>
@@ -640,7 +640,7 @@ const ManifestDetailPage = () => {
                   <Link to={`/participants/${id}`} className="card-link manifest-detail-card-link">
                     <strong>{participantLabel(id)}</strong>
                     <div className="muted">{profile?.email || 'No email on file'}</div>
-                    <div className="muted">Experience: {profile?.experience_level || 'Not provided'}</div>
+                    <div className="muted">Notes: {profile?.notes || 'Not provided'}</div>
                   </Link>
                   <button type="button" className="ghost danger" onClick={() => handleRemoveParticipant(id)} disabled={saving}>
                     Remove
@@ -709,11 +709,11 @@ const ManifestDetailPage = () => {
               />
             </label>
             <label className="form-field">
-              <span>Experience level</span>
+              <span>Notes</span>
               <input
                 type="text"
-                value={staffForm.experience_level}
-                onChange={(e) => setStaffForm((prev) => ({ ...prev, experience_level: e.target.value }))}
+                value={staffForm.notes}
+                onChange={(e) => setStaffForm((prev) => ({ ...prev, notes: e.target.value }))}
                 placeholder="Optional"
               />
             </label>

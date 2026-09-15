@@ -3750,9 +3750,10 @@ button.ghost {
   flex: 1;
 }
 
-.event-detail-scroll-list {
+.status-list.event-detail-scroll-list {
   max-height: 24rem;
   overflow-y: auto;
+  gap: 0;
 }
 
 .event-detail-list-item {
@@ -3767,6 +3768,20 @@ button.ghost {
 
 .event-detail-list-link {
   flex: 1;
+}
+
+.event-detail-participant-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.event-detail-participant-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 
 .event-detail-list-summary-row {
@@ -3825,9 +3840,26 @@ button.ghost {
 
 .event-detail-registration-link {
   display: inline-flex;
-  margin-top: 0.35rem;
   font-size: 0.95rem;
   font-weight: 600;
+}
+
+.event-detail-registration-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.event-detail-registration-action-separator {
+  color: var(--muted-text);
+}
+
+.event-detail-remove-link {
+  border: 0;
+  padding: 0;
+  color: var(--danger-text, #dc2626);
+  background: transparent;
+  cursor: pointer;
 }
 
 .event-detail-role-options {

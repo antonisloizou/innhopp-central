@@ -12,7 +12,8 @@ type ParticipantCard = {
   full_name: string;
   email?: string;
   phone?: string;
-  experience_level?: string;
+  jump_count?: number;
+  years_in_sport?: number;
   emergency_contact?: string;
   eventCount: number;
   registeredAt: string;
@@ -27,7 +28,7 @@ const isNewsletterSubscriberOnly = (profile: ParticipantProfile, eventCount: num
   const normalize = (value: string) => value.trim().toLowerCase();
   const hasAdditionalText = [
     profile.phone,
-    profile.experience_level,
+    profile.notes,
     profile.emergency_contact,
     profile.emergency_contact_name,
     profile.emergency_contact_phone,
@@ -231,7 +232,8 @@ const ParticipantOnboardingPage = () => {
         full_name: profile?.full_name || `Participant #${id}`,
         email: profile?.email,
         phone: profile?.phone,
-        experience_level: profile?.experience_level,
+        jump_count: profile?.jump_count,
+        years_in_sport: profile?.years_in_sport,
         emergency_contact: profile?.emergency_contact,
         eventCount,
         registeredAt: profile?.created_at || '',
@@ -604,7 +606,8 @@ const ParticipantOnboardingPage = () => {
                       </strong>
                       <div className="muted">{p.email || 'No email on file'}</div>
                       <div className="muted">
-                        Experience: {p.experience_level || 'Not provided'}
+                        Jumps: {typeof p.jump_count === 'number' ? p.jump_count : '-'} · Years in sport:{' '}
+                        {typeof p.years_in_sport === 'number' ? p.years_in_sport : '-'}
                       </div>
                     </Link>
                     <time className="muted participant-onboarding-registration-date" dateTime={p.registeredAt}>
