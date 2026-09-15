@@ -97,8 +97,8 @@ const ParticipantOnboardingPage = () => {
     () => searchParams.get('exclude_newsletter_subscribers_only') !== 'false'
   );
   const [sectionSorts, setSectionSorts] = useState<Record<'participants' | 'staff', ParticipantSort>>({
-    participants: { field: 'registrationDate', direction: 'desc' },
-    staff: { field: 'registrationDate', direction: 'desc' }
+    participants: { field: 'name', direction: 'asc' },
+    staff: { field: 'name', direction: 'asc' }
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

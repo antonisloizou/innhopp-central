@@ -2540,6 +2540,49 @@ button.ghost {
   justify-self: start;
 }
 
+@media (max-width: 720px) {
+  .participant-onboarding-table-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 0.75rem;
+  }
+
+  .participant-onboarding-table-header > :nth-child(2) {
+    grid-column: 2;
+  }
+
+  .participant-onboarding-table-header > :nth-child(3) {
+    display: none;
+  }
+
+  .participant-onboarding-results .status-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+    align-items: start;
+  }
+
+  .participant-onboarding-results .status-list li > :first-child {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    overflow-wrap: anywhere;
+  }
+
+  .participant-onboarding-results .status-list li > :nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+  }
+
+  .participant-onboarding-results .status-list li > :nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: end;
+    justify-self: end;
+  }
+}
+
 .participant-onboarding-profile-warning {
   margin-left: 0.35rem;
 }
