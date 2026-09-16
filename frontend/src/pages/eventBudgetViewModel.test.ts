@@ -147,7 +147,12 @@ describe('eventBudgetViewModel', () => {
           participants: 24,
           cost_with_drift: 700
         }
-      }
+      },
+      margin_curve: [
+        { participants: 12, revenue: 3600, cost: 500, margin: 3100 },
+        { participants: 18, revenue: 5400, cost: 600, margin: 4800 },
+        { participants: 24, revenue: 7200, cost: 700, margin: 6500 }
+      ]
     });
 
     const curve = buildMarginCurveModel(summary, 20);
@@ -158,6 +163,21 @@ describe('eventBudgetViewModel', () => {
       .map((entry) => Number(entry.split(',')[1]));
     expect(targetPoints?.[0]).toBeGreaterThan(targetPoints?.[1] || 0);
     expect(targetPoints?.[1]).toBeGreaterThan(targetPoints?.[2] || 0);
+  });
+
+  it('uses the per-participant curve instead of smoothing between scenarios', () => {
+    const summary = makeSummary({
+      margin_curve: [
+        { participants: 10, revenue: 3000, cost: 1000, margin: 2000 },
+        { participants: 11, revenue: 3300, cost: 1100, margin: 2200 },
+        { participants: 12, revenue: 3600, cost: 1200, margin: 2400 },
+        { participants: 13, revenue: 3900, cost: 2500, margin: 1400 }
+      ]
+    });
+
+    const curve = buildMarginCurveModel(summary, 20);
+
+    expect(curve?.points.map((point) => point.participants)).toEqual([10, 11, 12, 13]);
   });
 
   it('keeps zero at the bottom when every curve value is positive', () => {

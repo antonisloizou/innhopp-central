@@ -85,6 +85,7 @@ export interface CreateCampaignPayload {
   mode?: string;
   filter?: AudienceFilter;
   registration_ids?: number[];
+  send_copy_to_self?: boolean;
 }
 
 export const listEmailTemplates = () => apiRequest<EmailTemplate[]>('/comms/templates');

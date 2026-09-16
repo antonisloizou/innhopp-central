@@ -18,6 +18,7 @@ type EmailSender interface {
 
 type EmailMessage struct {
 	To                string
+	Bcc               string
 	Subject           string
 	HTML              string
 	PlainText         string
@@ -132,6 +133,12 @@ func (s *SMTPSender) Send(ctx context.Context, message EmailMessage) (EmailSendR
 	}
 	if err := client.rcpt(to); err != nil {
 		return EmailSendResult{}, err
+	}
+	bcc := strings.TrimSpace(message.Bcc)
+	if bcc != "" && !strings.EqualFold(bcc, to) {
+		if err := client.rcpt(bcc); err != nil {
+			return EmailSendResult{}, err
+		}
 	}
 	if err := client.data(raw); err != nil {
 		return EmailSendResult{}, err

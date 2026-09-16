@@ -98,6 +98,13 @@ const activeStatuses = new Set<RegistrationStatus>(['deposit_pending', 'deposit_
 
 const isSkydiver = (profile?: ParticipantProfile) => Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
 
+const isStaff = (profile?: ParticipantProfile) => {
+  const hasRole = (roles: string[] | undefined, role: string) =>
+    roles?.some((value) => value.trim().toLowerCase() === role) ?? false;
+
+  return hasRole(profile?.roles, 'staff') || hasRole(profile?.account_roles, 'staff') || hasRole(profile?.account_roles, 'admin');
+};
+
 const sortParticipantRows = (items: ParticipantRow[], sort: ParticipantListSort) => [...items].sort((left, right) => {
   const result = sort.field === 'name'
     ? left.full_name.localeCompare(right.full_name, undefined, { sensitivity: 'base' })
@@ -541,7 +548,9 @@ const EventParticipantsPage = () => {
   };
   const sendChartFilterMessage = () => {
     if (!eventData || chartFilterRows.length === 0) return;
-    const includedRegistrationIds = chartFilterRows.map((row) => row.registration.id);
+    const includedRegistrationIds = chartFilterRows
+      .filter((row) => !isStaff(row.profile))
+      .map((row) => row.registration.id);
     const includedSet = new Set(includedRegistrationIds);
     navigate(`/events/${eventData.id}/comms`, {
       state: {
@@ -931,7 +940,7 @@ const EventParticipantsPage = () => {
               onSort={sortChartFilterBy}
               participantLink={(participant) => `/participants/${participant.id}`}
               countLabel={`${chartFilterRows.length} matching participants`}
-              headerAction={<button className="primary" type="button" disabled={chartFilterRows.length === 0} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send message</button>}
+              headerAction={<button className="primary" type="button" disabled={chartFilterRows.length === 0} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send Email</button>}
               thirdColumnLabel="Status"
               thirdColumnSortable={false}
               renderThirdColumn={(participant) => <span className={statusBadgeClass((participant as ParticipantRow).registration.status)}>{statusLabels[(participant as ParticipantRow).registration.status]}</span>}

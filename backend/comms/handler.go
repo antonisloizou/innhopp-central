@@ -130,6 +130,7 @@ type campaignPayload struct {
 	Mode            string         `json:"mode"`
 	Filter          AudienceFilter `json:"filter"`
 	RegistrationIDs []int64        `json:"registration_ids"`
+	SendCopyToSelf  bool           `json:"send_copy_to_self"`
 }
 
 type preparedDelivery struct {
@@ -323,6 +324,7 @@ func loadAudienceRecipients(ctx context.Context, q interface {
 		) latest
 		JOIN participant_profiles p ON p.id = latest.participant_id
 		WHERE COALESCE(p.email, '') <> ''
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
 		ORDER BY latest.registered_at DESC, latest.id DESC
 	`, eventID)
 	if err != nil {
@@ -410,6 +412,7 @@ func loadAudienceRecipientsByRegistrationIDs(ctx context.Context, q interface {
 		WHERE r.event_id = $1
 		  AND r.id = ANY($2)
 		  AND COALESCE(p.email, '') <> ''
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
 		ORDER BY r.registered_at DESC, r.id DESC
 	`, eventID, registrationIDs)
 	if err != nil {
@@ -1016,10 +1019,17 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 
 	sentCount := 0
 	failedCount := 0
+	copyRecipient := ""
+	if payload.SendCopyToSelf {
+		if claims := auth.FromContext(ctx); claims != nil {
+			copyRecipient = strings.TrimSpace(claims.Email)
+		}
+	}
 	for _, delivery := range deliveries {
 		htmlBody, plainTextBody, inlineAttachments := prepareEmailContent(delivery.Body)
 		sendResult, err := h.sender.Send(r.Context(), EmailMessage{
 			To:                delivery.Email,
+			Bcc:               copyRecipient,
 			Subject:           delivery.Subject,
 			HTML:              htmlBody,
 			PlainText:         plainTextBody,

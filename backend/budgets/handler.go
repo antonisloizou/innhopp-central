@@ -2480,46 +2480,22 @@ func (h *Handler) buildSummary(ctx context.Context, budgetID int64, overrides ma
 	if start > end {
 		start, end = end, start
 	}
-	curveCostAnchors := []struct {
-		participants  int
-		costWithDrift float64
-	}{
-		{participants: confirmParticipants, costWithDrift: confirmCostWithDrift},
-		{participants: worstParticipants, costWithDrift: worstCostWithDrift},
-		{participants: fullParticipants, costWithDrift: fullCostWithDrift},
-	}
-	sort.Slice(curveCostAnchors, func(i, j int) bool {
-		return curveCostAnchors[i].participants < curveCostAnchors[j].participants
-	})
-	interpolateCostWithDrift := func(participants int) float64 {
-		if len(curveCostAnchors) == 0 {
-			return costWithDrift
-		}
-		if participants <= curveCostAnchors[0].participants {
-			return curveCostAnchors[0].costWithDrift
-		}
-		last := curveCostAnchors[len(curveCostAnchors)-1]
-		if participants >= last.participants {
-			return last.costWithDrift
-		}
-		for i := 0; i < len(curveCostAnchors)-1; i++ {
-			left := curveCostAnchors[i]
-			right := curveCostAnchors[i+1]
-			if participants < left.participants || participants > right.participants {
-				continue
-			}
-			span := right.participants - left.participants
-			if span <= 0 {
-				return left.costWithDrift
-			}
-			ratio := float64(participants-left.participants) / float64(span)
-			return roundMoney(left.costWithDrift + (right.costWithDrift-left.costWithDrift)*ratio)
-		}
-		return costWithDrift
-	}
 	for p := start; p <= end; p++ {
+		// Aircraft and crew costs are step-based: a new load begins only when the
+		// previous load is full. Calculate each participant count instead of
+		// interpolating between the named scenarios, which would incorrectly
+		// spread a capacity jump across the counts before it.
+		aircraftCost, _, _, _, crewCountByDay, _, err := computeAircraftScenarioTotalsFromItems(
+			aircraftInnhopps,
+			p,
+			liveRates,
+			fallbackRates,
+		)
+		if err != nil {
+			return BudgetSummary{}, err
+		}
+		_, scenarioCostWithDrift := buildCostWithDrift(p, crewCountByDay, aircraftCost)
 		revenue := roundMoney(float64(p) * revenuePerParticipant)
-		scenarioCostWithDrift := interpolateCostWithDrift(p)
 		margin := roundMoney(revenue - scenarioCostWithDrift)
 		curve = append(curve, MarginPoint{
 			Participants: p,

@@ -143,14 +143,18 @@ export const buildMarginCurveModel = (
       (point): point is { participants: number; margin: number; costWithDrift: number } => point !== null
     )
     .sort((a, b) => a.participants - b.participants);
+  // The server calculates every participant count so capacity-driven costs
+  // (for example, an extra aircraft load) appear at their actual threshold.
+  // Prefer those points to the three scenario anchors, which would draw a
+  // misleading straight line through a step change.
   const sourceCurvePoints =
-    scenarioCurvePoints.length >= 2
-      ? scenarioCurvePoints
-      : (rawCurve || []).map((point) => ({
+    rawCurve && rawCurve.length > 0
+      ? rawCurve.map((point) => ({
           participants: point.participants || 0,
           margin: point.margin || 0,
           costWithDrift: point.cost || 0
-        }));
+        }))
+      : scenarioCurvePoints;
   if (!sourceCurvePoints.length) return null;
   const width = 640;
   const height = 220;

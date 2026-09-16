@@ -98,6 +98,17 @@ func TestComputeAircraftScenarioTotalsExcludesFerryFlightsFromPayableCrew(t *tes
 	}
 }
 
+func TestAircraftLoadCountAddsSecondLoadAtCapacityPlusOne(t *testing.T) {
+	item := eventAircraftInnhopp{Capacity: 14, CrewOnLoadCount: 2}
+
+	if got := aircraftLoadCount(item, 12); got != 1 {
+		t.Fatalf("loads at passenger capacity = %d, want 1", got)
+	}
+	if got := aircraftLoadCount(item, 13); got != 2 {
+		t.Fatalf("loads at passenger capacity plus one = %d, want 2", got)
+	}
+}
+
 func float64Ptr(value float64) *float64 {
 	return &value
 }

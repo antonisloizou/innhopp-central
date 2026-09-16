@@ -809,6 +809,27 @@ button.ghost {
   min-width: max-content;
 }
 
+.comms-send-copy-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.comms-send-campaign-control {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.comms-send-copy-checkbox input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
 .comms-composer-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
@@ -7223,6 +7244,22 @@ button.ghost.event-route-preview-overlay-button {
   color: #bbf7d0;
 }
 
+:root[data-theme='light'] .budget-scenario-indicator {
+  opacity: 1;
+}
+
+:root[data-theme='light'] .budget-scenario-indicator-confirm {
+  color: #854d0e;
+}
+
+:root[data-theme='light'] .budget-scenario-indicator-worst {
+  color: #991b1b;
+}
+
+:root[data-theme='light'] .budget-scenario-indicator-full {
+  color: #166534;
+}
+
 .budget-scenario-indicator-caret {
   position: absolute;
   top: 0.06rem;
@@ -7315,6 +7352,10 @@ button.ghost.event-route-preview-overlay-button {
   transform: translateX(-1px);
   z-index: 2;
   pointer-events: none;
+}
+
+:root[data-theme='light'] .budget-bar-target-line {
+  border-left-color: rgba(51, 65, 85, 0.72);
 }
 
 .budget-bar {
@@ -7492,6 +7533,12 @@ button.ghost.event-route-preview-overlay-button {
 .budget-curve-line-target {
   stroke: rgba(226, 232, 240, 0.38);
   stroke-dasharray: 7 3 1.5 3;
+}
+
+/* The default target line is tuned for the dark chart surface. Use a darker
+   stroke in light mode so it remains distinguishable over the positive band. */
+:root[data-theme='light'] .budget-curve-line-target {
+  stroke: rgba(51, 65, 85, 0.72);
 }
 
 .budget-curve-hover-guide {

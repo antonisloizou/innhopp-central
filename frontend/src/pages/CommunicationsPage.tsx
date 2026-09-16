@@ -982,6 +982,7 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [creatingTemplate, setCreatingTemplate] = useState(false);
   const [sendingCampaign, setSendingCampaign] = useState(false);
+  const [sendCopyToSelf, setSendCopyToSelf] = useState(true);
   const [copying, setCopying] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1850,7 +1851,8 @@ const insertIntoActiveTemplateField = (snippet: string) => {
             template_id: Number(selectedTemplateId),
             mode: 'manual',
             filter,
-            registration_ids: registrationIDsByEvent.get(eventId)
+            registration_ids: registrationIDsByEvent.get(eventId),
+            send_copy_to_self: sendCopyToSelf
           })
         )
       );
@@ -2373,14 +2375,24 @@ const insertIntoActiveTemplateField = (snippet: string) => {
 
             {selectedTemplate ? (
               <div className="detail-actions">
-                <button
-                  className="primary"
-                  type="button"
-                  disabled={!selectedTemplate || sendingCampaign || effectiveEventIds.length === 0}
-                  onClick={() => void handleSendCampaign()}
-                >
-                  {sendingCampaign ? 'Sending…' : 'Send campaign'}
-                </button>
+                <div className="comms-send-campaign-control">
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={!selectedTemplate || sendingCampaign || effectiveEventIds.length === 0}
+                    onClick={() => void handleSendCampaign()}
+                  >
+                    {sendingCampaign ? 'Sending…' : 'Send campaign'}
+                  </button>
+                  <label className="comms-send-copy-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={sendCopyToSelf}
+                      onChange={(event) => setSendCopyToSelf(event.target.checked)}
+                    />
+                    <span className="field-label">Send a copy to myself</span>
+                  </label>
+                </div>
                 <span className="badge neutral">
                   {previewLoading
                     ? 'Updating audience…'
@@ -2388,11 +2400,6 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                       ? `${audiencePreview.count} recipients`
                       : '0 recipients'}
                 </span>
-                {(filter.included_registration_ids?.length || filter.excluded_registration_ids?.length) ? (
-                  <span className="badge neutral">
-                    {`Overrides: ${filter.included_registration_ids?.length || 0} added, ${filter.excluded_registration_ids?.length || 0} removed`}
-                  </span>
-                ) : null}
               </div>
             ) : null}
 

@@ -1558,12 +1558,17 @@ const EventBudgetPage = () => {
       setCurvePopup(null);
       return;
     }
-    const costWithDrift = interpolateScenarioValueAtParticipants(point.participants, (scenario) =>
-      Number(scenario.cost_with_drift || 0)
+    const calculatedPoint = summary?.margin_curve?.find(
+      (curvePoint) => curvePoint.participants === point.participants
     );
-    const revenue = interpolateScenarioValueAtParticipants(point.participants, (scenario) =>
-      Number(scenario.revenue || 0)
-    );
+    const costWithDrift = calculatedPoint
+      ? Number(calculatedPoint.cost || 0)
+      : interpolateScenarioValueAtParticipants(point.participants, (scenario) =>
+          Number(scenario.cost_with_drift || 0)
+        );
+    const revenue = calculatedPoint
+      ? Number(calculatedPoint.revenue || 0)
+      : interpolateScenarioValueAtParticipants(point.participants, (scenario) => Number(scenario.revenue || 0));
     setCurvePopup({
       ...point,
       costWithDrift,
