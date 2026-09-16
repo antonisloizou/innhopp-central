@@ -34,6 +34,7 @@ import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { normalizeAircraftFormBands } from '../utils/aircraftForm';
 import { roleOptions } from '../utils/roles';
+import { isNewsletterSubscriberOnly } from '../utils/newsletterSubscribers';
 import { formatMetersWithFeet } from '../utils/units';
 import {
   formatEventLocal,
@@ -313,7 +314,8 @@ const EventDetailPage = () => {
   const [participantIds, setParticipantIds] = useState<number[]>([]);
   const [airfieldIds, setAirfieldIds] = useState<number[]>([]);
   const [selectedAircraftId, setSelectedAircraftId] = useState<string>('');
-  const [selectedParticipantId, setSelectedParticipantId] = useState<string>('');
+  const [participantSearchQuery, setParticipantSearchQuery] = useState('');
+  const [participantSearchFocused, setParticipantSearchFocused] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState<string>('');
   const [selectedAirfieldId, setSelectedAirfieldId] = useState<string>('');
   const [eventForm, setEventForm] = useState({
@@ -1111,13 +1113,6 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     );
   };
 
-  const availableParticipants = participants
-    .filter((p) => {
-      const roles = Array.isArray(p.roles) ? p.roles : [];
-      const isStaff = roles.includes('Staff');
-      return !participantIds.includes(p.id) && !isStaff;
-    })
-    .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
   const availableAirfields = airfields.filter((a) => !airfieldIds.includes(a.id));
   const groupedTakeoffAirfields = useMemo(() => {
     const eventLocation = (eventForm.location || eventData?.location || '').trim();
@@ -1513,12 +1508,11 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     }
   };
 
-  const handleAssignParticipant = async () => {
-    const id = Number(selectedParticipantId);
+  const handleAssignParticipant = async (id: number) => {
     if (!id || participantIds.includes(id) || !eventData) return;
     const next = [...participantIds, id];
     setParticipantIds(next);
-    setSelectedParticipantId('');
+    setParticipantSearchQuery('');
     await persistEvent(next, airfieldIds);
   };
 
@@ -1528,6 +1522,57 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
       .filter((p): p is ParticipantProfile => !!p && Array.isArray(p.roles) && p.roles.includes('Staff'));
     return staffProfiles.sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }));
   }, [participantIds, participants]);
+
+  const participantEventCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    const events =
+      eventData && !allEvents.some((event) => event.id === eventData.id)
+        ? [...allEvents, eventData]
+        : allEvents;
+    events.forEach((event) => {
+      (Array.isArray(event.participant_ids) ? event.participant_ids : []).forEach((id) => {
+        counts.set(id, (counts.get(id) || 0) + 1);
+      });
+    });
+    return counts;
+  }, [allEvents, eventData]);
+
+  const visibleParticipants = useMemo(
+    () =>
+      participantIds
+        .map((id) => participants.find((p) => p.id === id))
+        .filter(
+          (profile): profile is ParticipantProfile =>
+            !!profile &&
+            !(Array.isArray(profile.roles) && profile.roles.includes('Staff')) &&
+            !isNewsletterSubscriberOnly(profile, participantEventCounts.get(profile.id) || 0)
+        )
+        .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })),
+    [participantIds, participants, participantEventCounts]
+  );
+
+  const availableParticipants = useMemo(
+    () =>
+      participants
+        .filter((profile) => {
+          const roles = Array.isArray(profile.roles) ? profile.roles : [];
+          return (
+            !participantIds.includes(profile.id) &&
+            !roles.includes('Staff') &&
+            !isNewsletterSubscriberOnly(profile, participantEventCounts.get(profile.id) || 0)
+          );
+        })
+        .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' })),
+    [participantEventCounts, participantIds, participants]
+  );
+
+  const matchingAvailableParticipants = useMemo(() => {
+    const query = participantSearchQuery.trim().toLocaleLowerCase();
+    if (!query) return availableParticipants;
+    return availableParticipants.filter((profile) =>
+      `${profile.full_name} ${profile.email || ''}`.toLocaleLowerCase().includes(query)
+    );
+  }, [availableParticipants, participantSearchQuery]);
 
   const availableStaff = useMemo(() => {
     return participants.filter((p) => {
@@ -2978,30 +3023,17 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           </div>
           <span className="badge neutral">
             {
-              participantIds.filter((id) => {
-                const roles = participants.find((p) => p.id === id)?.roles || [];
-                return !roles.includes('Staff');
-              }).length
+              visibleParticipants.length
             }{' '}
             Participants
           </span>
         </header>
         {openSections.participants &&
-          (participantIds.filter((id) => {
-            const roles = participants.find((p) => p.id === id)?.roles || [];
-            return !roles.includes('Staff');
-          }).length === 0 ? (
+          (visibleParticipants.length === 0 ? (
             <p className="muted">No participants yet.</p>
           ) : (
             <ul className="status-list event-detail-scroll-list">
-              {participantIds
-                .map((id) => participants.find((p) => p.id === id))
-                .filter(
-                  (profile): profile is ParticipantProfile =>
-                    !!profile && !(Array.isArray(profile.roles) && profile.roles.includes('Staff'))
-                )
-                .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }))
-                .map((profile) => {
+              {visibleParticipants.map((profile) => {
                   const id = profile.id;
                   const roles = Array.isArray(profile.roles) ? profile.roles : [];
                   const hasJumpLeader = roles.includes('Jump Leader');
@@ -3079,37 +3111,65 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
           <>
             <div className="form-grid event-detail-top-margin">
               <label className="form-field">
-                <span>Select participant</span>
-                <select
-                  value={selectedParticipantId}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__new__') {
-                      setShowParticipantForm(true);
-                      setSelectedParticipantId('');
-                    } else {
-                      setSelectedParticipantId(val);
-                    }
+                <span>Search participants</span>
+                <input
+                  type="search"
+                  value={participantSearchQuery}
+                  placeholder="Search by name or email"
+                  onFocus={() => {
+                    setParticipantSearchFocused(true);
+                    setShowParticipantForm(false);
                   }}
-                >
-                  <option value="">Choose a participant</option>
-                  <option value="__new__">Create new participant…</option>
-                  {availableParticipants.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.full_name} ({p.email || 'No email'})
-                    </option>
-                  ))}
-                </select>
+                  onBlur={() => setParticipantSearchFocused(false)}
+                  onChange={(e) => {
+                    setParticipantSearchQuery(e.target.value);
+                  }}
+                />
               </label>
               <div className="form-actions event-detail-compact-actions">
-                <button type="button" className="primary" onClick={handleAssignParticipant} disabled={!selectedParticipantId}>
-                  Add
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => {
+                    setParticipantSearchFocused(false);
+                    setShowParticipantForm(true);
+                  }}
+                >
+                  Create new participant
                 </button>
                 <button type="button" className={saveButtonClass} onClick={handleSaveAll} disabled={saving}>
                   {saveButtonLabel}
                 </button>
               </div>
             </div>
+            {participantSearchFocused && (
+              <div className="event-detail-participant-search-results" role="listbox" aria-label="Available participants">
+                {matchingAvailableParticipants.length === 0 ? (
+                  <p className="muted">No participants match your search.</p>
+                ) : (
+                  matchingAvailableParticipants.map((profile) => (
+                    <div
+                      key={profile.id}
+                      role="option"
+                      className="event-detail-participant-search-result"
+                    >
+                      <div>
+                        <strong>{profile.full_name}</strong>
+                        <span>{profile.email || 'No email on file'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="primary event-detail-participant-search-add"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void handleAssignParticipant(profile.id)}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
             {showParticipantForm && (
               <form className="form-grid event-detail-top-margin" onSubmit={handleCreateParticipant}>
                 <label className="form-field">
