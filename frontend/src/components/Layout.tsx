@@ -14,6 +14,7 @@ const Layout = () => {
   const [navOpen, setNavOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [profileIncomplete, setProfileIncomplete] = useState(false);
+  const [profileCompletionChecked, setProfileCompletionChecked] = useState(false);
   const [hasPendingPayments, setHasPendingPayments] = useState(false);
   const [registeredEvents, setRegisteredEvents] = useState<Event[]>([]);
   const navigate = useNavigate();
@@ -22,7 +23,9 @@ const Layout = () => {
   // Participant-only sessions need a document navigation so the browser picks up
   // the session-backed view, matching the event gear menu behavior.
   const forceDocumentNavigation = !!user?.impersonator || participantOnly;
-  const navItems = participantOnly
+  const navItems = profileCompletionChecked && profileIncomplete
+    ? []
+    : participantOnly
     ? [{ to: '/events', label: 'Events' }]
       : [
         { to: '/events', label: 'Events' },
@@ -104,8 +107,10 @@ const Layout = () => {
       if (!user) {
         setProfileIncomplete(false);
         setHasPendingPayments(false);
+        setProfileCompletionChecked(false);
         return;
       }
+      setProfileCompletionChecked(false);
       try {
         const [profile, registrations] = await Promise.all([
           getMyParticipantProfile(),
@@ -124,6 +129,8 @@ const Layout = () => {
         const status = (error as Error & { status?: number })?.status;
         setProfileIncomplete(status === 404);
         setHasPendingPayments(false);
+      } finally {
+        if (!cancelled) setProfileCompletionChecked(true);
       }
     };
 
@@ -137,6 +144,11 @@ const Layout = () => {
       window.removeEventListener('participant-profile-updated', handleProfileUpdated);
     };
   }, [user?.email, user?.account_id]);
+
+  useEffect(() => {
+    if (!profileCompletionChecked || !profileIncomplete || location.pathname === '/profile') return;
+    navigate('/profile', { replace: true });
+  }, [location.pathname, navigate, profileCompletionChecked, profileIncomplete]);
 
   useEffect(() => {
     let cancelled = false;
@@ -346,7 +358,9 @@ const Layout = () => {
               </div>
             </section>
           )}
-          <Outlet key={location.pathname} />
+          {profileCompletionChecked && profileIncomplete && location.pathname !== '/profile'
+            ? null
+            : <Outlet key={location.pathname} />}
         </main>
       </div>
     </div>

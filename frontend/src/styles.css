@@ -686,6 +686,171 @@ button.ghost {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.registration-checklist-column {
+  width: 5.75rem;
+}
+
+.registration-checklist-button {
+  display: inline-grid;
+  justify-items: center;
+  gap: 0.1rem;
+  min-width: 4.75rem;
+  padding: 0.2rem 0.35rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--text-color);
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1.1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 140ms ease, background-color 140ms ease;
+}
+
+.registration-checklist-button .material-symbols-outlined {
+  font-size: 1.25rem;
+}
+
+.registration-table-row:hover .registration-checklist-button,
+.registration-checklist-button:focus-visible {
+  opacity: 1;
+}
+
+.registration-checklist-button:hover,
+.registration-checklist-button:focus-visible {
+  background: var(--overlay-scrim-subtle);
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  .registration-checklist-button {
+    opacity: 1;
+  }
+}
+
+.registration-checklist-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  overflow: auto;
+  background: var(--overlay-scrim);
+}
+
+.card.registration-checklist-overlay-panel {
+  width: min(31rem, 100%);
+  max-height: min(44rem, calc(100vh - 2rem));
+  overflow: auto;
+  padding: 1.5rem;
+  background: rgba(10, 15, 28, 0.9);
+  border-color: var(--modal-border);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--modal-border);
+}
+
+:root[data-theme='light'] .card.registration-checklist-overlay-panel {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.registration-checklist-overlay-header {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0 2rem 1rem 0;
+}
+
+.registration-checklist-overlay-header h2,
+.registration-checklist-overlay-header p {
+  margin: 0;
+}
+
+.registration-checklist-items {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.registration-checklist-items li {
+  border: 1px solid var(--table-border);
+  border-radius: 0.5rem;
+}
+
+.registration-checklist-item-button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.registration-checklist-item-button:hover:not(:disabled),
+.registration-checklist-item-button:focus-visible {
+  background: var(--overlay-scrim-subtle);
+  outline: none;
+}
+
+.registration-checklist-item-button:disabled {
+  cursor: wait;
+}
+
+.registration-checklist-item-button .material-symbols-outlined {
+  color: var(--muted-text);
+}
+
+.registration-checklist-item-button .material-symbols-outlined:first-child {
+  color: #38bdf8;
+}
+
+.registration-checklist-item--with-text {
+  display: grid;
+  grid-template-columns: max-content minmax(8rem, 11rem);
+  align-items: center;
+  justify-content: start;
+  column-gap: 0.25rem;
+}
+
+.registration-checklist-item--with-text .registration-checklist-item-button {
+  width: auto;
+}
+
+.registration-checklist-paid-via-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.42rem 0.55rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #0f172a;
+  font: inherit;
+  outline: 0;
+}
+
+@media (max-width: 520px) {
+  .registration-checklist-item--with-text {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-checklist-paid-via-input {
+    margin: 0 0.65rem 0.65rem;
+    width: calc(100% - 1.3rem);
+  }
+}
+
+.registration-checklist-save-error {
+  margin: 0.85rem 0 0;
+}
+
 .registration-detail-header-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7055,6 +7220,22 @@ button.ghost.event-route-preview-overlay-button {
 .notice.warning {
   background: rgba(249, 115, 22, 0.15);
   color: #fed7aa;
+}
+
+.profile-registration-blocked-notice {
+  margin: 0 0 1.25rem;
+  border: 2px solid #f97316;
+  background: rgba(249, 115, 22, 0.22);
+  font-size: 1rem;
+}
+
+.profile-registration-blocked-notice strong {
+  display: block;
+  font-size: 1.2rem;
+}
+
+.profile-registration-blocked-notice p {
+  margin: 0.4rem 0 0;
 }
 
 .login-sidebar {

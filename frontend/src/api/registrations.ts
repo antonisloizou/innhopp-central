@@ -59,6 +59,8 @@ export interface Registration {
   staff_owner_account_id?: number | null;
   tags: string[];
   internal_notes?: string;
+  checklist?: Record<string, boolean>;
+  checklist_text?: Record<string, string>;
   created_at: string;
   updated_at: string;
   payments?: RegistrationPayment[];
@@ -169,6 +171,16 @@ export const updateRegistration = (registrationId: number, payload: UpdateRegist
   apiRequest<Registration>(`/registrations/${registrationId}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
+  });
+
+export const updateRegistrationChecklist = (
+  registrationId: number,
+  checklist: Record<string, boolean>,
+  checklistText: Record<string, string>
+) =>
+  apiRequest<Registration>(`/registrations/${registrationId}/checklist`, {
+    method: 'PUT',
+    body: JSON.stringify({ checklist, checklist_text: checklistText })
   });
 
 export const updateRegistrationStatus = (registrationId: number, payload: UpdateRegistrationStatusPayload) =>

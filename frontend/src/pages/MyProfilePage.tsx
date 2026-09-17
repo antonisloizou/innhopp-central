@@ -15,6 +15,7 @@ import ParticipantProfileForm, {
 import { useAuth } from '../auth/AuthProvider';
 import { formatEventLocalDate } from '../utils/eventDate';
 import ParticipantEventsCard from '../components/ParticipantEventsCard';
+import { isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 
 const PENDING_PUBLIC_REGISTRATION_KEY = 'innhopp-pending-public-registration';
 
@@ -103,7 +104,7 @@ const MyProfilePage = () => {
     let cancelled = false;
 
     const maybeClaimPublicRegistration = async () => {
-      if (!user || typeof window === 'undefined') return;
+      if (!user || !profile || !isProfileCompleteForRegistration(profile) || typeof window === 'undefined') return;
       const params = new URLSearchParams(location.search);
       if (!params.has('publicRegistration')) return;
 
@@ -139,7 +140,7 @@ const MyProfilePage = () => {
     return () => {
       cancelled = true;
     };
-  }, [location.search, user]);
+  }, [location.search, profile, user]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -171,6 +172,7 @@ const MyProfilePage = () => {
       .filter((payment) => payment.status === 'pending')
       .map((payment) => ({ registration, payment }))
   );
+  const profileIncomplete = !profile || !isProfileCompleteForRegistration(profile);
 
   return (
     <section>
@@ -180,6 +182,12 @@ const MyProfilePage = () => {
         </div>
       </header>
 
+      {profileIncomplete ? (
+        <section className="notice warning profile-registration-blocked-notice" role="alert">
+          <strong>Registration blocked</strong>
+          <p>Complete every required profile field and save your profile before you can register for an event.</p>
+        </section>
+      ) : null}
       {error ? <p className="error-text">{error}</p> : null}
       {claimingRegistration ? <p className="muted">Creating your registration…</p> : null}
       {pendingPayments.length > 0 ? (

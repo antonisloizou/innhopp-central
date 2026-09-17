@@ -81,6 +81,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}/stream", h.streamRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/{registrationID}", h.getRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Put("/{registrationID}", h.updateRegistration)
+	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Put("/{registrationID}/checklist", h.updateRegistrationChecklist)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/{registrationID}/status", h.updateRegistrationStatus)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Post("/{registrationID}/payments", h.createPayment)
 	r.With(enforcer.Authorize(rbac.PermissionManageRegistrations)).Put("/payments/{paymentID}", h.updatePayment)
@@ -108,6 +109,8 @@ type Registration struct {
 	StaffOwnerAccountID *int64                 `json:"staff_owner_account_id,omitempty"`
 	Tags                []string               `json:"tags"`
 	InternalNotes       string                 `json:"internal_notes,omitempty"`
+	Checklist           map[string]bool        `json:"checklist"`
+	ChecklistText       map[string]string      `json:"checklist_text"`
 	CreatedAt           time.Time              `json:"created_at"`
 	UpdatedAt           time.Time              `json:"updated_at"`
 	Payments            []RegistrationPayment  `json:"payments,omitempty"`
@@ -182,6 +185,11 @@ type registrationPayload struct {
 
 type registrationStatusPayload struct {
 	Status string `json:"status"`
+}
+
+type registrationChecklistPayload struct {
+	Checklist     map[string]bool   `json:"checklist"`
+	ChecklistText map[string]string `json:"checklist_text"`
 }
 
 type paymentPayload struct {
@@ -269,6 +277,7 @@ const registrationSelectColumns = `
 	r.staff_owner_account_id,
 	COALESCE(r.tags, ARRAY[]::TEXT[]),
 	COALESCE(r.internal_notes, ''),
+	COALESCE(r.registration_checklist, '{}'::JSONB),
 	r.created_at,
 	r.updated_at
 `
@@ -388,6 +397,7 @@ func currentAccountID(ctx context.Context) *int64 {
 
 func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registration, error) {
 	var registration Registration
+	var checklistJSON []byte
 	if err := scanner.Scan(
 		&registration.ID,
 		&registration.EventID,
@@ -408,6 +418,7 @@ func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registrati
 		&registration.StaffOwnerAccountID,
 		&registration.Tags,
 		&registration.InternalNotes,
+		&checklistJSON,
 		&registration.CreatedAt,
 		&registration.UpdatedAt,
 	); err != nil {
@@ -415,7 +426,77 @@ func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registrati
 	}
 	registration.ParticipantEmail = strings.ToLower(strings.TrimSpace(registration.ParticipantEmail))
 	registration.Tags = normalizeTags(registration.Tags)
+	registration.Checklist, registration.ChecklistText = normalizeRegistrationChecklistJSON(checklistJSON)
 	return &registration, nil
+}
+
+var validRegistrationChecklistItems = map[string]struct{}{
+	"email_reg_form":          {},
+	"main_invoice_amount":     {},
+	"made_invoice":            {},
+	"main_email_sent":         {},
+	"sent_invoice":            {},
+	"received_main":           {},
+	"amount":                  {},
+	"paid_via":                {},
+	"checked_paid_on_stripe":  {},
+	"added_to_whatsapp_group": {},
+}
+
+var registrationChecklistTextItems = map[string]struct{}{
+	"main_invoice_amount": {},
+	"amount":              {},
+	"paid_via":            {},
+}
+
+func normalizeRegistrationChecklistJSON(raw []byte) (map[string]bool, map[string]string) {
+	checklist := make(map[string]bool)
+	checklistText := make(map[string]string)
+	if len(raw) == 0 {
+		return checklist, checklistText
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return checklist, checklistText
+	}
+	for key := range validRegistrationChecklistItems {
+		var checked bool
+		if err := json.Unmarshal(values[key], &checked); err == nil && checked {
+			checklist[key] = true
+		}
+	}
+	for key := range registrationChecklistTextItems {
+		var value string
+		if err := json.Unmarshal(values[key+"_text"], &value); err == nil && strings.TrimSpace(value) != "" {
+			checklistText[key] = strings.TrimSpace(value)
+		}
+	}
+	return checklist, checklistText
+}
+
+func normalizeRegistrationChecklist(input map[string]bool) map[string]bool {
+	checklist := make(map[string]bool)
+	for key, checked := range input {
+		if _, valid := validRegistrationChecklistItems[key]; valid && checked {
+			checklist[key] = true
+		}
+	}
+	return checklist
+}
+
+func encodeRegistrationChecklist(input map[string]bool, textValues map[string]string) ([]byte, error) {
+	values := make(map[string]any)
+	for key, checked := range normalizeRegistrationChecklist(input) {
+		if checked {
+			values[key] = true
+		}
+	}
+	for key := range registrationChecklistTextItems {
+		if value := strings.TrimSpace(textValues[key]); value != "" {
+			values[key+"_text"] = value
+		}
+	}
+	return json.Marshal(values)
 }
 
 func loadPayments(ctx context.Context, q interface {
@@ -1405,6 +1486,31 @@ func ensureOwnParticipantProfileTx(ctx context.Context, tx pgx.Tx, claims *auth.
 	return participantID, nil
 }
 
+func isProfileCompleteForRegistrationTx(ctx context.Context, tx pgx.Tx, participantID int64) (bool, error) {
+	var complete bool
+	err := tx.QueryRow(ctx, `
+		SELECT btrim(full_name) <> ''
+			AND btrim(email) <> ''
+			AND btrim(COALESCE(emergency_contact_name, '')) <> ''
+			AND btrim(COALESCE(emergency_contact_phone, '')) <> ''
+			AND btrim(COALESCE(whatsapp, '')) <> ''
+			AND btrim(COALESCE(license, '')) <> ''
+			AND btrim(COALESCE(uses_packer, '')) <> ''
+			AND btrim(COALESCE(accommodation, '')) <> ''
+			AND btrim(COALESCE(main_canopy, '')) <> ''
+			AND btrim(COALESCE(wingload, '')) <> ''
+			AND years_in_sport IS NOT NULL
+			AND jump_count IS NOT NULL
+			AND recent_jump_count IS NOT NULL
+		FROM participant_profiles
+		WHERE id = $1
+	`, participantID).Scan(&complete)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return complete, err
+}
+
 func nullableAccountID(accountID int64) any {
 	if accountID <= 0 {
 		return nil
@@ -1673,6 +1779,15 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to prepare participant profile: %v", err))
 		return
 	}
+	profileComplete, err := isProfileCompleteForRegistrationTx(ctx, tx, participantID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to validate participant profile")
+		return
+	}
+	if !profileComplete {
+		httpx.Error(w, http.StatusForbidden, "registration is blocked until you complete all required profile information")
+		return
+	}
 
 	accountID := claims.AccountID
 	registrationID, err := createPublicRegistrationTx(
@@ -1861,6 +1976,7 @@ func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request)
 			       staff_owner_account_id,
 			       tags,
 			       internal_notes,
+			       registration_checklist,
 			       created_at,
 			       updated_at
 			FROM event_registrations
@@ -2095,6 +2211,48 @@ func (h *Handler) updateRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.publishRegistrationUpdate(registration, "registration.updated")
+	httpx.WriteJSON(w, http.StatusOK, registration)
+}
+
+func (h *Handler) updateRegistrationChecklist(w http.ResponseWriter, r *http.Request) {
+	registrationID, err := strconv.ParseInt(chi.URLParam(r, "registrationID"), 10, 64)
+	if err != nil || registrationID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid registration id")
+		return
+	}
+
+	var payload registrationChecklistPayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	checklistJSON, err := encodeRegistrationChecklist(payload.Checklist, payload.ChecklistText)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid registration checklist")
+		return
+	}
+
+	commandTag, err := h.db.Exec(r.Context(), `
+		UPDATE event_registrations
+		SET registration_checklist = $2::JSONB,
+			updated_at = NOW()
+		WHERE id = $1
+	`, registrationID, string(checklistJSON))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to update registration checklist")
+		return
+	}
+	if commandTag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "registration not found")
+		return
+	}
+
+	registration, err := h.loadRegistration(r.Context(), registrationID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load registration")
+		return
+	}
+	h.publishRegistrationUpdate(registration, "registration.checklist_updated")
 	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 

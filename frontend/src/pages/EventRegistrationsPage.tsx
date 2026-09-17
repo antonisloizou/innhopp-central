@@ -1,11 +1,19 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { copyEvent, deleteEvent, Event, getEvent } from '../api/events';
 import { listParticipantProfiles, ParticipantProfile } from '../api/participants';
-import { createEventRegistration, listEventRegistrations, Registration, RegistrationStatus } from '../api/registrations';
+import {
+  createEventRegistration,
+  listEventRegistrations,
+  Registration,
+  RegistrationStatus,
+  updateRegistrationChecklist
+} from '../api/registrations';
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { usePreserveOverlayScroll } from '../hooks/usePreserveOverlayScroll';
 import {
   formatEventLocalDateInputFromDate,
   formatEventLocal,
@@ -58,6 +66,151 @@ const createInitialFormState = (event?: Event | null): CreateRegistrationFormSta
 });
 
 const normalizeSearch = (value: string) => value.trim().toLowerCase();
+
+const registrationChecklistItems = [
+  { key: 'email_reg_form', label: 'Email To Fill Profile' },
+  { key: 'main_invoice_amount', label: 'Main Invoice Amount', textField: true },
+  { key: 'made_invoice', label: 'Made Invoice' },
+  { key: 'main_email_sent', label: 'Main Email Sent' },
+  { key: 'sent_invoice', label: 'Sent Invoice' },
+  { key: 'received_main', label: 'Received Main' },
+  { key: 'amount', label: 'Amount', textField: true },
+  { key: 'paid_via', label: 'Paid Via', textField: true },
+  { key: 'checked_paid_on_stripe', label: 'Checked As Paid On Stripe' },
+  { key: 'added_to_whatsapp_group', label: 'Added To WhatsApp Group' }
+];
+
+type RegistrationActionsChecklistOverlayProps = {
+  registration: Registration;
+  onClose: () => void;
+  onSaved: (registration: Registration) => void;
+};
+
+const RegistrationActionsChecklistOverlay = ({
+  registration,
+  onClose,
+  onSaved
+}: RegistrationActionsChecklistOverlayProps) => {
+  usePreserveOverlayScroll();
+  const [checklist, setChecklist] = useState(registration.checklist || {});
+  const [checklistText, setChecklistText] = useState(registration.checklist_text || {});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  if (typeof document === 'undefined') return null;
+
+  const saveChecklist = async (
+    nextChecklist: Record<string, boolean>,
+    nextChecklistText: Record<string, string>,
+    savingItem: string
+  ) => {
+    if (savingKey) return;
+    setChecklist(nextChecklist);
+    setChecklistText(nextChecklistText);
+    setSavingKey(savingItem);
+    setSaveError(null);
+    try {
+      const updatedRegistration = await updateRegistrationChecklist(registration.id, nextChecklist, nextChecklistText);
+      setChecklist(updatedRegistration.checklist || {});
+      setChecklistText(updatedRegistration.checklist_text || {});
+      onSaved(updatedRegistration);
+    } catch (err) {
+      setChecklist(registration.checklist || {});
+      setChecklistText(registration.checklist_text || {});
+      setSaveError(err instanceof Error ? err.message : 'Failed to save checklist item');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const toggleChecklistItem = async (key: string) => {
+    const nextChecklist = { ...checklist, [key]: !checklist[key] };
+    if (!nextChecklist[key]) delete nextChecklist[key];
+    await saveChecklist(nextChecklist, checklistText, key);
+  };
+
+  return createPortal(
+    <div className="registration-checklist-overlay" role="presentation" onClick={onClose}>
+      <section
+        className="card overlay-panel-with-close registration-checklist-overlay-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="registration-actions-checklist-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          className="overlay-close-button overlay-close-top-left"
+          type="button"
+          aria-label="Close registration actions checklist"
+          onClick={onClose}
+        >
+          ×
+        </button>
+        <header className="registration-checklist-overlay-header">
+          <h2 id="registration-actions-checklist-title">Registration Actions Checklist</h2>
+          <p className="muted">
+            {registration.participant_name || `Participant #${registration.participant_id}`}
+          </p>
+        </header>
+        <ul className="registration-checklist-items">
+          {registrationChecklistItems.map((item) => (
+            <li key={item.key} className={item.textField ? 'registration-checklist-item--with-text' : undefined}>
+              <button
+                type="button"
+                className="registration-checklist-item-button"
+                disabled={savingKey !== null}
+                onClick={() => void toggleChecklistItem(item.key)}
+              >
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  {checklist[item.key] ? 'check_box' : 'check_box_outline_blank'}
+                </span>
+                <span>{item.label}</span>
+              </button>
+              {item.textField ? (
+                <input
+                  className="registration-checklist-paid-via-input"
+                  type="text"
+                  value={checklistText[item.key] || ''}
+                  placeholder={item.key === 'paid_via' ? 'Payment method' : 'Enter amount'}
+                  aria-label={item.label}
+                  disabled={savingKey !== null}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setChecklistText((current) => ({ ...current, [item.key]: nextValue }));
+                    setChecklist((current) => {
+                      const nextChecklist = { ...current };
+                      if (nextValue.trim()) {
+                        nextChecklist[item.key] = true;
+                      } else {
+                        delete nextChecklist[item.key];
+                      }
+                      return nextChecklist;
+                    });
+                  }}
+                  onBlur={() => {
+                    if ((checklistText[item.key] || '') !== (registration.checklist_text?.[item.key] || '')) {
+                      void saveChecklist(checklist, checklistText, item.key);
+                    }
+                  }}
+                />
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {saveError ? <p className="error-text registration-checklist-save-error">{saveError}</p> : null}
+      </section>
+    </div>,
+    document.body
+  );
+};
 
 const isCompletedStatus = (status: string) => status === 'completed' || status === 'fully_paid';
 
@@ -125,6 +278,7 @@ const EventRegistrationsPage = () => {
   const [query, setQuery] = useState('');
   const [createFormOpen, setCreateFormOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateRegistrationFormState>(createInitialFormState());
+  const [checklistRegistration, setChecklistRegistration] = useState<Registration | null>(null);
 
   const reload = useCallback(
     async (options?: { preserveLoading?: boolean; preserveCreateForm?: boolean }) => {
@@ -224,9 +378,18 @@ const EventRegistrationsPage = () => {
     }
   };
 
+  const nonStaffRegistrations = useMemo(() => {
+    const staffParticipantIDs = new Set(
+      participants
+        .filter((participant) => (participant.roles || []).some((role) => role.toLowerCase() === 'staff'))
+        .map((participant) => participant.id)
+    );
+    return registrations.filter((registration) => !staffParticipantIDs.has(registration.participant_id));
+  }, [participants, registrations]);
+
   const filteredRegistrations = useMemo(() => {
     const normalizedQuery = normalizeSearch(query);
-    return registrations.filter((registration) => {
+    return nonStaffRegistrations.filter((registration) => {
       const depositState = computePaymentState(
         registration.deposit_paid_at,
         registration.deposit_due_at,
@@ -250,7 +413,7 @@ const EventRegistrationsPage = () => {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(normalizedQuery));
     });
-  }, [depositFilter, mainInvoiceFilter, query, registrations, statusFilter]);
+  }, [depositFilter, mainInvoiceFilter, nonStaffRegistrations, query, statusFilter]);
 
   const registeredParticipantIds = useMemo(
     () => new Set(registrations.map((registration) => registration.participant_id)),
@@ -267,19 +430,19 @@ const EventRegistrationsPage = () => {
   );
 
   const stats = useMemo(() => {
-    const overdueDeposits = registrations.filter(
+    const overdueDeposits = nonStaffRegistrations.filter(
       (registration) =>
         computePaymentState(registration.deposit_paid_at, registration.deposit_due_at, registration.status) ===
         'overdue'
     ).length;
-    const overdueMainInvoices = registrations.filter(
+    const overdueMainInvoices = nonStaffRegistrations.filter(
       (registration) =>
         computePaymentState(registration.main_invoice_paid_at, registration.main_invoice_due_at, registration.status) ===
         'overdue'
     ).length;
-    const completed = registrations.filter((registration) => isCompletedStatus(registration.status)).length;
+    const completed = nonStaffRegistrations.filter((registration) => isCompletedStatus(registration.status)).length;
     return { overdueDeposits, overdueMainInvoices, completed };
-  }, [registrations]);
+  }, [nonStaffRegistrations]);
 
   const handleCreateRegistration = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -348,7 +511,7 @@ const EventRegistrationsPage = () => {
       <section className="registration-stats-grid">
         <article className="card registration-stat-card">
           <span className="registration-stat-label">Total</span>
-          <strong>{registrations.length}</strong>
+          <strong>{nonStaffRegistrations.length}</strong>
         </article>
         <article className="card registration-stat-card">
           <span className="registration-stat-label">Deposit overdue</span>
@@ -413,6 +576,7 @@ const EventRegistrationsPage = () => {
               <thead>
                 <tr>
                   <th>Participant</th>
+                  <th className="registration-checklist-column">Checklist</th>
                   <th>Status</th>
                   <th>Deposit</th>
                   <th>Main Invoice</th>
@@ -442,6 +606,26 @@ const EventRegistrationsPage = () => {
                           <strong>{registration.participant_name || `Participant #${registration.participant_id}`}</strong>
                           <span className="muted">{registration.participant_email || 'No email'}</span>
                         </div>
+                      </td>
+                      <td
+                        className="registration-checklist-column"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setChecklistRegistration(registration);
+                        }}
+                      >
+                        <button
+                          className="registration-checklist-button"
+                          type="button"
+                          aria-label={`Open registration actions checklist for ${registration.participant_name || `participant ${registration.participant_id}`}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setChecklistRegistration(registration);
+                          }}
+                        >
+                          <span className="material-symbols-outlined" aria-hidden="true">check_box</span>
+                          <span>Checklist</span>
+                        </button>
                       </td>
                       <td>
                         <span className={badgeClassForRegistrationStatus(registration.status)}>
@@ -483,6 +667,19 @@ const EventRegistrationsPage = () => {
           </div>
         )}
       </article>
+
+      {checklistRegistration ? (
+        <RegistrationActionsChecklistOverlay
+          registration={checklistRegistration}
+          onClose={() => setChecklistRegistration(null)}
+          onSaved={(updatedRegistration) => {
+            setRegistrations((current) =>
+              current.map((registration) => registration.id === updatedRegistration.id ? updatedRegistration : registration)
+            );
+            setChecklistRegistration(updatedRegistration);
+          }}
+        />
+      ) : null}
 
       <article className="card stack">
         <div className="page-header">

@@ -1118,6 +1118,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             staff_owner_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
             tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
             internal_notes TEXT,
+            registration_checklist JSONB NOT NULL DEFAULT '{}'::JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
@@ -1134,6 +1135,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS staff_owner_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS internal_notes TEXT`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS registration_checklist JSONB NOT NULL DEFAULT '{}'::JSONB`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`DO $$
