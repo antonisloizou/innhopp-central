@@ -7238,6 +7238,15 @@ button.ghost.event-route-preview-overlay-button {
   margin: 0.4rem 0 0;
 }
 
+:root[data-theme='light'] .notice.warning {
+  color: #9a3412;
+}
+
+:root[data-theme='light'] .profile-registration-blocked-notice {
+  border-color: #ea580c;
+  background: rgba(255, 247, 237, 0.94);
+}
+
 .login-sidebar {
   display: none;
 }
