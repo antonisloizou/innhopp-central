@@ -314,6 +314,7 @@ type historyEvent struct {
 type groundCrewKitItem struct {
 	Key     string `json:"key"`
 	Checked bool   `json:"checked"`
+	Absent  bool   `json:"absent"`
 }
 
 var groundCrewKitItemKeys = []string{
@@ -388,8 +389,8 @@ func (h *Handler) groundCrewKit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemTable, _, _ := groundCrewKitTables(r)
-	checked := map[string]bool{}
-	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
+	itemsByKey := map[string]groundCrewKitItem{}
+	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked, absent FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
 	if err != nil {
 		httpx.Error(w, 500, "could not load ground crew kit")
 		return
@@ -397,16 +398,18 @@ func (h *Handler) groundCrewKit(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var key string
-		var value bool
-		if err := rows.Scan(&key, &value); err != nil {
+		var checked, absent bool
+		if err := rows.Scan(&key, &checked, &absent); err != nil {
 			httpx.Error(w, 500, "could not read ground crew kit")
 			return
 		}
-		checked[key] = value
+		itemsByKey[key] = groundCrewKitItem{Key: key, Checked: checked, Absent: absent}
 	}
 	items := make([]groundCrewKitItem, 0, len(groundCrewKitItemKeys))
 	for _, key := range groundCrewKitItemKeys {
-		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+		item := itemsByKey[key]
+		item.Key = key
+		items = append(items, item)
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"items": items})
 }
@@ -424,6 +427,7 @@ func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Checked bool `json:"checked"`
+		Absent  bool `json:"absent"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.Error(w, 400, "checked is required")
@@ -451,7 +455,10 @@ func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	var previous bool
 	_ = tx.QueryRow(r.Context(), fmt.Sprintf(`SELECT checked FROM %s WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, itemTable), innhoppID, itemKey).Scan(&previous)
-	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+	if req.Absent {
+		req.Checked = false
+	}
+	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,absent,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,absent=EXCLUDED.absent,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, req.Absent, claims.AccountID, name); err != nil {
 		httpx.Error(w, 500, "could not save ground crew kit")
 		return
 	}
@@ -480,8 +487,8 @@ func (h *Handler) packerKit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemTable, _, _ := packerKitTables(r)
-	checked := map[string]bool{}
-	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
+	itemsByKey := map[string]groundCrewKitItem{}
+	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked, absent FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
 	if err != nil {
 		httpx.Error(w, 500, "could not load packing kit")
 		return
@@ -489,16 +496,18 @@ func (h *Handler) packerKit(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	for rows.Next() {
 		var key string
-		var value bool
-		if err := rows.Scan(&key, &value); err != nil {
+		var checked, absent bool
+		if err := rows.Scan(&key, &checked, &absent); err != nil {
 			httpx.Error(w, 500, "could not read packing kit")
 			return
 		}
-		checked[key] = value
+		itemsByKey[key] = groundCrewKitItem{Key: key, Checked: checked, Absent: absent}
 	}
 	items := make([]groundCrewKitItem, 0, len(packerKitItemKeys))
 	for _, key := range packerKitItemKeys {
-		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+		item := itemsByKey[key]
+		item.Key = key
+		items = append(items, item)
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"items": items})
 }
@@ -516,6 +525,7 @@ func (h *Handler) updatePackerKit(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Checked bool `json:"checked"`
+		Absent  bool `json:"absent"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.Error(w, 400, "checked is required")
@@ -543,7 +553,10 @@ func (h *Handler) updatePackerKit(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	var previous bool
 	_ = tx.QueryRow(r.Context(), fmt.Sprintf(`SELECT checked FROM %s WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, itemTable), innhoppID, itemKey).Scan(&previous)
-	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+	if req.Absent {
+		req.Checked = false
+	}
+	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,absent,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,absent=EXCLUDED.absent,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, req.Absent, claims.AccountID, name); err != nil {
 		httpx.Error(w, 500, "could not save packing kit")
 		return
 	}

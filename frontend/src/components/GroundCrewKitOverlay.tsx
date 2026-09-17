@@ -1,6 +1,7 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { GroundCrewKit, updateGroundCrewKitItem, updateGroundCrewReturnKitItem } from '../api/groundCrewKit';
+import { usePreserveOverlayScroll } from '../hooks/usePreserveOverlayScroll';
 
 type KitItem = { key: string; label: string; icon: string; group: 'essentials' | 'bag' | 'metal-box' };
 
@@ -27,30 +28,34 @@ export default function GroundCrewKitOverlay({ innhoppId, title, sequence, sched
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState('');
   const checked = new Set(kit.items.filter((item) => item.checked).map((item) => item.key));
+  const absent = new Set(kit.items.filter((item) => item.absent).map((item) => item.key));
   const progress = checked.size / kitItems.length;
   const date = scheduledAt ? new Date(scheduledAt) : null;
   const dateLabel = date && !Number.isNaN(date.getTime()) ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', hour12: false }) : 'Time not scheduled';
 
-  useEffect(() => {
-    document.body.classList.add('ground-kit-overlay-open');
-    return () => document.body.classList.remove('ground-kit-overlay-open');
-  }, []);
+  usePreserveOverlayScroll();
 
   const toggle = async (key: string) => {
     setSaving(key); setError('');
     try {
-      const updated = await (stage ? updateGroundCrewReturnKitItem(innhoppId, key, !checked.has(key)) : updateGroundCrewKitItem(innhoppId, key, !checked.has(key)));
+      const updated = await (stage ? updateGroundCrewReturnKitItem(innhoppId, key, !checked.has(key), false) : updateGroundCrewKitItem(innhoppId, key, !checked.has(key), false));
       setKit(updated); onUpdated(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save kit item');
     } finally { setSaving(null); }
   };
+  const toggleAbsent = async (key: string) => {
+    setSaving(key); setError('');
+    try {
+      const updated = await (stage ? updateGroundCrewReturnKitItem(innhoppId, key, false, !absent.has(key)) : updateGroundCrewKitItem(innhoppId, key, false, !absent.has(key)));
+      setKit(updated); onUpdated(updated);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not save kit item'); } finally { setSaving(null); }
+  };
   const renderGroup = (group: KitItem['group'], heading: string, subheading: string) => <section className={`ground-kit-group ground-kit-group--${group}`}>
     <header><div><h4>{heading}</h4>{subheading && <p>{subheading}</p>}</div><span>{kitItems.filter((item) => item.group === group && checked.has(item.key)).length}/{kitItems.filter((item) => item.group === group).length}</span></header>
-    <div className="ground-kit-items">{kitItems.filter((item) => item.group === group).map((item) => <label key={item.key} className={`ground-kit-item${checked.has(item.key) ? ' checked' : ''}${saving === item.key ? ' saving' : ''}`}>
-      <input type="checkbox" checked={checked.has(item.key)} disabled={saving !== null} onChange={() => void toggle(item.key)} />
-      <span className={`ground-kit-icon${item.key === 'stretcher' || item.key === 'windsock' || item.key === 'windblade_sockets' || item.key === 'radio' || item.key === 'location_flag' || item.key === 'small_flags' || item.key === 'marking_band' ? ' material-symbols-outlined' : ''}`} aria-hidden="true">{item.icon}</span><span className="ground-kit-item-copy"><strong>{item.label}</strong></span><span className="ground-kit-tick">✓</span>
-    </label>)}</div>
+    <div className="ground-kit-items">{kitItems.filter((item) => item.group === group).map((item) => <div key={item.key} className={`ground-kit-item${checked.has(item.key) ? ' checked' : ''}${absent.has(item.key) ? ' absent' : ''}${saving === item.key ? ' saving' : ''}`}>
+      <span className={`ground-kit-icon${item.key === 'stretcher' || item.key === 'windsock' || item.key === 'windblade_sockets' || item.key === 'radio' || item.key === 'location_flag' || item.key === 'small_flags' || item.key === 'marking_band' ? ' material-symbols-outlined' : ''}`} aria-hidden="true">{item.icon}</span><span className="ground-kit-item-copy"><strong>{item.label}</strong></span><button type="button" className="ground-kit-tick" aria-label={`Mark ${item.label} as ${checked.has(item.key) ? 'unchecked' : 'checked'}`} disabled={saving !== null} onClick={() => void toggle(item.key)}>✓</button><button type="button" className="ground-kit-absent" aria-pressed={absent.has(item.key)} aria-label={`${absent.has(item.key) ? 'Restore' : 'Mark'} ${item.label} as absent`} disabled={saving !== null} onClick={() => void toggleAbsent(item.key)}>×</button>
+    </div>)}</div>
   </section>;
   if (typeof document === 'undefined') return null;
   return createPortal(<div className="event-schedule-preview-backdrop ground-kit-backdrop" onClick={onClose} role="presentation"><section className="card overlay-panel-with-close ground-kit-overlay" role="dialog" aria-modal="true" aria-labelledby="ground-kit-title" onClick={(event) => event.stopPropagation()}>
