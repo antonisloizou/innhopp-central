@@ -1151,33 +1151,6 @@ func EnsureStaffParticipantRegistrations(ctx context.Context, db *pgxpool.Pool, 
 	return tx.Commit(ctx)
 }
 
-func ExpireOverdueRegistrations(ctx context.Context, db *pgxpool.Pool) (int64, error) {
-	commandTag, err := db.Exec(ctx, `
-		UPDATE event_registrations
-		SET status = 'expired',
-			expired_at = COALESCE(expired_at, NOW()),
-			updated_at = NOW()
-		WHERE cancelled_at IS NULL
-		  AND expired_at IS NULL
-		  AND status <> 'expired'
-		  AND EXISTS (
-			SELECT 1
-			FROM events e
-			WHERE e.id = event_registrations.event_id
-			  AND COALESCE(e.ends_at, e.starts_at)::date >= CURRENT_DATE
-		  )
-		  AND (
-			(deposit_due_at IS NOT NULL AND deposit_paid_at IS NULL AND deposit_due_at < CURRENT_DATE)
-			OR
-			(main_invoice_due_at IS NOT NULL AND main_invoice_paid_at IS NULL AND main_invoice_due_at < CURRENT_DATE)
-		  )
-	`)
-	if err != nil {
-		return 0, err
-	}
-	return commandTag.RowsAffected(), nil
-}
-
 func normalizeOptionalPublicString(value string) string {
 	return strings.TrimSpace(value)
 }

@@ -72,8 +72,6 @@ func main() {
 		log.Printf("staff registration backfill failed: %v", err)
 	}
 	cancelBackfill()
-	runRegistrationExpirySweep(pool)
-	go startRegistrationExpiryWorker(pool)
 
 	sessionSecret := os.Getenv("SESSION_SECRET")
 	if sessionSecret == "" {
@@ -243,32 +241,6 @@ func logMissingOIDCConfig(cfg auth.Config) {
 	log.Printf("OIDC is partially configured; missing: %s", strings.Join(missing, ", "))
 	if strings.TrimSpace(cfg.ClientSecret) == "" {
 		log.Printf("OIDC_CLIENT_SECRET is not set; Google usually requires it for web application clients")
-	}
-}
-
-func runRegistrationExpirySweep(pool *pgxpool.Pool) {
-	sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	rows, err := registrations.ExpireOverdueRegistrations(sweepCtx, pool)
-	if err != nil {
-		log.Printf("registration expiry sweep failed: %v", err)
-		return
-	}
-	if rows > 0 {
-		log.Printf("registration expiry sweep marked %d registrations as expired", rows)
-	}
-}
-
-func startRegistrationExpiryWorker(pool *pgxpool.Pool) {
-	for {
-		now := time.Now().UTC()
-		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 1, 0, 0, time.UTC)
-		if !now.Before(next) {
-			next = next.Add(24 * time.Hour)
-		}
-		timer := time.NewTimer(time.Until(next))
-		<-timer.C
-		runRegistrationExpirySweep(pool)
 	}
 }
 
