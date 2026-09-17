@@ -2,6 +2,7 @@ package checklists
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,12 @@ func (h *Handler) Routes(e *rbac.Enforcer) chi.Router {
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/history", h.history)
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/ground-crew-kit", h.groundCrewKit)
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/ground-crew-kit/{itemKey}", h.updateGroundCrewKit)
+	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/packer-kit", h.packerKit)
+	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/packer-kit/{itemKey}", h.updatePackerKit)
+	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/ground-crew-tasks", h.groundCrewTasks)
+	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/ground-crew-tasks/{itemKey}", h.updateGroundCrewTask)
+	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/packer-tasks", h.packerTasks)
+	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/packer-tasks/{itemKey}", h.updatePackerTask)
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/stream", h.stream)
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/items/{itemID}/complete", h.complete)
 	r.With(e.Authorize(rbac.PermissionReverseAnyChecklist)).Post("/innhopps/{innhoppID}/items/{itemID}/reverse", h.reverse)
@@ -88,6 +95,16 @@ func rolesFor(boat bool) []string {
 		return []string{"jump_leader", "jump_master", "ground_crew", "packer", "boat_crew"}
 	}
 	return []string{"jump_leader", "jump_master", "ground_crew", "packer"}
+}
+
+// readinessRolesFor returns the checks that must be complete before an innhopp
+// can proceed. Packer checks remain available for operational tracking, but
+// are advisory and must not hold up the innhopp.
+func readinessRolesFor(boat bool) []string {
+	if boat {
+		return []string{"jump_leader", "jump_master", "ground_crew", "boat_crew"}
+	}
+	return []string{"jump_leader", "jump_master", "ground_crew"}
 }
 
 func operationalTeamDetail(boat bool) string {
@@ -163,7 +180,7 @@ func (h *Handler) eventReadiness(ctx context.Context, eventID int64) ([]bool, er
 		if err := rows.Scan(&id, &boat); err != nil {
 			return nil, err
 		}
-		out = append(out, h.ready(ctx, id, rolesFor(boat)) || h.overridden(ctx, id))
+		out = append(out, h.ready(ctx, id, readinessRolesFor(boat)) || h.overridden(ctx, id))
 	}
 	return out, rows.Err()
 }
@@ -197,7 +214,7 @@ func (h *Handler) listInnhopps(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		x.RequiredRoles = rolesFor(x.RescueBoat)
-		x.Ready = h.ready(r.Context(), x.ID, x.RequiredRoles)
+		x.Ready = h.ready(r.Context(), x.ID, readinessRolesFor(x.RescueBoat))
 		x.Overridden = h.overridden(r.Context(), x.ID)
 		x.Ready = x.Ready || x.Overridden
 		x.OperationalStatus = h.operationalStatus(r.Context(), x.ID)
@@ -238,7 +255,7 @@ func (h *Handler) load(ctx context.Context, innhoppID int64, role string) (check
 	out.InnhoppID = innhoppID
 	out.Role = role
 	out.RequiredRoles = rolesFor(boat)
-	out.Ready = h.ready(ctx, innhoppID, out.RequiredRoles)
+	out.Ready = h.ready(ctx, innhoppID, readinessRolesFor(boat))
 	out.Overridden = h.overridden(ctx, innhoppID)
 	if out.Overridden {
 		out.Override = h.overrideSummary(ctx, innhoppID)
@@ -300,9 +317,15 @@ type groundCrewKitItem struct {
 }
 
 var groundCrewKitItemKeys = []string{
-	"stretcher", "medical_kit", "windsock_bag", "metal_box", "target_t", "radio",
+	"stretcher", "medical_kit", "windsock", "poles", "windblade_sockets", "target_t", "radio",
 	"emergency_plan", "marking_band", "small_flags", "windblades", "banners", "location_flag",
 }
+
+var groundCrewTaskItemKeys = []string{"deploy_emergency_kit", "marking_tape", "national_flags", "windblades", "banners"}
+
+var packerTaskItemKeys = []string{"packing_mat_and_speaker", "table_chairs_and_boxes", "power_supply", "banners_and_decoration", "coffee_and_landing_beer"}
+
+var packerKitItemKeys = []string{"speaker", "generator", "table", "chairs", "packing_mat", "rubber_bands_loops_pullupcords", "banners", "extension_cable_multiplier", "office_box", "coffee_maker", "cups", "snacks", "fruit", "beverages", "t_shirts", "innhopp_gadgets", "souvenirs"}
 
 func validGroundCrewKitItem(key string) bool {
 	for _, candidate := range groundCrewKitItemKeys {
@@ -311,6 +334,47 @@ func validGroundCrewKitItem(key string) bool {
 		}
 	}
 	return false
+}
+
+func groundCrewKitTables(r *http.Request) (string, string, string) {
+	if r.URL.Query().Get("stage") == "site_clearing" {
+		return "innhopp_ground_crew_site_kit_items", "innhopp_ground_crew_site_kit_item_events", "Ground Crew Site Kit"
+	}
+	return "innhopp_ground_crew_kit_items", "innhopp_ground_crew_kit_item_events", "Ground Crew Kit"
+}
+
+func validGroundCrewTaskItem(key string) bool {
+	for _, candidate := range groundCrewTaskItemKeys {
+		if key == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func validPackerTaskItem(key string) bool {
+	for _, candidate := range packerTaskItemKeys {
+		if key == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func validPackerKitItem(key string) bool {
+	for _, candidate := range packerKitItemKeys {
+		if key == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func packerKitTables(r *http.Request) (string, string, string) {
+	if r.URL.Query().Get("stage") == "site_clearing" {
+		return "innhopp_packer_site_kit_items", "innhopp_packer_site_kit_item_events", "Packer Site Kit"
+	}
+	return "innhopp_packer_kit_items", "innhopp_packer_kit_item_events", "Packer Kit"
 }
 
 func (h *Handler) groundCrewKit(w http.ResponseWriter, r *http.Request) {
@@ -323,8 +387,9 @@ func (h *Handler) groundCrewKit(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 404, "innhopp not found")
 		return
 	}
+	itemTable, _, _ := groundCrewKitTables(r)
 	checked := map[string]bool{}
-	rows, err := h.db.Query(r.Context(), `SELECT item_key, checked FROM innhopp_ground_crew_kit_items WHERE innhopp_id=$1`, innhoppID)
+	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
 	if err != nil {
 		httpx.Error(w, 500, "could not load ground crew kit")
 		return
@@ -352,6 +417,7 @@ func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	itemKey := strings.TrimSpace(chi.URLParam(r, "itemKey"))
+	itemTable, eventTable, actionLabel := groundCrewKitTables(r)
 	if !validGroundCrewKitItem(itemKey) {
 		httpx.Error(w, 400, "invalid ground crew kit item")
 		return
@@ -384,13 +450,13 @@ func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var previous bool
-	_ = tx.QueryRow(r.Context(), `SELECT checked FROM innhopp_ground_crew_kit_items WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, innhoppID, itemKey).Scan(&previous)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_kit_items (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+	_ = tx.QueryRow(r.Context(), fmt.Sprintf(`SELECT checked FROM %s WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, itemTable), innhoppID, itemKey).Scan(&previous)
+	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
 		httpx.Error(w, 500, "could not save ground crew kit")
 		return
 	}
 	if previous != req.Checked {
-		if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_kit_item_events (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+		if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventTable), eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
 			httpx.Error(w, 500, "could not record ground crew kit update")
 			return
 		}
@@ -399,8 +465,280 @@ func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 500, "could not save ground crew kit")
 		return
 	}
-	h.publishUpdate(innhoppID, eventID, "ground_crew_kit")
+	h.publishUpdate(innhoppID, eventID, strings.ToLower(strings.ReplaceAll(actionLabel, " ", "_")))
 	h.groundCrewKit(w, r)
+}
+
+func (h *Handler) packerKit(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	var exists bool
+	if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE id=$1)`, innhoppID).Scan(&exists); err != nil || !exists {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	itemTable, _, _ := packerKitTables(r)
+	checked := map[string]bool{}
+	rows, err := h.db.Query(r.Context(), fmt.Sprintf(`SELECT item_key, checked FROM %s WHERE innhopp_id=$1`, itemTable), innhoppID)
+	if err != nil {
+		httpx.Error(w, 500, "could not load packing kit")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var value bool
+		if err := rows.Scan(&key, &value); err != nil {
+			httpx.Error(w, 500, "could not read packing kit")
+			return
+		}
+		checked[key] = value
+	}
+	items := make([]groundCrewKitItem, 0, len(packerKitItemKeys))
+	for _, key := range packerKitItemKeys {
+		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) updatePackerKit(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	itemKey := strings.TrimSpace(chi.URLParam(r, "itemKey"))
+	itemTable, eventTable, actionLabel := packerKitTables(r)
+	if !validPackerKitItem(itemKey) {
+		httpx.Error(w, 400, "invalid packing kit item")
+		return
+	}
+	var req struct {
+		Checked bool `json:"checked"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, 400, "checked is required")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, 401, "authentication required")
+		return
+	}
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT event_id FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&eventID); err != nil {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	name := strings.TrimSpace(claims.FullName)
+	if name == "" {
+		name = claims.Email
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, 500, "could not save packing kit")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var previous bool
+	_ = tx.QueryRow(r.Context(), fmt.Sprintf(`SELECT checked FROM %s WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, itemTable), innhoppID, itemKey).Scan(&previous)
+	if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, itemTable), innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+		httpx.Error(w, 500, "could not save packing kit")
+		return
+	}
+	if previous != req.Checked {
+		if _, err = tx.Exec(r.Context(), fmt.Sprintf(`INSERT INTO %s (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventTable), eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+			httpx.Error(w, 500, "could not record packing kit update")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, 500, "could not save packing kit")
+		return
+	}
+	h.publishUpdate(innhoppID, eventID, strings.ToLower(strings.ReplaceAll(actionLabel, " ", "_")))
+	h.packerKit(w, r)
+}
+
+func (h *Handler) groundCrewTasks(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	var exists bool
+	if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE id=$1)`, innhoppID).Scan(&exists); err != nil || !exists {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	checked := map[string]bool{}
+	rows, err := h.db.Query(r.Context(), `SELECT item_key, checked FROM innhopp_ground_crew_task_items WHERE innhopp_id=$1`, innhoppID)
+	if err != nil {
+		httpx.Error(w, 500, "could not load ground crew tasks")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var value bool
+		if err := rows.Scan(&key, &value); err != nil {
+			httpx.Error(w, 500, "could not read ground crew tasks")
+			return
+		}
+		checked[key] = value
+	}
+	items := make([]groundCrewKitItem, 0, len(groundCrewTaskItemKeys))
+	for _, key := range groundCrewTaskItemKeys {
+		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) updateGroundCrewTask(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	itemKey := strings.TrimSpace(chi.URLParam(r, "itemKey"))
+	if !validGroundCrewTaskItem(itemKey) {
+		httpx.Error(w, 400, "invalid ground crew task")
+		return
+	}
+	var req struct {
+		Checked bool `json:"checked"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, 400, "checked is required")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, 401, "authentication required")
+		return
+	}
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT event_id FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&eventID); err != nil {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	name := strings.TrimSpace(claims.FullName)
+	if name == "" {
+		name = claims.Email
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, 500, "could not save ground crew task")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var previous bool
+	_ = tx.QueryRow(r.Context(), `SELECT checked FROM innhopp_ground_crew_task_items WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, innhoppID, itemKey).Scan(&previous)
+	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_task_items (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+		httpx.Error(w, 500, "could not save ground crew task")
+		return
+	}
+	if previous != req.Checked {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_task_item_events (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+			httpx.Error(w, 500, "could not record ground crew task")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, 500, "could not save ground crew task")
+		return
+	}
+	h.publishUpdate(innhoppID, eventID, "ground_crew_task")
+	h.groundCrewTasks(w, r)
+}
+
+func (h *Handler) packerTasks(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	var exists bool
+	if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE id=$1)`, innhoppID).Scan(&exists); err != nil || !exists {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	checked := map[string]bool{}
+	rows, err := h.db.Query(r.Context(), `SELECT item_key, checked FROM innhopp_packer_task_items WHERE innhopp_id=$1`, innhoppID)
+	if err != nil {
+		httpx.Error(w, 500, "could not load packer tasks")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var value bool
+		if err := rows.Scan(&key, &value); err != nil {
+			httpx.Error(w, 500, "could not read packer tasks")
+			return
+		}
+		checked[key] = value
+	}
+	items := make([]groundCrewKitItem, 0, len(packerTaskItemKeys))
+	for _, key := range packerTaskItemKeys {
+		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) updatePackerTask(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	itemKey := strings.TrimSpace(chi.URLParam(r, "itemKey"))
+	if !validPackerTaskItem(itemKey) {
+		httpx.Error(w, 400, "invalid packer task")
+		return
+	}
+	var req struct {
+		Checked bool `json:"checked"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, 400, "checked is required")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, 401, "authentication required")
+		return
+	}
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT event_id FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&eventID); err != nil {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	name := strings.TrimSpace(claims.FullName)
+	if name == "" {
+		name = claims.Email
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, 500, "could not save packer task")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var previous bool
+	_ = tx.QueryRow(r.Context(), `SELECT checked FROM innhopp_packer_task_items WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, innhoppID, itemKey).Scan(&previous)
+	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_packer_task_items (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+		httpx.Error(w, 500, "could not save packer task")
+		return
+	}
+	if previous != req.Checked {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_packer_task_item_events (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+			httpx.Error(w, 500, "could not record packer task")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, 500, "could not save packer task")
+		return
+	}
+	h.publishUpdate(innhoppID, eventID, "packer_task")
+	h.packerTasks(w, r)
 }
 
 func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
@@ -420,6 +758,21 @@ func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 		UNION ALL
 		SELECT -1000000000-id, 'Ground Crew Kit: ' || replace(item_key, '_', ' ') AS item_label, 'ground_crew' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
 		FROM innhopp_ground_crew_kit_item_events WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -3000000000-id, 'Ground Crew Site Kit: ' || replace(item_key, '_', ' ') AS item_label, 'ground_crew' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_ground_crew_site_kit_item_events WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -2000000000-id, 'Ground Crew Task: ' || replace(item_key, '_', ' ') AS item_label, 'ground_crew' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_ground_crew_task_item_events WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -4000000000-id, 'Packing Kit: ' || replace(item_key, '_', ' ') AS item_label, 'packer' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_packer_kit_item_events WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -5000000000-id, 'Packer Site Kit: ' || replace(item_key, '_', ' ') AS item_label, 'packer' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_packer_site_kit_item_events WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -6000000000-id, 'Packer Task: ' || replace(item_key, '_', ' ') AS item_label, 'packer' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_packer_task_item_events WHERE innhopp_id=$1
 	) audit ORDER BY created_at DESC,id DESC`, id)
 	if err != nil {
 		httpx.Error(w, 500, "could not load checklist history")
@@ -732,7 +1085,7 @@ func (h *Handler) proceed(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, 404, "innhopp not found")
 		return
 	}
-	if !h.ready(r.Context(), innhoppID, rolesFor(boat)) && !h.overridden(r.Context(), innhoppID) {
+	if !h.ready(r.Context(), innhoppID, readinessRolesFor(boat)) && !h.overridden(r.Context(), innhoppID) {
 		httpx.Error(w, 409, "innhopp is blocked: complete all required pre-take-off checks or create an authorised override")
 		return
 	}
@@ -789,10 +1142,10 @@ var seedTemplates = map[string][]seedItem{
 		{"pilot_brief", "Pilot briefing is complete", "Confirm that the pilot has accurate coordinates, jumprun, and altitude.", "readiness", false}, {"landing_plan", "Current conditions and landing plan is understood", "Communicate with ground crew and get information on current winds, landing direction, and any new information.", "readiness", false}, {"load_checked", "Load is checked and organised", "Current manifest, suitability and required equipment are checked.", "readiness", false}, {"jumper_brief", "Jumper briefing is delivered and understood", "Exit altitudes, altitude offsets, canopy separation, landing pattern, hazards and emergency actions are covered.", "readiness", false}, {"exit_observation_plan", "Jumprun", "Spotting, exit order, separation and Jump Master position are confirmed.", "readiness", false}, {"load_spotted", "Load is visually spotted before exit", "The agreed visual reference and conditions are acceptable.", "execution", false}, {"load_accounted", "Load is accounted for", "Count the load after landing and report any exception.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with Ground Crew to record the distance from the T at which each jumper landed.", "closeout", false},
 	},
 	"ground_crew": {
-		{"location_route", "Current operational plan", "Location, route, access and communication contact are confirmed.", "readiness", false}, {"arrival_timing", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"kit_complete", "Ground crew kit is complete", "T, wind indicators, Radio and approved medical kit are present.", "readiness", false}, {"emergency_support", "Transport and emergency support are ready", "Access, emergency contacts, hospital route and off-landing pickup are confirmed.", "readiness", false}, {"landing_prepared", "Landing area prepared", "T and windblades placed, current conditions assessed.", "readiness", false}, {"report_conditions", "Report current conditions", "Live conditions are reported to operations.", "readiness", false}, {"public_controls", "Public and landing-area controls are in place", "Crowd control and primary or secondary landing-area usability are confirmed.", "readiness", false}, {"boat_coordination", "Safety boat coordination is confirmed when required", "Boat Crew location, communications and ready signal are confirmed.", "readiness", true}, {"monitor_exits_landings", "Ground crew monitors exits and landings", "Maintain communications and initiate pickup or emergency response as needed.", "execution", false}, {"all_accounted", "All jumpers are accounted for and reported", "Confirm against manifest and report completion or exceptions.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with the Jump Master to record the distance from the T at which each jumper landed.", "closeout", false}, {"site_cleared", "Ground crew site is cleared", "Recover markers and kit, then report incidents, damage or missing equipment.", "closeout", false},
+		{"location_route", "Current operational plan", "Location, route, access and communication contact are confirmed.", "readiness", false}, {"kit_complete", "Ground crew kit is complete", "T, wind indicators, Radio and approved medical kit are present.", "readiness", false}, {"arrival_timing", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"emergency_support", "Transport and emergency support are ready", "Access, emergency contacts, hospital route and off-landing pickup are confirmed.", "readiness", false}, {"report_conditions", "Report current conditions", "Live conditions are reported to operations.", "readiness", false}, {"landing_prepared", "Landing area prepared", "T and windblades placed, current conditions assessed.", "readiness", false}, {"public_controls", "Public and landing-area controls are in place", "Crowd control and primary or secondary landing-area usability are confirmed.", "readiness", false}, {"boat_coordination", "Safety boat coordination is confirmed when required", "Boat Crew location, communications and ready signal are confirmed.", "readiness", true}, {"monitor_exits_landings", "Ground crew monitors exits and landings", "Maintain communications and initiate pickup or emergency response as needed.", "execution", false}, {"all_accounted", "All jumpers are accounted for and reported", "Confirm against manifest and report completion or exceptions.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with the Jump Master to record the distance from the T at which each jumper landed.", "closeout", false}, {"site_cleared", "Landing site is cleared", "Recover markers and kit, then report damage or missing equipment.", "closeout", false},
 	},
 	"packer": {
-		{"parachutes_ready", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"packing_log_updated", "Packing and equipment records are current", "Packing log, reserve status and any equipment restrictions have been checked and recorded.", "readiness", false}, {"gear_returned", "Parachutes are accounted for after landing", "Confirm all parachutes and packing equipment have been returned or report any exception.", "closeout", false},
+		{"packing_kit_complete", "Packing kit is complete", "Confirm the packing equipment, supplies and sales boxes are loaded and ready before arrival.", "readiness", false}, {"parachutes_ready", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"packing_log_updated", "Packing area prepared", "Packing area is clean, organised and ready for use.", "readiness", false}, {"gear_returned", "Landing site is cleared", "Recover all Packing Kit items, then report damage or missing equipment.", "closeout", false},
 	},
 	"boat_crew": {
 		{"boat_ready", "Boat, crew and recovery equipment are ready", "Vessel, fuel, safety equipment, communications and recovery equipment are checked.", "readiness", false}, {"recovery_plan", "Water recovery plan is understood", "Priorities, hazards, shore handover and emergency route are confirmed.", "readiness", false}, {"boat_position", "Boat is in position in the water", "Confirm position and give ready signal to Ground Crew.", "readiness", false}, {"water_monitored", "Water area is monitored during exits and landings", "Maintain safe position and monitor for water landings or distress.", "execution", false}, {"water_clear", "Water-area status is clear", "Confirm recovery/handover status and report it.", "closeout", false},

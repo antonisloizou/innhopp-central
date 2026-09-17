@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access';
@@ -6,6 +6,9 @@ import { ChecklistStatusTag } from '../components/ChecklistStatusTag';
 import EventGearMenu from '../components/EventGearMenu';
 import RosterCheckInOverlay from '../components/RosterCheckInOverlay';
 import GroundCrewKitOverlay from '../components/GroundCrewKitOverlay';
+import PackerKitOverlay from '../components/PackerKitOverlay';
+import GroundCrewTaskListOverlay from '../components/GroundCrewTaskListOverlay';
+import PackerTaskListOverlay from '../components/PackerTaskListOverlay';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { ScheduleEntry } from '../components/schedulePreviewTypes';
 import { Event, getEvent, getInnhopp, listEvents } from '../api/events';
@@ -14,8 +17,11 @@ import { getInnhoppAircraftWarning } from '../utils/innhoppAircraftWarnings';
 import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { parseEventLocal } from '../utils/eventDate';
 import { useResourceStream } from '../hooks/useResourceStream';
-import { RosterCheckIn, createRosterCheckIn } from '../api/rosterCheckIns';
-import { GroundCrewKit, getGroundCrewKit } from '../api/groundCrewKit';
+import { RosterCheckIn, createRosterCheckIn, getRosterCheckIn } from '../api/rosterCheckIns';
+import { GroundCrewKit, getGroundCrewKit, getGroundCrewReturnKit } from '../api/groundCrewKit';
+import { getPackerKit, getPackerReturnKit } from '../api/packerKit';
+import { getGroundCrewTasks } from '../api/groundCrewTasks';
+import { getPackerTasks } from '../api/packerTasks';
 import {
   ChecklistHistoryEvent,
   ChecklistInnhopp,
@@ -69,6 +75,11 @@ const isPastEvent = (event: Event) => {
 const compareEventsByStartDateAscending = (left: Event, right: Event) =>
   (parseEventLocal(left.starts_at)?.getTime() ?? 0) - (parseEventLocal(right.starts_at)?.getTime() ?? 0);
 
+const CompletionPie = ({ completed, total, empty = false }: { completed: number; total: number; empty?: boolean }) => {
+  const percent = total ? Math.round((completed / total) * 100) : 0;
+  return <span className={`checklist-action-progress${empty ? ' checklist-action-progress--empty' : ''}`} style={{ '--completion': `${percent * 3.6}deg` } as CSSProperties} title={empty ? 'Roster not started' : `${completed} of ${total} complete`}>{!empty && <span>{completed}/{total}</span>}</span>;
+};
+
 export default function ChecklistsPage() {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -90,7 +101,24 @@ export default function ChecklistsPage() {
   const [rosterCheckIn, setRosterCheckIn] = useState<RosterCheckIn | null>(null);
   const [openingRoster, setOpeningRoster] = useState(false);
   const [openingGroundKit, setOpeningGroundKit] = useState(false);
+  const [openingPackerKit, setOpeningPackerKit] = useState(false);
   const [groundCrewKit, setGroundCrewKit] = useState<GroundCrewKit | null>(null);
+  const [groundCrewKitProgress, setGroundCrewKitProgress] = useState<GroundCrewKit | null>(null);
+  const [packerKit, setPackerKit] = useState<GroundCrewKit | null>(null);
+  const [packerKitProgress, setPackerKitProgress] = useState<GroundCrewKit | null>(null);
+  const [packerReturnKit, setPackerReturnKit] = useState<GroundCrewKit | null>(null);
+  const [packerReturnProgress, setPackerReturnProgress] = useState<GroundCrewKit | null>(null);
+  const [openingPackerReturnKit, setOpeningPackerReturnKit] = useState(false);
+  const [groundCrewReturnKit, setGroundCrewReturnKit] = useState<GroundCrewKit | null>(null);
+  const [groundCrewReturnProgress, setGroundCrewReturnProgress] = useState<GroundCrewKit | null>(null);
+  const [openingGroundReturnKit, setOpeningGroundReturnKit] = useState(false);
+  const [groundCrewTasks, setGroundCrewTasks] = useState<GroundCrewKit | null>(null);
+  const [groundCrewTasksProgress, setGroundCrewTasksProgress] = useState<GroundCrewKit | null>(null);
+  const [openingGroundTasks, setOpeningGroundTasks] = useState(false);
+  const [packerTasks, setPackerTasks] = useState<GroundCrewKit | null>(null);
+  const [packerTasksProgress, setPackerTasksProgress] = useState<GroundCrewKit | null>(null);
+  const [openingPackerTasks, setOpeningPackerTasks] = useState(false);
+  const [rosterProgress, setRosterProgress] = useState<RosterCheckIn | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetReason, setResetReason] = useState('');
   const [reverseItem, setReverseItem] = useState<{ id: number; label: string } | null>(null);
@@ -178,6 +206,26 @@ export default function ChecklistsPage() {
   }, [selectedInnhoppId, role, loadChecklist]);
 
   useEffect(() => {
+    let active = true;
+    setGroundCrewKitProgress(null);
+    setPackerKitProgress(null);
+    setPackerReturnProgress(null);
+    setGroundCrewReturnProgress(null);
+    setGroundCrewTasksProgress(null);
+    setPackerTasksProgress(null);
+    setRosterProgress(null);
+    if (!selectedInnhoppId) return () => { active = false; };
+    void getGroundCrewKit(selectedInnhoppId).then((kit) => { if (active) setGroundCrewKitProgress(kit); }).catch(() => {});
+    void getPackerKit(selectedInnhoppId).then((kit) => { if (active) setPackerKitProgress(kit); }).catch(() => {});
+    void getPackerReturnKit(selectedInnhoppId).then((kit) => { if (active) setPackerReturnProgress(kit); }).catch(() => {});
+    void getGroundCrewReturnKit(selectedInnhoppId).then((kit) => { if (active) setGroundCrewReturnProgress(kit); }).catch(() => {});
+    void getGroundCrewTasks(selectedInnhoppId).then((tasks) => { if (active) setGroundCrewTasksProgress(tasks); }).catch(() => {});
+    void getPackerTasks(selectedInnhoppId).then((tasks) => { if (active) setPackerTasksProgress(tasks); }).catch(() => {});
+    if (selectedEventId) void getRosterCheckIn(selectedEventId, 'innhopp', selectedInnhoppId).then((roster) => { if (active) setRosterProgress(roster); }).catch(() => {});
+    return () => { active = false; };
+  }, [selectedEventId, selectedInnhoppId]);
+
+  useEffect(() => {
     const innhoppId = selectedInnhoppId;
     if (!innhoppId || !canReverse) return;
     void getChecklistHistory(innhoppId).then((nextHistory) => {
@@ -251,7 +299,9 @@ export default function ChecklistsPage() {
     setError('');
     try {
       // Creating is idempotent: an existing roster is returned instead of duplicated.
-      setRosterCheckIn(await createRosterCheckIn(selectedEventId, 'innhopp', selectedInnhoppId));
+      const roster = await createRosterCheckIn(selectedEventId, 'innhopp', selectedInnhoppId);
+      setRosterCheckIn(roster);
+      setRosterProgress(roster);
     } catch (openError) {
       setError((openError as Error).message);
     } finally {
@@ -262,9 +312,49 @@ export default function ChecklistsPage() {
   const openGroundCrewKit = async () => {
     if (!selectedInnhoppId) return;
     setOpeningGroundKit(true); setError('');
-    try { setGroundCrewKit(await getGroundCrewKit(selectedInnhoppId)); }
+    try { const kit = await getGroundCrewKit(selectedInnhoppId); setGroundCrewKit(kit); setGroundCrewKitProgress(kit); }
     catch (openError) { setError((openError as Error).message); }
     finally { setOpeningGroundKit(false); }
+  };
+
+  const openPackerKit = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningPackerKit(true); setError('');
+    try { const kit = await getPackerKit(selectedInnhoppId); setPackerKit(kit); setPackerKitProgress(kit); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningPackerKit(false); }
+  };
+
+  const openPackerReturnKit = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningPackerReturnKit(true); setError('');
+    try { const kit = await getPackerReturnKit(selectedInnhoppId); setPackerReturnKit(kit); setPackerReturnProgress(kit); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningPackerReturnKit(false); }
+  };
+
+  const openGroundCrewReturnKit = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningGroundReturnKit(true); setError('');
+    try { const kit = await getGroundCrewReturnKit(selectedInnhoppId); setGroundCrewReturnKit(kit); setGroundCrewReturnProgress(kit); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningGroundReturnKit(false); }
+  };
+
+  const openGroundCrewTasks = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningGroundTasks(true); setError('');
+    try { const tasks = await getGroundCrewTasks(selectedInnhoppId); setGroundCrewTasks(tasks); setGroundCrewTasksProgress(tasks); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningGroundTasks(false); }
+  };
+
+  const openPackerTasks = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningPackerTasks(true); setError('');
+    try { const tasks = await getPackerTasks(selectedInnhoppId); setPackerTasks(tasks); setPackerTasksProgress(tasks); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningPackerTasks(false); }
   };
 
   const activePhases: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
@@ -273,7 +363,8 @@ export default function ChecklistsPage() {
   const phaseOrder: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
     ? ['execution', 'closeout', 'readiness']
     : ['readiness', 'execution', 'closeout'];
-  const missingRoles = roleChecklists.filter((entry) => entry.items.some((item) => item.phase === 'readiness' && !item.completed));
+  // Packer checks are operationally useful, but advisory: they do not gate proceeding.
+  const missingRoles = roleChecklists.filter((entry) => entry.role !== 'packer' && entry.items.some((item) => item.phase === 'readiness' && !item.completed));
   const missingItems = (entry: InnhoppChecklist) => entry.items.filter((item) => activePhases.includes(item.phase) && !item.completed);
   const highlightChecklistItem = (itemID: number) => {
     setHighlightedItemId(itemID);
@@ -328,7 +419,7 @@ export default function ChecklistsPage() {
       <div className="checklist-role-summary">{roleChecklists.map((entry) => <button key={entry.role} className={`badge checklist-role-badge ${missingItems(entry).length ? 'danger' : 'success'}`} onClick={() => { setRole(entry.role); setSearchParams({ innhopp: String(selectedInnhoppId), role: entry.role }); }}>{roleLabels[entry.role]}: {missingItems(entry).length} missing</button>)}</div>
       {phaseOrder.map((phase) => {
         const items = checklist.items.filter((item) => item.phase === phase).sort((a, b) => Number(a.completed) - Number(b.completed));
-        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className={`checklist-mark${pendingItemId === item.id ? ' checklist-mark--pending' : ''}`}>{item.completed ? '✓' : pendingItemId === item.id ? <span className="checklist-spinner" aria-label="Saving" /> : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.item_key === 'kit_complete' && <button type="button" className="ghost checklist-roster-action" disabled={openingGroundKit} onClick={(event) => { event.stopPropagation(); void openGroundCrewKit(); }}>{openingGroundKit ? 'Opening…' : 'Ground Crew Inventory'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
+        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : ''}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`}><button type="button" className="checklist-complete-action" disabled={item.completed || pendingItemId !== null} aria-label={item.completed ? `${item.label} checked` : `Check ${item.label}`} onClick={() => void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className={`checklist-mark ${item.completed ? 'checklist-mark--completed' : 'checklist-mark--unchecked'}${pendingItemId === item.id ? ' checklist-mark--pending' : ''}`}>{item.completed ? '✓' : pendingItemId === item.id ? <span className="checklist-spinner" aria-label="Saving" /> : null}</span></button><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingRoster} onClick={() => void openRoster()}>{openingRoster ? 'Opening…' : 'Open Roster'}{rosterProgress ? <CompletionPie completed={rosterProgress.checked_in_count} total={rosterProgress.expected_count} /> : <CompletionPie completed={0} total={0} empty />}</button>}{item.item_key === 'kit_complete' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingGroundKit} onClick={() => void openGroundCrewKit()}>{openingGroundKit ? 'Opening…' : 'Inventory'}{groundCrewKitProgress && <CompletionPie completed={groundCrewKitProgress.items.filter((kitItem) => kitItem.checked).length} total={groundCrewKitProgress.items.length} />}</button>}{item.item_key === 'packing_kit_complete' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingPackerKit} onClick={() => void openPackerKit()}>{openingPackerKit ? 'Opening…' : 'Inventory'}{packerKitProgress ? <CompletionPie completed={packerKitProgress.items.filter((kitItem) => kitItem.checked).length} total={packerKitProgress.items.length} /> : <CompletionPie completed={0} total={0} empty />}</button>}{item.item_key === 'packing_log_updated' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingPackerTasks} onClick={() => void openPackerTasks()}>{openingPackerTasks ? 'Opening…' : 'Task List'}{packerTasksProgress && <CompletionPie completed={packerTasksProgress.items.filter((task) => task.checked).length} total={packerTasksProgress.items.length} />}</button>}{item.item_key === 'landing_prepared' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingGroundTasks} onClick={() => void openGroundCrewTasks()}>{openingGroundTasks ? 'Opening…' : 'Task List'}{groundCrewTasksProgress && <CompletionPie completed={groundCrewTasksProgress.items.filter((task) => task.checked).length} total={groundCrewTasksProgress.items.length} />}</button>}{item.item_key === 'gear_returned' && role === 'packer' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingPackerReturnKit} onClick={() => void openPackerReturnKit()}>{openingPackerReturnKit ? 'Opening…' : 'Inventory'}{packerReturnProgress ? <CompletionPie completed={packerReturnProgress.items.filter((kitItem) => kitItem.checked).length} total={packerReturnProgress.items.length} /> : <CompletionPie completed={0} total={0} empty />}</button>}{item.item_key === 'site_cleared' && role === 'ground_crew' && <button type="button" className="ghost checklist-roster-action checklist-roster-action--progress" disabled={openingGroundReturnKit} onClick={() => void openGroundCrewReturnKit()}>{openingGroundReturnKit ? 'Opening…' : 'Inventory'}{groundCrewReturnProgress ? <CompletionPie completed={groundCrewReturnProgress.items.filter((kitItem) => kitItem.checked).length} total={groundCrewReturnProgress.items.length} /> : <CompletionPie completed={0} total={0} empty />}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={() => { setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
       })}
       {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>History</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
     </>}
@@ -389,8 +480,13 @@ export default function ChecklistsPage() {
       checkIn={rosterCheckIn}
       title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`}
       onClose={() => setRosterCheckIn(null)}
-      onUpdated={(updated) => setRosterCheckIn(updated)}
+      onUpdated={(updated) => { setRosterCheckIn(updated); setRosterProgress(updated); }}
     />}
-    {groundCrewKit && <GroundCrewKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={groundCrewKit} onClose={() => setGroundCrewKit(null)} onUpdated={setGroundCrewKit} />}
+    {groundCrewKit && <GroundCrewKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={groundCrewKit} onClose={() => setGroundCrewKit(null)} onUpdated={(kit) => { setGroundCrewKit(kit); setGroundCrewKitProgress(kit); }} />}
+    {packerKit && <PackerKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={packerKit} onClose={() => setPackerKit(null)} onUpdated={(kit) => { setPackerKit(kit); setPackerKitProgress(kit); }} />}
+    {packerReturnKit && <PackerKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={packerReturnKit} stage="site_clearing" onClose={() => setPackerReturnKit(null)} onUpdated={(kit) => { setPackerReturnKit(kit); setPackerReturnProgress(kit); }} />}
+    {groundCrewReturnKit && <GroundCrewKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={groundCrewReturnKit} stage="site_clearing" onClose={() => setGroundCrewReturnKit(null)} onUpdated={(kit) => { setGroundCrewReturnKit(kit); setGroundCrewReturnProgress(kit); }} />}
+    {groundCrewTasks && <GroundCrewTaskListOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} taskList={groundCrewTasks} onClose={() => setGroundCrewTasks(null)} onUpdated={(tasks) => { setGroundCrewTasks(tasks); setGroundCrewTasksProgress(tasks); }} />}
+    {packerTasks && <PackerTaskListOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} taskList={packerTasks} onClose={() => setPackerTasks(null)} onUpdated={(tasks) => { setPackerTasks(tasks); setPackerTasksProgress(tasks); }} />}
   </section>;
 }

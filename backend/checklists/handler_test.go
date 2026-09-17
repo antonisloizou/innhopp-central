@@ -9,7 +9,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 		"jump_leader": {8, 0, 2},
 		"jump_master": {5, 1, 2},
 		"ground_crew": {8, 1, 3},
-		"packer":      {2, 0, 1},
+		"packer":      {3, 0, 1},
 		"boat_crew":   {3, 1, 1},
 	}
 
@@ -80,6 +80,15 @@ func TestRolesForRescueBoat(t *testing.T) {
 	}
 	if got := rolesFor(true); len(got) != 5 || got[3] != "packer" || got[4] != "boat_crew" {
 		t.Fatalf("rolesFor(true) = %v, want boat crew included", got)
+	}
+}
+
+func TestReadinessRolesExcludePacker(t *testing.T) {
+	if got := readinessRolesFor(false); len(got) != 3 || containsRole(got, "packer") {
+		t.Fatalf("readinessRolesFor(false) = %v, want non-packer operational roles", got)
+	}
+	if got := readinessRolesFor(true); len(got) != 4 || containsRole(got, "packer") || !containsRole(got, "boat_crew") {
+		t.Fatalf("readinessRolesFor(true) = %v, want boat crew but no packer", got)
 	}
 }
 

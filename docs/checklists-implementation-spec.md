@@ -121,7 +121,7 @@ Each proposed item should be seeded with a stable `item_key`, the listed phase, 
 | Execution | Ground crew monitors exits and landings | Maintain communications, observe canopies/jumpers, track off-landings, and initiate pickup or emergency response when needed. |
 | Closeout | All jumpers are accounted for and reported | Confirm counts against the current manifest and report completion/any exceptions to DZ/operations. |
 | Closeout | Record accuracy score | Coordinate with the Jump Master to record the distance from the T at which each jumper landed. |
-| Closeout | Ground crew site is cleared | Recover markers and kit, then report any incident, damage, or missing equipment. |
+| Closeout | Landing site is cleared | Recover markers and kit, then report damage or missing equipment. |
 
 ### Boat Crew (only when `rescue_boat = true`)
 
