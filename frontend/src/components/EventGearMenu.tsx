@@ -270,7 +270,7 @@ const EventGearMenu = ({
                   navigateTo(`/events/${eventId}/participants`);
                 }}
               >
-                Participants
+                Roster
               </button> : null}
               {canViewLeaderboard ? <button
                 className="event-schedule-menu-item"

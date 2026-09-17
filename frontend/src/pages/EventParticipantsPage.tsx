@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Event, getEvent } from '../api/events';
@@ -23,7 +23,6 @@ const statusLabels: Record<RegistrationStatus, string> = {
 
 const chartPalette = ['#2b8a3e', '#74c69d', '#e6b84a', '#d97706', '#0d6efd', '#7e22ce'];
 const notApplicableChartColor = '#64748b';
-const chartColorFor = (label: string, index: number) => label === 'N/A' ? notApplicableChartColor : chartPalette[index % chartPalette.length];
 const canopyCourseChartLabels: Record<string, string> = {
   'Attended 1 or more canopy courses': '1 or more',
   'Never attended a canopy course': 'Never',
@@ -45,6 +44,7 @@ type ChartFilter = {
 };
 
 type ChartDatum = { label: string; count: number };
+type ParticipantScope = 'participants' | 'staff';
 
 const donutPoint = (angle: number, radius: number) => {
   const radians = (angle - 90) * Math.PI / 180;
@@ -65,15 +65,25 @@ const InteractiveDonut = ({
   colors,
   ariaLabel,
   onSelect,
+  hoveredIndex: controlledHoveredIndex,
+  onHoveredIndexChange,
   children
 }: {
   segments: ChartDatum[];
   colors: string[];
   ariaLabel: string;
   onSelect: (label: string) => void;
+  hoveredIndex?: number | null;
+  onHoveredIndexChange?: (index: number | null) => void;
   children?: ReactNode;
 }) => {
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [uncontrolledHoveredIndex, setUncontrolledHoveredIndex] = useState<number | null>(null);
+  const isHoverControlled = onHoveredIndexChange !== undefined;
+  const hoveredIndex = isHoverControlled ? controlledHoveredIndex ?? null : uncontrolledHoveredIndex;
+  const setHoveredIndex = (index: number | null) => {
+    if (!isHoverControlled) setUncontrolledHoveredIndex(index);
+    onHoveredIndexChange?.(index);
+  };
   const total = segments.reduce((sum, item) => sum + item.count, 0);
   let position = 0;
   return (
@@ -90,6 +100,53 @@ const InteractiveDonut = ({
         }) : <circle cx="50" cy="50" r="37" fill="none" stroke="var(--panel-border)" strokeWidth="16" />}
       </svg>
       {children}
+    </div>
+  );
+};
+
+const InteractiveDonutWithLegend = ({
+  segments,
+  colors,
+  ariaLabel,
+  onSelect
+}: {
+  segments: ChartDatum[];
+  colors: string[];
+  ariaLabel: string;
+  onSelect: (label: string) => void;
+}) => {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  return (
+    <div className="event-participants-type-pie-layout">
+      <InteractiveDonut
+        segments={segments}
+        colors={colors}
+        ariaLabel={ariaLabel}
+        onSelect={onSelect}
+        hoveredIndex={hoveredIndex}
+        onHoveredIndexChange={setHoveredIndex}
+      />
+      <ul className="event-participants-type-legend">
+        {segments.map((item, index) => (
+          <li key={item.label}>
+            <button
+              type="button"
+              className={hoveredIndex === index ? 'is-hovered' : ''}
+              onMouseEnter={() => setHoveredIndex(index)}
+              onMouseLeave={() => setHoveredIndex(null)}
+              onFocus={() => setHoveredIndex(index)}
+              onBlur={() => setHoveredIndex(null)}
+              onClick={() => onSelect(item.label)}
+              aria-label={`Show ${item.label} participants`}
+            >
+              <i style={{ background: item.label === 'N/A' ? notApplicableChartColor : colors[index % colors.length] }} />
+              <span className="registration-stat-label">{item.label}</span>
+              <strong>{item.count}</strong>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 };
@@ -136,9 +193,11 @@ const EventParticipantsPage = () => {
   const [generalInfoOpen, setGeneralInfoOpen] = useState(true);
   const [mealsAccommodationOpen, setMealsAccommodationOpen] = useState(true);
   const [hssQualitiesOpen, setHssQualitiesOpen] = useState(true);
+  const [participantScope, setParticipantScope] = useState<ParticipantScope>('participants');
   const [chartFilter, setChartFilter] = useState<ChartFilter | null>(null);
   const [chartFilterSort, setChartFilterSort] = useState<ParticipantListSort>({ field: 'name', direction: 'asc' });
   const [chartFilterListOpen, setChartFilterListOpen] = useState(true);
+  const overlayScrollYRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!eventId) return;
@@ -168,13 +227,44 @@ const EventParticipantsPage = () => {
 
   useEffect(() => {
     if (!chartFilter) return;
+    const scrollY = window.scrollY;
+    overlayScrollYRef.current = scrollY;
+    const { style } = document.body;
+    const previousStyles = {
+      position: style.position,
+      top: style.top,
+      left: style.left,
+      right: style.right,
+      width: style.width,
+      overflow: style.overflow
+    };
+
     document.body.classList.add('event-participants-overlay-open');
-    return () => document.body.classList.remove('event-participants-overlay-open');
+    // Fix the body in place instead of simply hiding overflow. The latter can
+    // reset the document's scroll position on mobile browsers.
+    style.position = 'fixed';
+    style.top = `-${scrollY}px`;
+    style.left = '0';
+    style.right = '0';
+    style.width = '100%';
+    style.overflow = 'hidden';
+
+    return () => {
+      document.body.classList.remove('event-participants-overlay-open');
+      style.position = previousStyles.position;
+      style.top = previousStyles.top;
+      style.left = previousStyles.left;
+      style.right = previousStyles.right;
+      style.width = previousStyles.width;
+      style.overflow = previousStyles.overflow;
+      window.scrollTo(0, overlayScrollYRef.current ?? scrollY);
+      overlayScrollYRef.current = null;
+    };
   }, [chartFilter]);
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
 
-  const rows = useMemo<ParticipantRow[]>(() => registrations.map((registration) => {
+  const allRows = useMemo<ParticipantRow[]>(() => registrations.map((registration) => {
     const profile = profileById.get(registration.participant_id);
     return {
       id: registration.participant_id,
@@ -190,11 +280,16 @@ const EventParticipantsPage = () => {
     };
   }), [registrations, profileById]);
 
+  const rows = useMemo(
+    () => allRows.filter((row) => participantScope === 'staff' ? isStaff(row.profile) : !isStaff(row.profile)),
+    [allRows, participantScope]
+  );
+
   const statusCounts = useMemo(() => {
     const counts = new Map<RegistrationStatus, number>();
-    registrations.forEach((registration) => counts.set(registration.status, (counts.get(registration.status) || 0) + 1));
+    rows.forEach((row) => counts.set(row.registration.status, (counts.get(row.registration.status) || 0) + 1));
     return (Object.keys(statusLabels) as RegistrationStatus[]).map((status) => ({ status, label: statusLabels[status], count: counts.get(status) || 0 }));
-  }, [registrations]);
+  }, [rows]);
 
   const participantTypeCounts = useMemo(() => {
     const activeRows = rows.filter((row) => activeStatuses.has(row.registration.status));
@@ -281,7 +376,7 @@ const EventParticipantsPage = () => {
       { label: '1.21–1.5', min: 1.21, max: 1.5, count: 0 },
       { label: '1.51–2.0', min: 1.51, max: 2, count: 0 },
       { label: '2.01–2.5', min: 2.01, max: 2.5, count: 0 },
-      { label: '2.51–3.0+', min: 2.51, max: Infinity, count: 0 },
+      { label: '2.51 +', min: 2.51, max: Infinity, count: 0 },
       { label: 'N/A', min: 0, max: -1, count: 0 }
     ];
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
@@ -525,11 +620,11 @@ const EventParticipantsPage = () => {
     [chartFilter, chartFilterSort, rows]
   );
 
-  const activeTotal = registrations.filter((registration) => activeStatuses.has(registration.status)).length;
-  const depositPaidTotal = registrations.filter((registration) => (
-    registration.status === 'deposit_paid' ||
-    registration.status === 'main_invoice_pending' ||
-    registration.status === 'completed'
+  const activeTotal = rows.filter((row) => activeStatuses.has(row.registration.status)).length;
+  const depositPaidTotal = rows.filter((row) => (
+    row.registration.status === 'deposit_paid' ||
+    row.registration.status === 'main_invoice_pending' ||
+    row.registration.status === 'completed'
   )).length;
   const completedTotal = statusCounts.find((item) => item.status === 'completed')?.count || 0;
   const cancelledTotal = statusCounts.find((item) => item.status === 'cancelled')?.count || 0;
@@ -600,17 +695,26 @@ const EventParticipantsPage = () => {
   return (
     <section className="stack event-participants-page">
       <header className="page-header">
-        <EventPageTitle event={eventData} section="Participants" showSlotsBadge />
+        <EventPageTitle event={eventData} section="Roster" showSlotsBadge />
         <EventGearMenu eventId={eventData.id} currentPage="participants" menuId="event-participants-actions-menu" />
       </header>
 
+      <div className="event-participants-scope" role="tablist" aria-label="Participant audience">
+        <button type="button" role="tab" aria-selected={participantScope === 'participants'} className={participantScope === 'participants' ? 'active' : ''} onClick={() => setParticipantScope('participants')}>
+          Participants <span>{allRows.filter((row) => !isStaff(row.profile)).length}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={participantScope === 'staff'} className={participantScope === 'staff' ? 'active' : ''} onClick={() => setParticipantScope('staff')}>
+          Staff <span>{allRows.filter((row) => isStaff(row.profile)).length}</span>
+        </button>
+      </div>
+
       <div className="event-participants-summary" aria-label="Participant summary">
         <article className="card event-participants-summary-card">
-          <div className="event-participants-total-card event-participants-primary-card"><span className="registration-stat-label">Registrations</span><strong>{activeTotal}</strong></div>
+          <div className="event-participants-total-card event-participants-primary-card"><span className="registration-stat-label">Registrations</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Active registrations', (row) => activeStatuses.has(row.registration.status))} aria-label={`Show ${activeTotal} active registrations`}><strong>{activeTotal}</strong></button></div>
           <div className="event-participants-status-summary">
-            <div className="event-participants-total-card"><span className="registration-stat-label">Deposit</span><strong>{depositPaidTotal}</strong></div>
-            <div className="event-participants-total-card"><span className="registration-stat-label">Full</span><strong>{completedTotal}</strong></div>
-            <div className="event-participants-total-card"><span className="registration-stat-label">Canceled</span><strong>{cancelledTotal}</strong></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Deposit</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Deposit paid', (row) => row.registration.status === 'deposit_paid' || row.registration.status === 'main_invoice_pending' || row.registration.status === 'completed')} aria-label={`Show ${depositPaidTotal} registrations with deposit paid`}><strong>{depositPaidTotal}</strong></button></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Full</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Completed registrations', (row) => row.registration.status === 'completed')} aria-label={`Show ${completedTotal} completed registrations`}><strong>{completedTotal}</strong></button></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Canceled</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Canceled registrations', (row) => row.registration.status === 'cancelled')} aria-label={`Show ${cancelledTotal} canceled registrations`}><strong>{cancelledTotal}</strong></button></div>
           </div>
         </article>
         <article className="card event-participants-total-card event-participants-profile-completion-card">
@@ -625,12 +729,7 @@ const EventParticipantsPage = () => {
           </InteractiveDonut>
         </article>
         <article className="card event-participants-chart-card event-participants-type-chart-card">
-          <div className="event-participants-type-pie-layout">
-            <InteractiveDonut segments={participantTypeCounts} colors={['#2b8a3e', '#d97706']} ariaLabel={`${participantTypeCounts[0].count} skydivers and ${participantTypeCounts[1].count} non-jumpers`} onSelect={(label) => openChartFilter(label, (row) => activeStatuses.has(row.registration.status) && (label === 'Skydivers' ? isSkydiver(row.profile) : !isSkydiver(row.profile)))} />
-            <ul className="event-participants-type-legend">
-              {participantTypeCounts.map((item) => <li key={item.label}><i /><span className="registration-stat-label">{item.label}</span><strong>{item.count}</strong></li>)}
-            </ul>
-          </div>
+          <InteractiveDonutWithLegend segments={participantTypeCounts} colors={['#2b8a3e', '#d97706']} ariaLabel={`${participantTypeCounts[0].count} skydivers and ${participantTypeCounts[1].count} non-jumpers`} onSelect={(label) => openChartFilter(label, (row) => activeStatuses.has(row.registration.status) && (label === 'Skydivers' ? isSkydiver(row.profile) : !isSkydiver(row.profile)))} />
         </article>
       </div>
 
@@ -718,16 +817,11 @@ const EventParticipantsPage = () => {
         </article>
         <article className="card event-participants-chart-card event-participants-choice-card event-participants-distribution-card">
           <h3 className="registration-stat-label">Landing area preference</h3>
-          <div className="event-participants-type-pie-layout">
-            <InteractiveDonut segments={landingAreaPreferenceCounts} colors={chartPalette} ariaLabel={`${landingAreaPreferenceTotal} skydivers by landing area preference`} onSelect={(label) => openChartFilter(`Landing area preference: ${label}`, (row) => {
+          <InteractiveDonutWithLegend segments={landingAreaPreferenceCounts} colors={chartPalette} ariaLabel={`${landingAreaPreferenceTotal} skydivers by landing area preference`} onSelect={(label) => openChartFilter(`Landing area preference: ${label}`, (row) => {
               if (!activeStatuses.has(row.registration.status) || !isSkydiver(row.profile)) return false;
               const preference = row.profile?.landing_area_preference?.trim();
               return label === 'N/A' ? !preference || !landingAreaPreferenceOptions.includes(preference as typeof landingAreaPreferenceOptions[number]) : preference === label;
             })} />
-            <ul className="event-participants-type-legend">
-              {landingAreaPreferenceCounts.map((item, index) => <li key={item.label}><i style={{ background: chartColorFor(item.label, index) }} /><span className="registration-stat-label">{item.label}</span><strong>{item.count}</strong></li>)}
-            </ul>
-          </div>
         </article>
         <article className="card event-participants-chart-card event-participants-distribution-card">
           <h3 className="registration-stat-label">Canopy course</h3>
@@ -740,16 +834,11 @@ const EventParticipantsPage = () => {
         </article>
         <article className="card event-participants-chart-card event-participants-choice-card event-participants-distribution-card">
           <h3 className="registration-stat-label">Packer</h3>
-          <div className="event-participants-type-pie-layout">
-            <InteractiveDonut segments={packerCounts} colors={chartPalette} ariaLabel={`${packerTotal} skydivers by packer preference`} onSelect={(label) => openChartFilter(`Packer: ${label}`, (row) => {
+          <InteractiveDonutWithLegend segments={packerCounts} colors={chartPalette} ariaLabel={`${packerTotal} skydivers by packer preference`} onSelect={(label) => openChartFilter(`Packer: ${label}`, (row) => {
               if (!activeStatuses.has(row.registration.status) || !isSkydiver(row.profile)) return false;
               const preference = row.profile?.uses_packer?.trim();
               return label === 'N/A' ? !preference || !usesPackerOptions.includes(preference as typeof usesPackerOptions[number]) : preference === label;
             })} />
-            <ul className="event-participants-type-legend">
-              {packerCounts.map((item, index) => <li key={item.label}><i style={{ background: chartColorFor(item.label, index) }} /><span className="registration-stat-label">{item.label}</span><strong>{item.count}</strong></li>)}
-            </ul>
-          </div>
         </article>
         <article className="card event-participants-chart-card event-participants-distribution-card">
           <h3 className="registration-stat-label">Other air sports</h3>
@@ -809,17 +898,12 @@ const EventParticipantsPage = () => {
           </article>
           <article className="card event-participants-chart-card event-participants-choice-card event-participants-distribution-card">
             <h3 className="registration-stat-label">Medical expertise</h3>
-            <div className="event-participants-type-pie-layout">
-              <InteractiveDonut segments={medicalExpertiseCounts} colors={chartPalette} ariaLabel={`${medicalExpertiseTotal} medical expertise records`} onSelect={(label) => openChartFilter(`Medical expertise: ${label}`, (row) => {
+            <InteractiveDonutWithLegend segments={medicalExpertiseCounts} colors={chartPalette} ariaLabel={`${medicalExpertiseTotal} medical expertise records`} onSelect={(label) => openChartFilter(`Medical expertise: ${label}`, (row) => {
                 if (!activeStatuses.has(row.registration.status)) return false;
                 const expertise = row.profile?.medical_expertise || [];
                 if (label === 'None') return expertise.length === 0;
                 return expertise.includes(label === 'First aid' ? 'First aid certified' : label);
               })} />
-              <ul className="event-participants-type-legend">
-                {medicalExpertiseCounts.map((item, index) => <li key={item.label}><i style={{ background: chartColorFor(item.label, index) }} /><span className="registration-stat-label">{item.label}</span><strong>{item.count}</strong></li>)}
-              </ul>
-            </div>
           </article>
         </div> : null}
       </article>
@@ -846,17 +930,12 @@ const EventParticipantsPage = () => {
         {mealsAccommodationOpen ? <div id="event-participants-meals-accommodation-charts" className="event-participants-charts">
           <article className="card event-participants-chart-card event-participants-choice-card event-participants-distribution-card">
             <h3 className="registration-stat-label">Accommodation</h3>
-            <div className="event-participants-type-pie-layout">
-              <InteractiveDonut segments={accommodationCounts} colors={chartPalette} ariaLabel={`${accommodationTotal} participants by accommodation`} onSelect={(label) => openChartFilter(`Accommodation: ${label}`, (row) => {
+            <InteractiveDonutWithLegend segments={accommodationCounts} colors={chartPalette} ariaLabel={`${accommodationTotal} participants by accommodation`} onSelect={(label) => openChartFilter(`Accommodation: ${label}`, (row) => {
                 if (!activeStatuses.has(row.registration.status)) return false;
                 const accommodation = row.profile?.accommodation?.trim();
                 const selected = accommodationCounts.find((item) => item.label === label);
                 return label === 'N/A' ? !accommodation || !accommodationOptions.includes(accommodation as typeof accommodationOptions[number]) : accommodation === selected?.value;
               })} />
-              <ul className="event-participants-type-legend">
-                {accommodationCounts.map((item, index) => <li key={item.label}><i style={{ background: chartColorFor(item.label, index) }} /><span className="registration-stat-label">{item.label}</span><strong>{item.count}</strong></li>)}
-              </ul>
-            </div>
           </article>
           <article className="card event-participants-chart-card event-participants-distribution-card event-participants-dietary-card">
             <h3 className="registration-stat-label">Dietary restrictions</h3>

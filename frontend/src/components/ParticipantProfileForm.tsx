@@ -26,7 +26,8 @@ export const dietaryRestrictionOptions = [
   'Vegan',
   'Kosher',
   'Halal',
-  'Gluten-free'
+  'Gluten-free',
+  'Lactose intolerant'
 ] as const;
 export const accommodationOptions = ['Shared (usually 2 per room)', 'Single Room (additional cost)'] as const;
 export const medicalExpertiseOptions = [

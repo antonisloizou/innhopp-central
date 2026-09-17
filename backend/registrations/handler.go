@@ -1896,7 +1896,6 @@ func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request)
 		) r
 		JOIN events e ON e.id = r.event_id
 		JOIN participant_profiles p ON p.id = r.participant_id
-		WHERE NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
 		ORDER BY r.registered_at DESC, r.id DESC
 	`, eventID)
 	if err != nil {
