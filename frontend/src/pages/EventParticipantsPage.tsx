@@ -45,6 +45,21 @@ type ChartFilter = {
 
 type ChartDatum = { label: string; count: number };
 type ParticipantScope = 'participants' | 'staff';
+type RosterView = 'list' | 'stats';
+
+export type RosterStatsSource = {
+  items: Array<{
+    profile: ParticipantProfile;
+    eventCount: number;
+    registeredAt?: string;
+  }>;
+  loading?: boolean;
+  error?: string | null;
+  /** Real registrations used for the registration summary cards. */
+  registrations?: Registration[];
+  /** The date used for age calculations when this is not an event roster. */
+  referenceDate?: string;
+};
 
 const donutPoint = (angle: number, radius: number) => {
   const radians = (angle - 90) * Math.PI / 180;
@@ -177,13 +192,13 @@ const statusBadgeClass = (status: RegistrationStatus) => {
   return 'badge neutral';
 };
 
-const EventParticipantsPage = () => {
+export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource }) => {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const [eventData, setEventData] = useState<Event | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [profiles, setProfiles] = useState<ParticipantProfile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!source);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | RegistrationStatus>('all');
@@ -194,13 +209,14 @@ const EventParticipantsPage = () => {
   const [mealsAccommodationOpen, setMealsAccommodationOpen] = useState(true);
   const [hssQualitiesOpen, setHssQualitiesOpen] = useState(true);
   const [participantScope, setParticipantScope] = useState<ParticipantScope>('participants');
+  const [rosterView, setRosterView] = useState<RosterView>('stats');
   const [chartFilter, setChartFilter] = useState<ChartFilter | null>(null);
   const [chartFilterSort, setChartFilterSort] = useState<ParticipantListSort>({ field: 'name', direction: 'asc' });
   const [chartFilterListOpen, setChartFilterListOpen] = useState(true);
   const overlayScrollYRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!eventId) return;
+    if (source || !eventId) return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -223,7 +239,7 @@ const EventParticipantsPage = () => {
     };
     void load();
     return () => { cancelled = true; };
-  }, [eventId]);
+  }, [eventId, source]);
 
   useEffect(() => {
     if (!chartFilter) return;
@@ -264,7 +280,32 @@ const EventParticipantsPage = () => {
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles]);
 
-  const allRows = useMemo<ParticipantRow[]>(() => registrations.map((registration) => {
+  const allRows = useMemo<ParticipantRow[]>(() => source ? source.items.map(({ profile, eventCount, registeredAt }) => {
+    const registration: Registration = {
+      id: -profile.id,
+      event_id: 0,
+      participant_id: profile.id,
+      participant_name: profile.full_name,
+      participant_email: profile.email,
+      status: 'completed',
+      registered_at: registeredAt || profile.created_at || '',
+      tags: [],
+      created_at: registeredAt || profile.created_at || '',
+      updated_at: registeredAt || profile.created_at || ''
+    };
+    return {
+      id: profile.id,
+      full_name: profile.full_name || `Participant #${profile.id}`,
+      email: profile.email,
+      jump_count: profile.jump_count,
+      years_in_sport: profile.years_in_sport,
+      eventCount,
+      registeredAt: registration.registered_at,
+      profileIncomplete: !isProfileCompleteForRegistration(profile),
+      registration,
+      profile
+    };
+  }) : registrations.map((registration) => {
     const profile = profileById.get(registration.participant_id);
     return {
       id: registration.participant_id,
@@ -278,7 +319,7 @@ const EventParticipantsPage = () => {
       registration,
       profile
     };
-  }), [registrations, profileById]);
+  }), [registrations, profileById, source]);
 
   const rows = useMemo(
     () => allRows.filter((row) => participantScope === 'staff' ? isStaff(row.profile) : !isStaff(row.profile)),
@@ -522,7 +563,7 @@ const EventParticipantsPage = () => {
       { label: '60+', min: 61, max: Infinity, count: 0 },
       { label: 'N/A', min: 0, max: -1, count: 0 }
     ];
-    const referenceDate = new Date(eventData?.starts_at || Date.now());
+    const referenceDate = new Date(source?.referenceDate || eventData?.starts_at || Date.now());
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const birthday = row.profile?.date_of_birth ? new Date(row.profile.date_of_birth) : null;
       if (!birthday || Number.isNaN(birthday.getTime())) {
@@ -537,7 +578,7 @@ const EventParticipantsPage = () => {
       else buckets[4].count += 1;
     });
     return buckets;
-  }, [eventData?.starts_at, rows]);
+  }, [eventData?.starts_at, rows, source?.referenceDate]);
 
   const medicalExpertiseCounts = useMemo(() => {
     const counts = new Map(['None', ...medicalExpertiseOptions].map((label) => [label, 0]));
@@ -629,6 +670,15 @@ const EventParticipantsPage = () => {
   const completedTotal = statusCounts.find((item) => item.status === 'completed')?.count || 0;
   const cancelledTotal = statusCounts.find((item) => item.status === 'cancelled')?.count || 0;
   const profilesCompleteTotal = rows.filter((row) => activeStatuses.has(row.registration.status) && row.profile && isProfileCompleteForRegistration(row.profile)).length;
+  const summaryRegistrations = source?.registrations ?? registrations;
+  const summaryActiveTotal = summaryRegistrations.filter((registration) => activeStatuses.has(registration.status)).length;
+  const summaryDepositPaidTotal = summaryRegistrations.filter((registration) => (
+    registration.status === 'deposit_paid' ||
+    registration.status === 'main_invoice_pending' ||
+    registration.status === 'completed'
+  )).length;
+  const summaryCompletedTotal = summaryRegistrations.filter((registration) => registration.status === 'completed').length;
+  const summaryCancelledTotal = summaryRegistrations.filter((registration) => registration.status === 'cancelled').length;
   const sortBy = (field: ParticipantListSortField) => setSort((current) => ({
     field,
     direction: current.field === field && current.direction === 'asc' ? 'desc' : 'asc'
@@ -655,9 +705,12 @@ const EventParticipantsPage = () => {
     });
   };
 
-  if (loading) return <p className="muted">Loading event participants…</p>;
-  if (error) return <p className="error-text">{error}</p>;
-  if (!eventData) return <p className="muted">Event not found.</p>;
+  const isSharedStats = Boolean(source);
+  const sourceLoading = source?.loading ?? loading;
+  const sourceError = source?.error ?? error;
+  if (sourceLoading) return <p className="muted">Loading participants…</p>;
+  if (sourceError) return <p className="error-text">{sourceError}</p>;
+  if (!source && !eventData) return <p className="muted">Event not found.</p>;
 
   const maxJumpBucketCount = Math.max(...jumpCountBuckets.map((item) => item.count), 1);
   const maxRecentJumpBucketCount = Math.max(...recentJumpBuckets.map((item) => item.count), 1);
@@ -694,27 +747,34 @@ const EventParticipantsPage = () => {
   ))}</div>;
   return (
     <section className="stack event-participants-page">
-      <header className="page-header">
-        <EventPageTitle event={eventData} section="Roster" showSlotsBadge />
-        <EventGearMenu eventId={eventData.id} currentPage="participants" menuId="event-participants-actions-menu" />
-      </header>
+      {!isSharedStats ? <header className="page-header">
+        <EventPageTitle event={eventData!} section="Roster" showSlotsBadge />
+        <EventGearMenu eventId={eventData!.id} currentPage="participants" menuId="event-participants-actions-menu" />
+      </header> : null}
 
-      <div className="event-participants-scope" role="tablist" aria-label="Participant audience">
-        <button type="button" role="tab" aria-selected={participantScope === 'participants'} className={participantScope === 'participants' ? 'active' : ''} onClick={() => setParticipantScope('participants')}>
-          Participants <span>{allRows.filter((row) => !isStaff(row.profile)).length}</span>
-        </button>
-        <button type="button" role="tab" aria-selected={participantScope === 'staff'} className={participantScope === 'staff' ? 'active' : ''} onClick={() => setParticipantScope('staff')}>
-          Staff <span>{allRows.filter((row) => isStaff(row.profile)).length}</span>
-        </button>
+      <div className={!isSharedStats ? 'event-participants-controls' : undefined}>
+        {!isSharedStats ? <div className="event-participants-scope" role="tablist" aria-label="Roster view">
+          <button type="button" role="tab" aria-selected={rosterView === 'list'} className={rosterView === 'list' ? 'active' : ''} onClick={() => setRosterView('list')}>List</button>
+          <button type="button" role="tab" aria-selected={rosterView === 'stats'} className={rosterView === 'stats' ? 'active' : ''} onClick={() => setRosterView('stats')}>Statistics</button>
+        </div> : null}
+        <div className="event-participants-scope" role="tablist" aria-label="Participant audience">
+          <button type="button" role="tab" aria-selected={participantScope === 'participants'} className={participantScope === 'participants' ? 'active' : ''} onClick={() => setParticipantScope('participants')}>
+            Participants <span>{allRows.filter((row) => !isStaff(row.profile)).length}</span>
+          </button>
+          <button type="button" role="tab" aria-selected={participantScope === 'staff'} className={participantScope === 'staff' ? 'active' : ''} onClick={() => setParticipantScope('staff')}>
+            Staff <span>{allRows.filter((row) => isStaff(row.profile)).length}</span>
+          </button>
+        </div>
       </div>
 
+      {(isSharedStats || rosterView === 'stats') && <>
       <div className="event-participants-summary" aria-label="Participant summary">
         <article className="card event-participants-summary-card">
-          <div className="event-participants-total-card event-participants-primary-card"><span className="registration-stat-label">Registrations</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Active registrations', (row) => activeStatuses.has(row.registration.status))} aria-label={`Show ${activeTotal} active registrations`}><strong>{activeTotal}</strong></button></div>
+          <div className="event-participants-total-card event-participants-primary-card"><span className="registration-stat-label">Registrations</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Active registrations', (row) => activeStatuses.has(row.registration.status))} aria-label={`Show ${summaryActiveTotal} active registrations`}><strong>{summaryActiveTotal}</strong></button></div>
           <div className="event-participants-status-summary">
-            <div className="event-participants-total-card"><span className="registration-stat-label">Deposit</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Deposit paid', (row) => row.registration.status === 'deposit_paid' || row.registration.status === 'main_invoice_pending' || row.registration.status === 'completed')} aria-label={`Show ${depositPaidTotal} registrations with deposit paid`}><strong>{depositPaidTotal}</strong></button></div>
-            <div className="event-participants-total-card"><span className="registration-stat-label">Full</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Completed registrations', (row) => row.registration.status === 'completed')} aria-label={`Show ${completedTotal} completed registrations`}><strong>{completedTotal}</strong></button></div>
-            <div className="event-participants-total-card"><span className="registration-stat-label">Canceled</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Canceled registrations', (row) => row.registration.status === 'cancelled')} aria-label={`Show ${cancelledTotal} canceled registrations`}><strong>{cancelledTotal}</strong></button></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Deposit</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Deposit paid', (row) => row.registration.status === 'deposit_paid' || row.registration.status === 'main_invoice_pending' || row.registration.status === 'completed')} aria-label={`Show ${summaryDepositPaidTotal} registrations with deposit paid`}><strong>{summaryDepositPaidTotal}</strong></button></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Full</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Completed registrations', (row) => row.registration.status === 'completed')} aria-label={`Show ${summaryCompletedTotal} completed registrations`}><strong>{summaryCompletedTotal}</strong></button></div>
+            <div className="event-participants-total-card"><span className="registration-stat-label">Canceled</span><button className="event-participants-summary-total" type="button" onClick={() => openChartFilter('Canceled registrations', (row) => row.registration.status === 'cancelled')} aria-label={`Show ${summaryCancelledTotal} canceled registrations`}><strong>{summaryCancelledTotal}</strong></button></div>
           </div>
         </article>
         <article className="card event-participants-total-card event-participants-profile-completion-card">
@@ -888,7 +948,7 @@ const EventParticipantsPage = () => {
               const birthday = row.profile?.date_of_birth ? new Date(row.profile.date_of_birth) : null;
               if (!bucket || !activeStatuses.has(row.registration.status)) return false;
               if (!birthday || Number.isNaN(birthday.getTime())) return label === 'N/A';
-              const referenceDate = new Date(eventData.starts_at);
+              const referenceDate = new Date(source?.referenceDate || eventData?.starts_at || Date.now());
               let age = referenceDate.getUTCFullYear() - birthday.getUTCFullYear();
               const monthDifference = referenceDate.getUTCMonth() - birthday.getUTCMonth();
               if (monthDifference < 0 || (monthDifference === 0 && referenceDate.getUTCDate() < birthday.getUTCDate())) age -= 1;
@@ -980,9 +1040,11 @@ const EventParticipantsPage = () => {
           </article>
         </div> : null}
       </article>
+      </>}
 
+      {(isSharedStats || rosterView === 'list') &&
       <ParticipantList
-        title="Registered participants"
+        title={isSharedStats ? 'Matching participants' : 'Registered participants'}
         singular="participant"
         people={visibleRows}
         open={listOpen}
@@ -991,17 +1053,17 @@ const EventParticipantsPage = () => {
         onSort={sortBy}
         participantLink={(participant) => `/participants/${participant.id}`}
         renderName={(name) => name}
-        countLabel={`${activeTotal} active registrations`}
+        countLabel={isSharedStats ? `${activeTotal} matching participants` : `${activeTotal} active registrations`}
         toolbar={(
           <div className="form-grid event-participants-filters participant-list-toolbar">
             <label className="form-field"><span>Search</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name or email" /></label>
-            <label className="form-field"><span>Registration status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | RegistrationStatus)}><option value="all">All statuses</option>{statusCounts.filter((item) => item.count > 0).map((item) => <option key={item.status} value={item.status}>{item.label}</option>)}</select></label>
+            {!isSharedStats ? <label className="form-field"><span>Registration status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | RegistrationStatus)}><option value="all">All statuses</option>{statusCounts.filter((item) => item.count > 0).map((item) => <option key={item.status} value={item.status}>{item.label}</option>)}</select></label> : null}
           </div>
         )}
         thirdColumnLabel="Status"
         thirdColumnSortable={false}
         renderThirdColumn={(participant) => <span className={statusBadgeClass((participant as ParticipantRow).registration.status)}>{statusLabels[(participant as ParticipantRow).registration.status]}</span>}
-      />
+      />}
       {chartFilter && typeof document !== 'undefined' ? createPortal(
         <div className="event-participants-filter-overlay" role="presentation" onClick={() => setChartFilter(null)}>
           <section className="event-participants-filter-overlay-panel" role="dialog" aria-modal="true" aria-labelledby="event-participants-filter-overlay-title" onClick={(event) => event.stopPropagation()}>
@@ -1019,7 +1081,7 @@ const EventParticipantsPage = () => {
               onSort={sortChartFilterBy}
               participantLink={(participant) => `/participants/${participant.id}`}
               countLabel={`${chartFilterRows.length} matching participants`}
-              headerAction={<button className="primary" type="button" disabled={chartFilterRows.length === 0} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send Email</button>}
+              headerAction={!isSharedStats ? <button className="primary" type="button" disabled={chartFilterRows.length === 0} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send Email</button> : null}
               thirdColumnLabel="Status"
               thirdColumnSortable={false}
               renderThirdColumn={(participant) => <span className={statusBadgeClass((participant as ParticipantRow).registration.status)}>{statusLabels[(participant as ParticipantRow).registration.status]}</span>}
@@ -1030,5 +1092,7 @@ const EventParticipantsPage = () => {
     </section>
   );
 };
+
+const EventParticipantsPage = () => <ParticipantRosterStats />;
 
 export default EventParticipantsPage;

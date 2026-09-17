@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
+import { Registration, listEventRegistrations } from '../api/registrations';
 import { useAuth } from '../auth/AuthProvider';
 import ParticipantList, { ParticipantListItem, ParticipantListSort, ParticipantListSortField } from '../components/ParticipantList';
+import { ParticipantRosterStats } from './EventParticipantsPage';
 import { parseEventLocal } from '../utils/eventDate';
 import { isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 import { roleOptions } from '../utils/roles';
@@ -51,6 +53,7 @@ const ParticipantOnboardingPage = () => {
   const [excludeNewsletterSubscribersOnly, setExcludeNewsletterSubscribersOnly] = useState(
     () => searchParams.get('exclude_newsletter_subscribers_only') !== 'false'
   );
+  const [view, setView] = useState<'list' | 'stats'>('list');
   const [sectionSorts, setSectionSorts] = useState<Record<'participants' | 'staff', ParticipantListSort>>({
     participants: { field: 'name', direction: 'asc' },
     staff: { field: 'name', direction: 'asc' }
@@ -59,6 +62,9 @@ const ParticipantOnboardingPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [impersonatingNewUser, setImpersonatingNewUser] = useState(false);
   const [openSections, setOpenSections] = useState({ participants: true, staff: true });
+  const [statsRegistrations, setStatsRegistrations] = useState<Registration[]>([]);
+  const [statsRegistrationsLoading, setStatsRegistrationsLoading] = useState(false);
+  const [statsRegistrationsError, setStatsRegistrationsError] = useState<string | null>(null);
 
   const canImpersonateNewUser =
     (user?.roles?.includes('admin') ?? false) &&
@@ -90,8 +96,9 @@ const ParticipantOnboardingPage = () => {
     if (eventCountMode === 'exactly') next.set('event_count_mode', 'exactly');
     if (profileCompletionFilter !== 'any') next.set('profile_completed', profileCompletionFilter);
     if (!excludeNewsletterSubscribersOnly) next.set('exclude_newsletter_subscribers_only', 'false');
+    if (view === 'stats') next.set('view', 'stats');
     setSearchParams(next, { replace: true });
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly, setSearchParams]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly, view, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -286,6 +293,40 @@ const ParticipantOnboardingPage = () => {
     });
   };
 
+  const statsEvents = useMemo(
+    () => selectedEvent ? events.filter((event) => event.id === Number(selectedEvent)) : filteredEvents,
+    [events, filteredEvents, selectedEvent]
+  );
+  const statsParticipantIds = useMemo(
+    () => filteredParticipants.map((participant) => participant.id).sort((left, right) => left - right).join(','),
+    [filteredParticipants]
+  );
+
+  useEffect(() => {
+    if (view !== 'stats') return;
+    let cancelled = false;
+    const participantIds = new Set(statsParticipantIds.split(',').filter(Boolean).map(Number));
+    const loadRegistrations = async () => {
+      setStatsRegistrationsLoading(true);
+      setStatsRegistrationsError(null);
+      try {
+        const registrationsByEvent = await Promise.all(statsEvents.map((event) => listEventRegistrations(event.id)));
+        if (!cancelled) {
+          setStatsRegistrations(registrationsByEvent.flat().filter((registration) => participantIds.has(registration.participant_id)));
+        }
+      } catch (cause) {
+        if (!cancelled) {
+          setStatsRegistrations([]);
+          setStatsRegistrationsError(cause instanceof Error ? cause.message : 'Failed to load registrations');
+        }
+      } finally {
+        if (!cancelled) setStatsRegistrationsLoading(false);
+      }
+    };
+    void loadRegistrations();
+    return () => { cancelled = true; };
+  }, [statsEvents, statsParticipantIds, view]);
+
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     if (selectedSeason) params.set('season', selectedSeason);
@@ -297,9 +338,21 @@ const ParticipantOnboardingPage = () => {
     if (eventCountMode === 'exactly') params.set('event_count_mode', 'exactly');
     if (profileCompletionFilter !== 'any') params.set('profile_completed', profileCompletionFilter);
     if (!excludeNewsletterSubscribersOnly) params.set('exclude_newsletter_subscribers_only', 'false');
+    if (view === 'stats') params.set('view', 'stats');
     const serialized = params.toString();
     return serialized ? `?${serialized}` : '';
-  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly]);
+  }, [selectedSeason, selectedEvent, selectedRoles, nameQuery, emailQuery, eventCountQuery, eventCountMode, profileCompletionFilter, excludeNewsletterSubscribersOnly, view]);
+
+  const statsSource = useMemo(() => ({
+    items: filteredParticipants.map((participant) => ({
+      profile: participantLookup.get(participant.id),
+      eventCount: participant.eventCount,
+      registeredAt: participant.registeredAt
+    })).filter((item): item is { profile: ParticipantProfile; eventCount: number; registeredAt: string } => Boolean(item.profile)),
+    registrations: statsRegistrations,
+    loading: loading || statsRegistrationsLoading,
+    error: error || statsRegistrationsError
+  }), [error, filteredParticipants, loading, participantLookup, statsRegistrations, statsRegistrationsError, statsRegistrationsLoading]);
 
   return (
     <section className="stack">
@@ -336,6 +389,11 @@ const ParticipantOnboardingPage = () => {
           </Link>
         </div>
       </header>
+
+      <div className="event-participants-scope" role="tablist" aria-label="Family view">
+        <button type="button" role="tab" aria-selected={view === 'list'} className={view === 'list' ? 'active' : ''} onClick={() => setView('list')}>List</button>
+        <button type="button" role="tab" aria-selected={view === 'stats'} className={view === 'stats' ? 'active' : ''} onClick={() => setView('stats')}>Statistics</button>
+      </div>
 
       <article className="card">
         <div className="form-grid participant-onboarding-filters">
@@ -477,7 +535,9 @@ const ParticipantOnboardingPage = () => {
         )}
       </article>
 
-      <div className="participant-onboarding-results">
+      {view === 'stats' ? (
+        <ParticipantRosterStats source={statsSource} />
+      ) : <div className="participant-onboarding-results">
         {([
           { key: 'participants' as const, title: 'Participants', singular: 'participant', people: participantCards },
           { key: 'staff' as const, title: 'Staff', singular: 'staff', people: staffCards }
@@ -497,7 +557,7 @@ const ParticipantOnboardingPage = () => {
             renderName={highlightName}
           />
         ))}
-      </div>
+      </div>}
     </section>
   );
 };

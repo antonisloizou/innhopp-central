@@ -201,6 +201,15 @@ const Layout = () => {
               <span className="bar" />
               <span className="bar" />
             </span>
+            {profileIncomplete ? (
+              <span
+                className="nav-user-warning menu-toggle-warning"
+                title={incompleteProfileWarning}
+                aria-label={incompleteProfileWarning}
+              >
+                !
+              </span>
+            ) : null}
           </button>
         }
       />
