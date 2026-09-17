@@ -1,4 +1,4 @@
-import type { Event } from '../api/events';
+import type { Event, EventStatus } from '../api/events';
 import { parseEventLocal } from './eventDate';
 
 export const isPastEvent = (event: Event, now = Date.now()) => {
@@ -10,3 +10,7 @@ export const isPastEvent = (event: Event, now = Date.now()) => {
   if (starts) return starts.getTime() < now;
   return false;
 };
+
+/** Whether an event has reached the lifecycle stage where participant payments are actionable. */
+export const isEventLaunchedOrLater = (status: EventStatus | null | undefined) =>
+  status === 'launched' || status === 'scouted' || status === 'live' || status === 'past';

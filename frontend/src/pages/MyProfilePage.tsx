@@ -13,9 +13,11 @@ import ParticipantProfileForm, {
   toParticipantPayload
 } from '../components/ParticipantProfileForm';
 import { useAuth } from '../auth/AuthProvider';
+import { listEventSummaries } from '../api/events';
 import { formatEventLocalDate } from '../utils/eventDate';
 import ParticipantEventsCard from '../components/ParticipantEventsCard';
 import { isProfileCompleteForRegistration } from '../utils/profileCompleteness';
+import { isEventLaunchedOrLater } from '../utils/eventStatus';
 
 const PENDING_PUBLIC_REGISTRATION_KEY = 'innhopp-pending-public-registration';
 
@@ -25,6 +27,7 @@ const MyProfilePage = () => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<ParticipantProfile | null>(null);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [launchedEventIDs, setLaunchedEventIDs] = useState<Set<number>>(new Set());
   const [form, setForm] = useState<CreateParticipantPayload>(
     createParticipantFormState(null, {
       full_name: user?.full_name || '',
@@ -58,13 +61,17 @@ const MyProfilePage = () => {
       setLoading(true);
       setError(null);
       try {
-        const [nextProfile, nextRegistrations] = await Promise.all([
+        const [nextProfile, nextRegistrations, events] = await Promise.all([
           getMyParticipantProfile(),
-          listMyRegistrations()
+          listMyRegistrations(),
+          listEventSummaries()
         ]);
         if (!cancelled) {
           setProfile(nextProfile);
           setRegistrations(nextRegistrations);
+          setLaunchedEventIDs(
+            new Set(events.filter((event) => isEventLaunchedOrLater(event.status)).map((event) => event.id))
+          );
           setForm(createParticipantFormState(nextProfile));
           setSaved(false);
         }
@@ -116,14 +123,18 @@ const MyProfilePage = () => {
         await claimPublicRegistration(slug);
         if (cancelled) return;
         window.sessionStorage.removeItem(PENDING_PUBLIC_REGISTRATION_KEY);
-        const [nextProfile, nextRegistrations] = await Promise.all([
+        const [nextProfile, nextRegistrations, events] = await Promise.all([
           getMyParticipantProfile(),
-          listMyRegistrations()
+          listMyRegistrations(),
+          listEventSummaries()
         ]);
         if (cancelled) return;
         setProfile(nextProfile);
         setForm(createParticipantFormState(nextProfile));
         setRegistrations(nextRegistrations);
+        setLaunchedEventIDs(
+          new Set(events.filter((event) => isEventLaunchedOrLater(event.status)).map((event) => event.id))
+        );
         window.dispatchEvent(new Event('participant-profile-updated'));
       } catch (err) {
         if (cancelled) return;
@@ -167,11 +178,12 @@ const MyProfilePage = () => {
     return <p className="muted">Loading profile…</p>;
   }
 
-  const pendingPayments = registrations.flatMap((registration) =>
-    (registration.payments || [])
+  const pendingPayments = registrations.flatMap((registration) => {
+    if (!launchedEventIDs.has(registration.event_id)) return [];
+    return (registration.payments || [])
       .filter((payment) => payment.status === 'pending')
-      .map((payment) => ({ registration, payment }))
-  );
+      .map((payment) => ({ registration, payment }));
+  });
   const profileIncomplete = !profile || !isProfileCompleteForRegistration(profile);
 
   return (

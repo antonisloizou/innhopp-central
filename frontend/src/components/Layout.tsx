@@ -7,6 +7,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { isParticipantOnlySession } from '../auth/access';
 import { budgetsV1Enabled } from '../config/flags';
 import { incompleteProfileWarning, isProfileCompleteForRegistration } from '../utils/profileCompleteness';
+import { isEventLaunchedOrLater } from '../utils/eventStatus';
 import AppHeader from './AppHeader';
 
 const Layout = () => {
@@ -112,14 +113,17 @@ const Layout = () => {
       }
       setProfileCompletionChecked(false);
       try {
-        const [profile, registrations] = await Promise.all([
+        const [profile, registrations, events] = await Promise.all([
           getMyParticipantProfile(),
-          listMyRegistrations()
+          listMyRegistrations(),
+          listEventSummaries()
         ]);
         if (!cancelled) {
           setProfileIncomplete(!isProfileCompleteForRegistration(profile));
+          const eventStatusByID = new Map(events.map((event) => [event.id, event.status]));
           setHasPendingPayments(
             registrations.some((registration) =>
+              isEventLaunchedOrLater(eventStatusByID.get(registration.event_id)) &&
               (registration.payments || []).some((payment) => payment.status === 'pending')
             )
           );
