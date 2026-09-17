@@ -18,6 +18,7 @@ export interface AudienceFilter {
   roles?: string[];
   included_registration_ids?: number[];
   excluded_registration_ids?: number[];
+  included_participant_ids?: number[];
 }
 
 export interface AudienceRecipient {
@@ -85,6 +86,7 @@ export interface CreateCampaignPayload {
   mode?: string;
   filter?: AudienceFilter;
   registration_ids?: number[];
+  participant_ids?: number[];
   send_copy_to_self?: boolean;
 }
 
@@ -113,6 +115,9 @@ export const getAudiencePreview = (eventId: number, filter: AudienceFilter) => {
   );
   (filter.excluded_registration_ids || []).forEach((id) =>
     params.append('excluded_registration_id', String(id))
+  );
+  (filter.included_participant_ids || []).forEach((id) =>
+    params.append('included_participant_id', String(id))
   );
   const query = params.toString();
   return apiRequest<AudiencePreviewResponse>(`/comms/events/${eventId}/audience-preview${query ? `?${query}` : ''}`);

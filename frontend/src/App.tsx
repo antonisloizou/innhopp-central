@@ -66,8 +66,8 @@ const App = () => (
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/events" replace />} />
           <Route path="events" element={<EventCalendarPage />} />
-          <Route path="checklists" element={<StaffRouteGuard><ChecklistsPage /></StaffRouteGuard>} />
-          <Route path="events/:eventId/checklists" element={<StaffRouteGuard><ChecklistsPage /></StaffRouteGuard>} />
+          <Route path="checklists" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><ChecklistsPage /></StaffRouteGuard>} />
+          <Route path="events/:eventId/checklists" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><ChecklistsPage /></StaffRouteGuard>} />
           <Route path="events/:eventId/leaderboard" element={<StaffRouteGuard><EventLeaderboardPage /></StaffRouteGuard>} />
           <Route path="events/:eventId/participants" element={<StaffRouteGuard><EventParticipantsPage /></StaffRouteGuard>} />
           {budgetsV1Enabled ? (

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Event, Season, listEvents, listSeasons } from '../api/events';
 import { ParticipantProfile, listParticipantProfiles } from '../api/participants';
 import { Registration, listEventRegistrations } from '../api/registrations';
@@ -28,6 +28,7 @@ const sortEventsByStartDateAscending = (events: Event[]) =>
 
 const ParticipantOnboardingPage = () => {
   const { impersonateNewUser, user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
@@ -350,9 +351,17 @@ const ParticipantOnboardingPage = () => {
       registeredAt: participant.registeredAt
     })).filter((item): item is { profile: ParticipantProfile; eventCount: number; registeredAt: string } => Boolean(item.profile)),
     registrations: statsRegistrations,
+    onSendFiltered: (participantIds: number[]) => {
+      navigate('/communications', {
+        state: {
+          selectedEventIds: statsEvents.map((event) => event.id),
+          includedParticipantIds: participantIds
+        }
+      });
+    },
     loading: loading || statsRegistrationsLoading,
     error: error || statsRegistrationsError
-  }), [error, filteredParticipants, loading, participantLookup, statsRegistrations, statsRegistrationsError, statsRegistrationsLoading]);
+  }), [error, filteredParticipants, loading, navigate, participantLookup, statsEvents, statsRegistrations, statsRegistrationsError, statsRegistrationsLoading]);
 
   return (
     <section className="stack">

@@ -166,6 +166,7 @@ func main() {
 		},
 	)
 	router.Use(sessionManager.Middleware)
+	router.Use(auth.RoleRefreshMiddleware(pool))
 
 	router.Get("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -578,7 +579,7 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK (role IN ('jump_leader','jump_master','ground_crew','boat_crew'))
+            CHECK (role IN ('jump_leader','jump_master','ground_crew','packer','boat_crew'))
         )`,
 		`CREATE TABLE IF NOT EXISTS checklist_template_items (
             id SERIAL PRIMARY KEY,
@@ -596,6 +597,9 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             CHECK (phase IN ('readiness','execution','closeout'))
         )`,
 		`ALTER TABLE checklist_template_items ADD COLUMN IF NOT EXISTS requires_rescue_boat BOOLEAN NOT NULL DEFAULT FALSE`,
+		`ALTER TABLE checklist_templates DROP CONSTRAINT IF EXISTS checklist_templates_role_check`,
+		`ALTER TABLE checklist_templates DROP CONSTRAINT IF EXISTS checklist_templates_valid_role`,
+		`ALTER TABLE checklist_templates ADD CONSTRAINT checklist_templates_valid_role CHECK (role IN ('jump_leader','jump_master','ground_crew','packer','boat_crew'))`,
 		`CREATE TABLE IF NOT EXISTS innhopp_checklist_item_events (
             id BIGSERIAL PRIMARY KEY,
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -610,11 +614,34 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             reason TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK (action IN ('completed','reversed')),
-            CHECK (role IN ('jump_leader','jump_master','ground_crew','boat_crew'))
+            CHECK (role IN ('jump_leader','jump_master','ground_crew','packer','boat_crew'))
         )`,
+		`ALTER TABLE innhopp_checklist_item_events DROP CONSTRAINT IF EXISTS innhopp_checklist_item_events_role_check`,
+		`ALTER TABLE innhopp_checklist_item_events DROP CONSTRAINT IF EXISTS innhopp_checklist_item_events_valid_role`,
+		`ALTER TABLE innhopp_checklist_item_events ADD CONSTRAINT innhopp_checklist_item_events_valid_role CHECK (role IN ('jump_leader','jump_master','ground_crew','packer','boat_crew'))`,
 		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_current_idx ON innhopp_checklist_item_events (innhopp_id, template_item_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_history_idx ON innhopp_checklist_item_events (innhopp_id, created_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS innhopp_checklist_item_events_template_item_idx ON innhopp_checklist_item_events (template_item_id)`,
+		`CREATE TABLE IF NOT EXISTS innhopp_ground_crew_kit_items (
+            innhopp_id INTEGER NOT NULL REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            item_key TEXT NOT NULL,
+            checked BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_by_account_id INTEGER NOT NULL,
+            updated_by_display_name_snapshot TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (innhopp_id, item_key)
+        )`,
+		`CREATE TABLE IF NOT EXISTS innhopp_ground_crew_kit_item_events (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            innhopp_id INTEGER NOT NULL REFERENCES event_innhopps(id) ON DELETE CASCADE,
+            item_key TEXT NOT NULL,
+            checked BOOLEAN NOT NULL,
+            actor_account_id INTEGER NOT NULL,
+            actor_display_name_snapshot TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE INDEX IF NOT EXISTS innhopp_ground_crew_kit_item_events_history_idx ON innhopp_ground_crew_kit_item_events (innhopp_id, created_at DESC, id DESC)`,
 		`CREATE TABLE IF NOT EXISTS innhopp_checklist_overrides (
             id BIGSERIAL PRIMARY KEY,
             event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,

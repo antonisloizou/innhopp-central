@@ -57,6 +57,7 @@ export type RosterStatsSource = {
   error?: string | null;
   /** Real registrations used for the registration summary cards. */
   registrations?: Registration[];
+  onSendFiltered?: (participantIds: number[]) => void;
   /** The date used for age calculations when this is not an event roster. */
   referenceDate?: string;
 };
@@ -692,6 +693,10 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     setChartFilterListOpen(true);
   };
   const sendChartFilterMessage = () => {
+    if (source) {
+      source.onSendFiltered?.(chartFilterRows.map((row) => row.id));
+      return;
+    }
     if (!eventData || chartFilterRows.length === 0) return;
     const includedRegistrationIds = chartFilterRows
       .filter((row) => !isStaff(row.profile))
@@ -704,6 +709,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
       }
     });
   };
+  const canSendChartFilterMessage = chartFilterRows.length > 0;
 
   const isSharedStats = Boolean(source);
   const sourceLoading = source?.loading ?? loading;
@@ -1081,7 +1087,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
               onSort={sortChartFilterBy}
               participantLink={(participant) => `/participants/${participant.id}`}
               countLabel={`${chartFilterRows.length} matching participants`}
-              headerAction={!isSharedStats ? <button className="primary" type="button" disabled={chartFilterRows.length === 0} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send Email</button> : null}
+              headerAction={!isSharedStats || source?.onSendFiltered ? <button className="primary" type="button" disabled={!canSendChartFilterMessage} onClick={(event) => { event.stopPropagation(); sendChartFilterMessage(); }}>Send Email</button> : null}
               thirdColumnLabel="Status"
               thirdColumnSortable={false}
               renderThirdColumn={(participant) => <span className={statusBadgeClass((participant as ParticipantRow).registration.status)}>{statusLabels[(participant as ParticipantRow).registration.status]}</span>}

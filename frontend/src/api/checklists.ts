@@ -1,12 +1,12 @@
 import { apiRequest } from './client';
 
-export type ChecklistRole = 'jump_leader' | 'jump_master' | 'ground_crew' | 'boat_crew';
+export type ChecklistRole = 'jump_leader' | 'jump_master' | 'ground_crew' | 'packer' | 'boat_crew';
 export type ChecklistPhase = 'readiness' | 'execution' | 'closeout';
 export type ChecklistItem = { id: number; item_key: string; label: string; detail?: string; phase: ChecklistPhase; sort_order: number; completed: boolean; checked_by?: string; checked_at?: string };
 export type ChecklistOverride = { actor: string; reason: string; created_at: string };
-export type InnhoppChecklist = { innhopp_id: number; event_id: number; innhopp_name: string; role: ChecklistRole; required_roles: ChecklistRole[]; ready: boolean; overridden: boolean; override?: ChecklistOverride; operational_status: 'planned'|'proceeding'|'completed'|'cancelled'; items: ChecklistItem[] };
+export type InnhoppChecklist = { innhopp_id: number; event_id: number; innhopp_name: string; innhopp_sequence: number; scheduled_at?: string | null; role: ChecklistRole; required_roles: ChecklistRole[]; ready: boolean; overridden: boolean; override?: ChecklistOverride; operational_status: 'planned'|'proceeding'|'completed'|'cancelled'; items: ChecklistItem[] };
 export type ChecklistInnhopp = { id:number; sequence:number; name:string; rescue_boat:boolean; required_roles:ChecklistRole[]; ready:boolean; overridden:boolean; operational_status:'planned'|'proceeding'|'completed'|'cancelled' };
-export type ChecklistHistoryEvent = { id:number; item_label:string; role:ChecklistRole | 'admin'; action:'completed'|'reversed'|'overridden'|'reset'; actor:string; reason?:string; created_at:string };
+export type ChecklistHistoryEvent = { id:number; item_label:string; role:ChecklistRole | 'admin'; action:'completed'|'reversed'|'overridden'|'reset'|'kit_checked'|'kit_unchecked'; actor:string; reason?:string; created_at:string };
 export const listChecklistInnhopps = (eventId:number) => apiRequest<ChecklistInnhopp[]>(`/checklists/events/${eventId}/innhopps`);
 export const getChecklist = (innhoppId:number, role:ChecklistRole) => apiRequest<InnhoppChecklist>(`/checklists/innhopps/${innhoppId}?role=${role}`);
 export const completeChecklistItem = (innhoppId:number,itemId:number,role:ChecklistRole) => apiRequest<InnhoppChecklist>(`/checklists/innhopps/${innhoppId}/items/${itemId}/complete`,{method:'POST',body:JSON.stringify({role})});

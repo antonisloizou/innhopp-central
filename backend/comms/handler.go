@@ -65,6 +65,7 @@ type AudienceFilter struct {
 	Roles                   []string `json:"roles,omitempty"`
 	IncludedRegistrationIDs []int64  `json:"included_registration_ids,omitempty"`
 	ExcludedRegistrationIDs []int64  `json:"excluded_registration_ids,omitempty"`
+	IncludedParticipantIDs  []int64  `json:"included_participant_ids,omitempty"`
 }
 
 type AudienceRecipient struct {
@@ -130,6 +131,7 @@ type campaignPayload struct {
 	Mode            string         `json:"mode"`
 	Filter          AudienceFilter `json:"filter"`
 	RegistrationIDs []int64        `json:"registration_ids"`
+	ParticipantIDs  []int64        `json:"participant_ids"`
 	SendCopyToSelf  bool           `json:"send_copy_to_self"`
 }
 
@@ -151,6 +153,10 @@ func parseAudienceRegistrationIDs(values []string) []int64 {
 		ids = append(ids, id)
 	}
 	return normalizeAudienceRegistrationIDs(ids)
+}
+
+func parseAudienceParticipantIDs(values []string) []int64 {
+	return parseAudienceRegistrationIDs(values)
 }
 
 func currentAccountID(ctx context.Context) *int64 {
@@ -448,9 +454,45 @@ func loadAudienceRecipientsByRegistrationIDs(ctx context.Context, q interface {
 	return recipients, rows.Err()
 }
 
+func loadAudienceRecipientsByParticipantIDs(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, participantIDs []int64) ([]AudienceRecipient, error) {
+	participantIDs = normalizeAudienceRegistrationIDs(participantIDs)
+	if len(participantIDs) == 0 {
+		return []AudienceRecipient{}, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT p.id, COALESCE(p.full_name, ''), COALESCE(p.email, '')
+		FROM participant_profiles p
+		WHERE p.id = ANY($1) AND COALESCE(p.email, '') <> ''
+		ORDER BY p.full_name, p.id
+	`, participantIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := make([]AudienceRecipient, 0, len(participantIDs))
+	for rows.Next() {
+		var recipient AudienceRecipient
+		if err := rows.Scan(&recipient.ParticipantID, &recipient.ParticipantName, &recipient.ParticipantEmail); err != nil {
+			return nil, err
+		}
+		recipient.ParticipantEmail = strings.ToLower(strings.TrimSpace(recipient.ParticipantEmail))
+		recipient.Status = "profile"
+		recipient.DepositState = "none"
+		recipient.MainInvoiceState = "none"
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
 func resolveAudienceRecipients(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, eventID int64, filter AudienceFilter) ([]AudienceRecipient, error) {
+	if len(filter.IncludedParticipantIDs) > 0 {
+		return loadAudienceRecipientsByParticipantIDs(ctx, q, filter.IncludedParticipantIDs)
+	}
 	baseRecipients, err := loadAudienceRecipients(ctx, q, eventID, filter)
 	if err != nil {
 		return nil, err
@@ -471,10 +513,10 @@ func resolveAudienceRecipients(ctx context.Context, q interface {
 		if _, excluded := excludedIDs[recipient.RegistrationID]; excluded {
 			return
 		}
-		if _, exists := seen[recipient.RegistrationID]; exists {
+		if _, exists := seen[recipient.ParticipantID]; exists {
 			return
 		}
-		seen[recipient.RegistrationID] = struct{}{}
+		seen[recipient.ParticipantID] = struct{}{}
 		merged = append(merged, recipient)
 	}
 
@@ -832,6 +874,7 @@ func (h *Handler) audiencePreview(w http.ResponseWriter, r *http.Request) {
 		Roles:                   r.URL.Query()["role"],
 		IncludedRegistrationIDs: parseAudienceRegistrationIDs(r.URL.Query()["included_registration_id"]),
 		ExcludedRegistrationIDs: parseAudienceRegistrationIDs(r.URL.Query()["excluded_registration_id"]),
+		IncludedParticipantIDs:  parseAudienceParticipantIDs(r.URL.Query()["included_participant_id"]),
 	}
 	recipients, err := resolveAudienceRecipients(r.Context(), h.db, eventID, filter)
 	if err != nil {
@@ -929,11 +972,15 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload.RegistrationIDs = normalizeAudienceRegistrationIDs(payload.RegistrationIDs)
+	payload.ParticipantIDs = normalizeAudienceRegistrationIDs(payload.ParticipantIDs)
 	payload.Filter.IncludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.IncludedRegistrationIDs)
 	payload.Filter.ExcludedRegistrationIDs = normalizeAudienceRegistrationIDs(payload.Filter.ExcludedRegistrationIDs)
+	payload.Filter.IncludedParticipantIDs = normalizeAudienceRegistrationIDs(payload.Filter.IncludedParticipantIDs)
 	var recipients []AudienceRecipient
 	if len(payload.RegistrationIDs) > 0 {
 		recipients, err = loadAudienceRecipientsByRegistrationIDs(ctx, tx, payload.EventID, payload.RegistrationIDs)
+	} else if len(payload.ParticipantIDs) > 0 {
+		recipients, err = loadAudienceRecipientsByParticipantIDs(ctx, tx, payload.ParticipantIDs)
 	} else {
 		recipients, err = resolveAudienceRecipients(ctx, tx, payload.EventID, payload.Filter)
 	}
@@ -997,7 +1044,7 @@ func (h *Handler) createCampaign(w http.ResponseWriter, r *http.Request) {
 		var deliveryID int64
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO email_deliveries (campaign_id, registration_id, email, subject, body, status)
-			VALUES ($1, $2, $3, $4, $5, 'pending')
+			VALUES ($1, NULLIF($2, 0), $3, $4, $5, 'pending')
 			RETURNING id
 		`, campaignID, recipient.RegistrationID, recipient.ParticipantEmail, subject, body).Scan(&deliveryID); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "failed to create deliveries")

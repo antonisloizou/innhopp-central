@@ -32,6 +32,8 @@ func (h *Handler) Routes(e *rbac.Enforcer) chi.Router {
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/events/{eventID}/innhopps", h.listInnhopps)
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}", h.getChecklist)
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/history", h.history)
+	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/ground-crew-kit", h.groundCrewKit)
+	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/ground-crew-kit/{itemKey}", h.updateGroundCrewKit)
 	r.With(e.Authorize(rbac.PermissionViewChecklists)).Get("/innhopps/{innhoppID}/stream", h.stream)
 	r.With(e.Authorize(rbac.PermissionCompleteChecklists)).Post("/innhopps/{innhoppID}/items/{itemID}/complete", h.complete)
 	r.With(e.Authorize(rbac.PermissionReverseAnyChecklist)).Post("/innhopps/{innhoppID}/items/{itemID}/reverse", h.reverse)
@@ -57,6 +59,8 @@ type checklist struct {
 	InnhoppID         int64            `json:"innhopp_id"`
 	EventID           int64            `json:"event_id"`
 	InnhoppName       string           `json:"innhopp_name"`
+	InnhoppSequence   int              `json:"innhopp_sequence"`
+	ScheduledAt       *time.Time       `json:"scheduled_at,omitempty"`
 	Role              string           `json:"role"`
 	RequiredRoles     []string         `json:"required_roles"`
 	Ready             bool             `json:"ready"`
@@ -81,16 +85,16 @@ func parseID(w http.ResponseWriter, r *http.Request, key string) (int64, bool) {
 }
 func rolesFor(boat bool) []string {
 	if boat {
-		return []string{"jump_leader", "jump_master", "ground_crew", "boat_crew"}
+		return []string{"jump_leader", "jump_master", "ground_crew", "packer", "boat_crew"}
 	}
-	return []string{"jump_leader", "jump_master", "ground_crew"}
+	return []string{"jump_leader", "jump_master", "ground_crew", "packer"}
 }
 
 func operationalTeamDetail(boat bool) string {
 	if boat {
-		return "Jump Master, Ground Crew and Boat Crew are confirmed."
+		return "Jump Master, Ground Crew, Packer and Boat Crew are confirmed."
 	}
-	return "Jump Master and Ground Crew are confirmed."
+	return "Jump Master, Ground Crew and Packer are confirmed."
 }
 
 func containsRole(roles []string, role string) bool {
@@ -102,7 +106,7 @@ func containsRole(roles []string, role string) bool {
 	return false
 }
 func validRole(role string) bool {
-	for _, r := range []string{"jump_leader", "jump_master", "ground_crew", "boat_crew"} {
+	for _, r := range []string{"jump_leader", "jump_master", "ground_crew", "packer", "boat_crew"} {
 		if role == r {
 			return true
 		}
@@ -227,7 +231,7 @@ func (h *Handler) getChecklist(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) load(ctx context.Context, innhoppID int64, role string) (checklist, error) {
 	var out checklist
 	var boat bool
-	err := h.db.QueryRow(ctx, `SELECT event_id,name,COALESCE(rescue_boat,false) FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&out.EventID, &out.InnhoppName, &boat)
+	err := h.db.QueryRow(ctx, `SELECT event_id,name,sequence,scheduled_at,COALESCE(rescue_boat,false) FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&out.EventID, &out.InnhoppName, &out.InnhoppSequence, &out.ScheduledAt, &boat)
 	if err != nil {
 		return out, err
 	}
@@ -290,6 +294,115 @@ type historyEvent struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type groundCrewKitItem struct {
+	Key     string `json:"key"`
+	Checked bool   `json:"checked"`
+}
+
+var groundCrewKitItemKeys = []string{
+	"stretcher", "medical_kit", "windsock_bag", "metal_box", "target_t", "radio",
+	"emergency_plan", "marking_band", "small_flags", "windblades", "banners", "location_flag",
+}
+
+func validGroundCrewKitItem(key string) bool {
+	for _, candidate := range groundCrewKitItemKeys {
+		if key == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) groundCrewKit(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	var exists bool
+	if err := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM event_innhopps WHERE id=$1)`, innhoppID).Scan(&exists); err != nil || !exists {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	checked := map[string]bool{}
+	rows, err := h.db.Query(r.Context(), `SELECT item_key, checked FROM innhopp_ground_crew_kit_items WHERE innhopp_id=$1`, innhoppID)
+	if err != nil {
+		httpx.Error(w, 500, "could not load ground crew kit")
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var value bool
+		if err := rows.Scan(&key, &value); err != nil {
+			httpx.Error(w, 500, "could not read ground crew kit")
+			return
+		}
+		checked[key] = value
+	}
+	items := make([]groundCrewKitItem, 0, len(groundCrewKitItemKeys))
+	for _, key := range groundCrewKitItemKeys {
+		items = append(items, groundCrewKitItem{Key: key, Checked: checked[key]})
+	}
+	httpx.WriteJSON(w, 200, map[string]any{"items": items})
+}
+
+func (h *Handler) updateGroundCrewKit(w http.ResponseWriter, r *http.Request) {
+	innhoppID, ok := parseID(w, r, "innhoppID")
+	if !ok {
+		return
+	}
+	itemKey := strings.TrimSpace(chi.URLParam(r, "itemKey"))
+	if !validGroundCrewKitItem(itemKey) {
+		httpx.Error(w, 400, "invalid ground crew kit item")
+		return
+	}
+	var req struct {
+		Checked bool `json:"checked"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Error(w, 400, "checked is required")
+		return
+	}
+	claims := auth.FromContext(r.Context())
+	if claims == nil {
+		httpx.Error(w, 401, "authentication required")
+		return
+	}
+	var eventID int64
+	if err := h.db.QueryRow(r.Context(), `SELECT event_id FROM event_innhopps WHERE id=$1`, innhoppID).Scan(&eventID); err != nil {
+		httpx.Error(w, 404, "innhopp not found")
+		return
+	}
+	name := strings.TrimSpace(claims.FullName)
+	if name == "" {
+		name = claims.Email
+	}
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, 500, "could not save ground crew kit")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var previous bool
+	_ = tx.QueryRow(r.Context(), `SELECT checked FROM innhopp_ground_crew_kit_items WHERE innhopp_id=$1 AND item_key=$2 FOR UPDATE`, innhoppID, itemKey).Scan(&previous)
+	if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_kit_items (innhopp_id,item_key,checked,updated_by_account_id,updated_by_display_name_snapshot) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (innhopp_id,item_key) DO UPDATE SET checked=EXCLUDED.checked,updated_by_account_id=EXCLUDED.updated_by_account_id,updated_by_display_name_snapshot=EXCLUDED.updated_by_display_name_snapshot,updated_at=NOW()`, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+		httpx.Error(w, 500, "could not save ground crew kit")
+		return
+	}
+	if previous != req.Checked {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO innhopp_ground_crew_kit_item_events (event_id,innhopp_id,item_key,checked,actor_account_id,actor_display_name_snapshot) VALUES ($1,$2,$3,$4,$5,$6)`, eventID, innhoppID, itemKey, req.Checked, claims.AccountID, name); err != nil {
+			httpx.Error(w, 500, "could not record ground crew kit update")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, 500, "could not save ground crew kit")
+		return
+	}
+	h.publishUpdate(innhoppID, eventID, "ground_crew_kit")
+	h.groundCrewKit(w, r)
+}
+
 func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r, "innhoppID")
 	if !ok {
@@ -304,6 +417,9 @@ func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
 		UNION ALL
 		SELECT -id, 'Innhopp Operational Checks Reset' AS item_label, 'admin' AS role, 'reset' AS action, actor_display_name_snapshot AS actor, reason, created_at
 		FROM innhopp_checklist_resets WHERE innhopp_id=$1
+		UNION ALL
+		SELECT -1000000000-id, 'Ground Crew Kit: ' || replace(item_key, '_', ' ') AS item_label, 'ground_crew' AS role, CASE WHEN checked THEN 'kit_checked' ELSE 'kit_unchecked' END AS action, actor_display_name_snapshot AS actor, '' AS reason, created_at
+		FROM innhopp_ground_crew_kit_item_events WHERE innhopp_id=$1
 	) audit ORDER BY created_at DESC,id DESC`, id)
 	if err != nil {
 		httpx.Error(w, 500, "could not load checklist history")
@@ -673,7 +789,10 @@ var seedTemplates = map[string][]seedItem{
 		{"pilot_brief", "Pilot briefing is complete", "Confirm that the pilot has accurate coordinates, jumprun, and altitude.", "readiness", false}, {"landing_plan", "Current conditions and landing plan is understood", "Communicate with ground crew and get information on current winds, landing direction, and any new information.", "readiness", false}, {"load_checked", "Load is checked and organised", "Current manifest, suitability and required equipment are checked.", "readiness", false}, {"jumper_brief", "Jumper briefing is delivered and understood", "Exit altitudes, altitude offsets, canopy separation, landing pattern, hazards and emergency actions are covered.", "readiness", false}, {"exit_observation_plan", "Jumprun", "Spotting, exit order, separation and Jump Master position are confirmed.", "readiness", false}, {"load_spotted", "Load is visually spotted before exit", "The agreed visual reference and conditions are acceptable.", "execution", false}, {"load_accounted", "Load is accounted for", "Count the load after landing and report any exception.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with Ground Crew to record the distance from the T at which each jumper landed.", "closeout", false},
 	},
 	"ground_crew": {
-		{"location_route", "Current operational plan", "Location, route, access and communication contact are confirmed.", "readiness", false}, {"arrival_timing", "Arrive at the landing location on time", "Be at the landing location 10 minutes before the agreed briefing time.", "readiness", false}, {"kit_complete", "Ground crew kit is complete", "T, wind indicators, Radio and approved medical kit are present.", "readiness", false}, {"emergency_support", "Transport and emergency support are ready", "Access, emergency contacts, hospital route and off-landing pickup are confirmed.", "readiness", false}, {"landing_prepared", "Landing area prepared", "T and windblades placed, current conditions assessed.", "readiness", false}, {"report_conditions", "Report current conditions", "Live conditions are reported to operations.", "readiness", false}, {"public_controls", "Public and landing-area controls are in place", "Crowd control and primary or secondary landing-area usability are confirmed.", "readiness", false}, {"boat_coordination", "Safety boat coordination is confirmed when required", "Boat Crew location, communications and ready signal are confirmed.", "readiness", true}, {"monitor_exits_landings", "Ground crew monitors exits and landings", "Maintain communications and initiate pickup or emergency response as needed.", "execution", false}, {"all_accounted", "All jumpers are accounted for and reported", "Confirm against manifest and report completion or exceptions.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with the Jump Master to record the distance from the T at which each jumper landed.", "closeout", false}, {"site_cleared", "Ground crew site is cleared", "Recover markers and kit, then report incidents, damage or missing equipment.", "closeout", false},
+		{"location_route", "Current operational plan", "Location, route, access and communication contact are confirmed.", "readiness", false}, {"arrival_timing", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"kit_complete", "Ground crew kit is complete", "T, wind indicators, Radio and approved medical kit are present.", "readiness", false}, {"emergency_support", "Transport and emergency support are ready", "Access, emergency contacts, hospital route and off-landing pickup are confirmed.", "readiness", false}, {"landing_prepared", "Landing area prepared", "T and windblades placed, current conditions assessed.", "readiness", false}, {"report_conditions", "Report current conditions", "Live conditions are reported to operations.", "readiness", false}, {"public_controls", "Public and landing-area controls are in place", "Crowd control and primary or secondary landing-area usability are confirmed.", "readiness", false}, {"boat_coordination", "Safety boat coordination is confirmed when required", "Boat Crew location, communications and ready signal are confirmed.", "readiness", true}, {"monitor_exits_landings", "Ground crew monitors exits and landings", "Maintain communications and initiate pickup or emergency response as needed.", "execution", false}, {"all_accounted", "All jumpers are accounted for and reported", "Confirm against manifest and report completion or exceptions.", "closeout", false}, {"record_accuracy_score", "Record accuracy score", "Coordinate with the Jump Master to record the distance from the T at which each jumper landed.", "closeout", false}, {"site_cleared", "Ground crew site is cleared", "Recover markers and kit, then report incidents, damage or missing equipment.", "closeout", false},
+	},
+	"packer": {
+		{"parachutes_ready", "Arrive 15 minutes prior to briefing / 45 minutes prior to take off", "Be at the landing location 15 minutes before briefing and 45 minutes before take off.", "readiness", false}, {"packing_log_updated", "Packing and equipment records are current", "Packing log, reserve status and any equipment restrictions have been checked and recorded.", "readiness", false}, {"gear_returned", "Parachutes are accounted for after landing", "Confirm all parachutes and packing equipment have been returned or report any exception.", "closeout", false},
 	},
 	"boat_crew": {
 		{"boat_ready", "Boat, crew and recovery equipment are ready", "Vessel, fuel, safety equipment, communications and recovery equipment are checked.", "readiness", false}, {"recovery_plan", "Water recovery plan is understood", "Priorities, hazards, shore handover and emergency route are confirmed.", "readiness", false}, {"boat_position", "Boat is in position in the water", "Confirm position and give ready signal to Ground Crew.", "readiness", false}, {"water_monitored", "Water area is monitored during exits and landings", "Maintain safe position and monitor for water landings or distress.", "execution", false}, {"water_clear", "Water-area status is clear", "Confirm recovery/handover status and report it.", "closeout", false},

@@ -5,12 +5,13 @@ import { canManageEvents } from './access';
 
 type StaffRouteGuardProps = {
   children: ReactElement;
+  allowedRoles?: string[];
 };
 
-const StaffRouteGuard = ({ children }: StaffRouteGuardProps) => {
+const StaffRouteGuard = ({ children, allowedRoles = [] }: StaffRouteGuardProps) => {
   const { user } = useAuth();
 
-  if (canManageEvents(user)) {
+  if (canManageEvents(user) || user?.roles.some((role) => allowedRoles.includes(role))) {
     return children;
   }
 

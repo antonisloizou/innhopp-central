@@ -44,6 +44,8 @@ type CommunicationsPageProps = {
 type CommunicationsNavigationState = {
   includedRegistrationIds?: number[];
   excludedRegistrationIds?: number[];
+  selectedEventIds?: number[];
+  includedParticipantIds?: number[];
 };
 
 type BodyLinkEditorState = {
@@ -991,9 +993,13 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
   const [selectedTemplateEditorId, setSelectedTemplateEditorId] = useState(createTemplateEditorOption);
   const [selectedPreviewRecipientKey, setSelectedPreviewRecipientKey] = useState<string | null>(null);
   const [manualAddRegistrationId, setManualAddRegistrationId] = useState('');
-  const [selectedEventIds, setSelectedEventIds] = useState<number[]>(() =>
-    fixedEventId ? [fixedEventId] : []
-  );
+  const [selectedEventIds, setSelectedEventIds] = useState<number[]>(() => {
+    if (fixedEventId) return [fixedEventId];
+    const navigationState = location.state as CommunicationsNavigationState | null;
+    return Array.isArray(navigationState?.selectedEventIds)
+      ? navigationState.selectedEventIds.filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+  });
   const [filter, setFilter] = useState<AudienceFilter>(() => {
     const navigationState = location.state as CommunicationsNavigationState | null;
     const includedRegistrationIds = Array.isArray(navigationState?.includedRegistrationIds)
@@ -1002,10 +1008,14 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
     const excludedRegistrationIds = Array.isArray(navigationState?.excludedRegistrationIds)
       ? navigationState.excludedRegistrationIds.filter((id) => Number.isFinite(id) && id > 0)
       : [];
+    const includedParticipantIds = Array.isArray(navigationState?.includedParticipantIds)
+      ? navigationState.includedParticipantIds.filter((id) => Number.isFinite(id) && id > 0)
+      : [];
     return {
       ...(defaultAudienceRoles.length > 0 ? { roles: defaultAudienceRoles } : {}),
       ...(includedRegistrationIds.length ? { included_registration_ids: includedRegistrationIds } : {}),
-      ...(excludedRegistrationIds.length ? { excluded_registration_ids: excludedRegistrationIds } : {})
+      ...(excludedRegistrationIds.length ? { excluded_registration_ids: excludedRegistrationIds } : {}),
+      ...(includedParticipantIds.length ? { included_participant_ids: includedParticipantIds } : {})
     };
   });
   const [templateForm, setTemplateForm] = useState<TemplateForm>(initialTemplateForm);
@@ -1829,16 +1839,25 @@ const insertIntoActiveTemplateField = (snippet: string) => {
     try {
       const recipients = (audiencePreview?.recipients || []) as AudienceRecipientWithEvent[];
       const registrationIDsByEvent = new Map<number, number[]>();
+      const participantIDsByEvent = new Map<number, number[]>();
       recipients.forEach((recipient) => {
-        if (!recipient.event_id || !Number.isFinite(recipient.registration_id) || recipient.registration_id <= 0) {
+        if (!recipient.event_id) {
           return;
         }
-        const existing = registrationIDsByEvent.get(recipient.event_id) || [];
-        existing.push(recipient.registration_id);
-        registrationIDsByEvent.set(recipient.event_id, existing);
+        if (Number.isFinite(recipient.registration_id) && recipient.registration_id > 0) {
+          const existing = registrationIDsByEvent.get(recipient.event_id) || [];
+          existing.push(recipient.registration_id);
+          registrationIDsByEvent.set(recipient.event_id, existing);
+        } else if (Number.isFinite(recipient.participant_id) && recipient.participant_id > 0) {
+          const existing = participantIDsByEvent.get(recipient.event_id) || [];
+          existing.push(recipient.participant_id);
+          participantIDsByEvent.set(recipient.event_id, existing);
+        }
       });
 
-      const sendEventIds = effectiveEventIds.filter((eventId) => (registrationIDsByEvent.get(eventId)?.length || 0) > 0);
+      const sendEventIds = effectiveEventIds.filter((eventId) =>
+        (registrationIDsByEvent.get(eventId)?.length || 0) > 0 || (participantIDsByEvent.get(eventId)?.length || 0) > 0
+      );
       if (sendEventIds.length === 0) {
         setError('Campaign audience is empty.');
         return;
@@ -1852,6 +1871,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
             mode: 'manual',
             filter,
             registration_ids: registrationIDsByEvent.get(eventId),
+            participant_ids: participantIDsByEvent.get(eventId),
             send_copy_to_self: sendCopyToSelf
           })
         )

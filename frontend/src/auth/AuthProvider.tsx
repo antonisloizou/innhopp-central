@@ -60,6 +60,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     void loadSession();
   }, []);
 
+  // Roles can be changed by an administrator while this tab is open. Refresh
+  // promptly when the user returns to the tab, and periodically while it is
+  // active so navigation and role-gated UI follow the server's current view.
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const refreshSilently = () => {
+      void refreshSession().catch(() => undefined);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshSilently();
+      }
+    };
+
+    window.addEventListener('focus', refreshSilently);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const interval = window.setInterval(refreshSilently, 30_000);
+
+    return () => {
+      window.removeEventListener('focus', refreshSilently);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [refreshSession, user?.account_id]);
+
   const startLogin = useCallback(async (redirectTo?: string) => {
     const redirectParam = typeof redirectTo === 'string' && redirectTo.trim()
       ? `?redirect_to=${encodeURIComponent(redirectTo.trim())}`

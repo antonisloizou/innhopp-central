@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/innhopp/central/backend/httpx"
 )
 
@@ -130,6 +132,59 @@ func (m *SessionManager) Middleware(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// RoleRefreshMiddleware replaces the role snapshot in a valid session with
+// the account's current assignments. Sessions can remain long-lived without
+// delaying role grants or revocations until the next login.
+func RoleRefreshMiddleware(db *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := FromContext(r.Context())
+			if claims == nil || claims.AccountID <= 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			roles, err := loadCurrentRoles(r.Context(), db, claims.AccountID)
+			if err != nil {
+				// Keep a valid session usable during a transient database failure.
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			refreshed := *claims
+			refreshed.Roles = roles
+			ctx := context.WithValue(r.Context(), claimsKey, &refreshed)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func loadCurrentRoles(ctx context.Context, db *pgxpool.Pool, accountID int64) ([]string, error) {
+	rows, err := db.Query(ctx, `
+		SELECT role_name
+		FROM account_roles
+		WHERE account_id = $1
+		ORDER BY role_name ASC
+	`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	roles := make([]string, 0)
+	for rows.Next() {
+		var role string
+		if err := rows.Scan(&role); err != nil {
+			return nil, err
+		}
+		roles = append(roles, role)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return roles, nil
 }
 
 func (m *SessionManager) extractToken(r *http.Request) string {

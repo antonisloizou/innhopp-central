@@ -9,6 +9,7 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 		"jump_leader": {8, 0, 2},
 		"jump_master": {5, 1, 2},
 		"ground_crew": {8, 1, 3},
+		"packer":      {2, 0, 1},
 		"boat_crew":   {3, 1, 1},
 	}
 
@@ -74,19 +75,19 @@ func TestSeedTemplatesCoverEveryProposedChecklistItem(t *testing.T) {
 }
 
 func TestRolesForRescueBoat(t *testing.T) {
-	if got := rolesFor(false); len(got) != 3 {
-		t.Fatalf("rolesFor(false) = %v, want three mandatory roles", got)
+	if got := rolesFor(false); len(got) != 4 || got[3] != "packer" {
+		t.Fatalf("rolesFor(false) = %v, want packer included", got)
 	}
-	if got := rolesFor(true); len(got) != 4 || got[3] != "boat_crew" {
+	if got := rolesFor(true); len(got) != 5 || got[3] != "packer" || got[4] != "boat_crew" {
 		t.Fatalf("rolesFor(true) = %v, want boat crew included", got)
 	}
 }
 
 func TestOperationalTeamDetailReflectsRescueBoatRequirement(t *testing.T) {
-	if got, want := operationalTeamDetail(false), "Jump Master and Ground Crew are confirmed."; got != want {
+	if got, want := operationalTeamDetail(false), "Jump Master, Ground Crew and Packer are confirmed."; got != want {
 		t.Fatalf("operationalTeamDetail(false) = %q, want %q", got, want)
 	}
-	if got, want := operationalTeamDetail(true), "Jump Master, Ground Crew and Boat Crew are confirmed."; got != want {
+	if got, want := operationalTeamDetail(true), "Jump Master, Ground Crew, Packer and Boat Crew are confirmed."; got != want {
 		t.Fatalf("operationalTeamDetail(true) = %q, want %q", got, want)
 	}
 }

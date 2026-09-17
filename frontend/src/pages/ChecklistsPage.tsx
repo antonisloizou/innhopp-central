@@ -5,6 +5,7 @@ import { canUseStaffMapsActions, isParticipantOnlySession } from '../auth/access
 import { ChecklistStatusTag } from '../components/ChecklistStatusTag';
 import EventGearMenu from '../components/EventGearMenu';
 import RosterCheckInOverlay from '../components/RosterCheckInOverlay';
+import GroundCrewKitOverlay from '../components/GroundCrewKitOverlay';
 import ScheduleEntryPreviewOverlay from '../components/ScheduleEntryPreviewOverlay';
 import { ScheduleEntry } from '../components/schedulePreviewTypes';
 import { Event, getEvent, getInnhopp, listEvents } from '../api/events';
@@ -14,6 +15,7 @@ import { isInnhoppReady } from '../utils/innhoppReadiness';
 import { parseEventLocal } from '../utils/eventDate';
 import { useResourceStream } from '../hooks/useResourceStream';
 import { RosterCheckIn, createRosterCheckIn } from '../api/rosterCheckIns';
+import { GroundCrewKit, getGroundCrewKit } from '../api/groundCrewKit';
 import {
   ChecklistHistoryEvent,
   ChecklistInnhopp,
@@ -35,6 +37,7 @@ const roleLabels: Record<ChecklistRole, string> = {
   jump_leader: 'Jump Leader',
   jump_master: 'Jump Master',
   ground_crew: 'Ground Crew',
+  packer: 'Packer',
   boat_crew: 'Boat Crew'
 };
 
@@ -44,10 +47,10 @@ const phaseLabels: Record<ChecklistPhase, string> = {
   closeout: 'After landing'
 };
 
-const checklistRoles: ChecklistRole[] = ['jump_leader', 'jump_master', 'ground_crew', 'boat_crew'];
+const checklistRoles: ChecklistRole[] = ['jump_leader', 'jump_master', 'ground_crew', 'packer', 'boat_crew'];
 
 const isChecklistRole = (value: string | null): value is ChecklistRole =>
-  value === 'jump_leader' || value === 'jump_master' || value === 'ground_crew' || value === 'boat_crew';
+  value === 'jump_leader' || value === 'jump_master' || value === 'ground_crew' || value === 'packer' || value === 'boat_crew';
 
 const formatDate = (value: string) => {
   const date = new Date(value);
@@ -55,7 +58,7 @@ const formatDate = (value: string) => {
 };
 
 const historyActionPrefix = (action: ChecklistHistoryEvent['action']) =>
-  action === 'completed' ? '' : action === 'overridden' ? 'Override created: ' : action === 'reset' ? '' : 'Reversed: ';
+  action === 'completed' || action === 'kit_checked' ? '' : action === 'kit_unchecked' ? 'Removed from kit: ' : action === 'overridden' ? 'Override created: ' : action === 'reset' ? '' : 'Reversed: ';
 
 const isPastEvent = (event: Event) => {
   if (event.status === 'past') return true;
@@ -86,6 +89,8 @@ export default function ChecklistsPage() {
   const [previewEntry, setPreviewEntry] = useState<ScheduleEntry | null>(null);
   const [rosterCheckIn, setRosterCheckIn] = useState<RosterCheckIn | null>(null);
   const [openingRoster, setOpeningRoster] = useState(false);
+  const [openingGroundKit, setOpeningGroundKit] = useState(false);
+  const [groundCrewKit, setGroundCrewKit] = useState<GroundCrewKit | null>(null);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [resetReason, setResetReason] = useState('');
   const [reverseItem, setReverseItem] = useState<{ id: number; label: string } | null>(null);
@@ -254,6 +259,14 @@ export default function ChecklistsPage() {
     }
   };
 
+  const openGroundCrewKit = async () => {
+    if (!selectedInnhoppId) return;
+    setOpeningGroundKit(true); setError('');
+    try { setGroundCrewKit(await getGroundCrewKit(selectedInnhoppId)); }
+    catch (openError) { setError((openError as Error).message); }
+    finally { setOpeningGroundKit(false); }
+  };
+
   const activePhases: ChecklistPhase[] = checklist?.operational_status === 'proceeding'
     ? ['readiness', 'execution', 'closeout']
     : ['readiness'];
@@ -315,7 +328,7 @@ export default function ChecklistsPage() {
       <div className="checklist-role-summary">{roleChecklists.map((entry) => <button key={entry.role} className={`badge checklist-role-badge ${missingItems(entry).length ? 'danger' : 'success'}`} onClick={() => { setRole(entry.role); setSearchParams({ innhopp: String(selectedInnhoppId), role: entry.role }); }}>{roleLabels[entry.role]}: {missingItems(entry).length} missing</button>)}</div>
       {phaseOrder.map((phase) => {
         const items = checklist.items.filter((item) => item.phase === phase).sort((a, b) => Number(a.completed) - Number(b.completed));
-        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className={`checklist-mark${pendingItemId === item.id ? ' checklist-mark--pending' : ''}`}>{item.completed ? '✓' : pendingItemId === item.id ? <span className="checklist-spinner" aria-label="Saving" /> : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
+        return items.length ? <section className="checklist-phase" key={phase}><h2>{phaseLabels[phase]}</h2>{items.map((item) => <article id={`checklist-item-${item.id}`} key={item.id} className={`card checklist-item ${item.completed ? 'completed' : 'actionable'}${highlightedItemId === item.id ? ' checklist-item--highlighted' : ''}`} onClick={() => !item.completed && void perform(item.id, () => completeChecklistItem(selectedInnhoppId, item.id, role))}><span className={`checklist-mark${pendingItemId === item.id ? ' checklist-mark--pending' : ''}`}>{item.completed ? '✓' : pendingItemId === item.id ? <span className="checklist-spinner" aria-label="Saving" /> : '○'}</span><div className="checklist-copy"><strong>{item.label}</strong>{item.detail && <p>{item.detail}</p>}{item.completed && <small>Checked by {item.checked_by}</small>}</div>{item.item_key === 'record_accuracy_score' && <button type="button" className="ghost checklist-roster-action" disabled={openingRoster} onClick={(event) => { event.stopPropagation(); void openRoster(); }}>{openingRoster ? 'Opening…' : 'Open Roster'}</button>}{item.item_key === 'kit_complete' && <button type="button" className="ghost checklist-roster-action" disabled={openingGroundKit} onClick={(event) => { event.stopPropagation(); void openGroundCrewKit(); }}>{openingGroundKit ? 'Opening…' : 'Ground Crew Inventory'}</button>}{item.completed && canReverse && <button className="ghost checklist-reverse" onClick={(event) => { event.stopPropagation(); setReverseItem({ id: item.id, label: item.label }); setReverseReason(''); }}>Reverse</button>}</article>)}</section> : null;
       })}
       {canReverse && history.length > 0 && <section className="checklist-phase checklist-history"><h2>History</h2>{history.map((entry) => <p key={entry.id}><time dateTime={entry.created_at}>{formatDate(entry.created_at)}</time> — {historyActionPrefix(entry.action)}{entry.item_label} — {entry.actor}{entry.reason ? ` (${entry.reason})` : ''}</p>)}</section>}
     </>}
@@ -378,5 +391,6 @@ export default function ChecklistsPage() {
       onClose={() => setRosterCheckIn(null)}
       onUpdated={(updated) => setRosterCheckIn(updated)}
     />}
+    {groundCrewKit && <GroundCrewKitOverlay innhoppId={selectedInnhoppId} title={checklist?.innhopp_name || `Innhopp #${selectedInnhoppId}`} sequence={checklist?.innhopp_sequence || 0} scheduledAt={checklist?.scheduled_at} kit={groundCrewKit} onClose={() => setGroundCrewKit(null)} onUpdated={setGroundCrewKit} />}
   </section>;
 }
