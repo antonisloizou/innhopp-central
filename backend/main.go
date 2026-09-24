@@ -331,7 +331,6 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
     instagram TEXT,
     citizenship TEXT,
     date_of_birth TEXT,
-    jumper BOOLEAN NOT NULL DEFAULT FALSE,
     years_in_sport INTEGER,
     jump_count INTEGER,
     recent_jump_count INTEGER,
@@ -362,7 +361,20 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS instagram TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS citizenship TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS date_of_birth TEXT`,
-		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS jumper BOOLEAN NOT NULL DEFAULT FALSE`,
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'participant_profiles' AND column_name = 'jumper'
+			) THEN
+				UPDATE participant_profiles
+				SET roles = array_append(COALESCE(roles, ARRAY['Participant']::TEXT[]), 'Skydiver')
+				WHERE (jumper OR upper(btrim(COALESCE(license, ''))) IN ('A', 'B', 'C', 'D'))
+					AND NOT ('Skydiver' = ANY(COALESCE(roles, ARRAY[]::TEXT[])));
+				ALTER TABLE participant_profiles DROP COLUMN jumper;
+			END IF;
+		END $$`,
+		`ALTER TABLE participant_profiles DROP COLUMN IF EXISTS experience_level`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS years_in_sport INTEGER`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS jump_count INTEGER`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS recent_jump_count INTEGER`,

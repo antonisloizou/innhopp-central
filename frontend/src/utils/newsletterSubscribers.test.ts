@@ -6,7 +6,6 @@ const newsletterProfile: ParticipantProfile = {
   id: 1,
   full_name: 'subscriber@example.com',
   email: 'subscriber@example.com',
-  jumper: false,
   roles: ['Participant'],
   ratings: [],
   disciplines: [],

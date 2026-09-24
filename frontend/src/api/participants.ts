@@ -13,7 +13,6 @@ export interface ParticipantProfile {
   instagram?: string;
   citizenship?: string;
   date_of_birth?: string;
-  jumper: boolean;
   years_in_sport?: number;
   jump_count?: number;
   recent_jump_count?: number;
@@ -54,7 +53,6 @@ export interface CreateParticipantPayload {
   instagram?: string;
   citizenship?: string;
   date_of_birth?: string;
-  jumper?: boolean;
   years_in_sport?: number;
   jump_count?: number;
   recent_jump_count?: number;

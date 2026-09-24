@@ -22,7 +22,6 @@ export const isNewsletterSubscriberOnly = (profile: ParticipantProfile, eventCou
     profile.medical_conditions
   ].some((value) => Boolean(value?.trim()));
   const hasAdditionalValues =
-    profile.jumper ||
     typeof profile.years_in_sport === 'number' ||
     typeof profile.jump_count === 'number' ||
     typeof profile.recent_jump_count === 'number' ||

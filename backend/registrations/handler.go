@@ -250,7 +250,6 @@ type publicRegistrationPayload struct {
 	Instagram        string `json:"instagram"`
 	Citizenship      string `json:"citizenship"`
 	DateOfBirth      string `json:"date_of_birth"`
-	Jumper           bool   `json:"jumper"`
 	YearsInSport     *int   `json:"years_in_sport"`
 	JumpCount        *int   `json:"jump_count"`
 	RecentJumpCount  *int   `json:"recent_jump_count"`
@@ -1236,6 +1235,15 @@ func normalizeOptionalPublicString(value string) string {
 	return strings.TrimSpace(value)
 }
 
+func isPublicSkydivingLicense(license string) bool {
+	switch strings.ToUpper(strings.TrimSpace(license)) {
+	case "A", "B", "C", "D":
+		return true
+	default:
+		return false
+	}
+}
+
 func normalizeOptionalPublicInt(value *int) *int {
 	if value == nil {
 		return nil
@@ -1379,6 +1387,11 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 	payload.JumpCount = normalizeOptionalPublicInt(payload.JumpCount)
 	payload.RecentJumpCount = normalizeOptionalPublicInt(payload.RecentJumpCount)
 
+	roles := []string{"Participant"}
+	if isPublicSkydivingLicense(payload.License) {
+		roles = append(roles, "Skydiver")
+	}
+
 	err = tx.QueryRow(ctx, `
 		INSERT INTO participant_profiles (
 			full_name,
@@ -1391,7 +1404,6 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 			instagram,
 			citizenship,
 			date_of_birth,
-			jumper,
 			years_in_sport,
 			jump_count,
 			recent_jump_count,
@@ -1414,10 +1426,10 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 			$12,
 			$13,
 			$14,
-			ARRAY['Participant']::TEXT[]
+			$15
 		)
 		RETURNING id
-	`, fullName, email, payload.Phone, payload.Notes, payload.EmergencyContact, payload.Whatsapp, payload.Instagram, payload.Citizenship, payload.DateOfBirth, payload.Jumper, payload.YearsInSport, payload.JumpCount, payload.RecentJumpCount, payload.License).Scan(&participantID)
+	`, fullName, email, payload.Phone, payload.Notes, payload.EmergencyContact, payload.Whatsapp, payload.Instagram, payload.Citizenship, payload.DateOfBirth, payload.YearsInSport, payload.JumpCount, payload.RecentJumpCount, payload.License, roles).Scan(&participantID)
 	if err != nil {
 		return 0, err
 	}
@@ -1466,7 +1478,6 @@ func ensureOwnParticipantProfileTx(ctx context.Context, tx pgx.Tx, claims *auth.
 			full_name,
 			email,
 			account_id,
-			jumper,
 			roles,
 			account_roles
 		)
@@ -1474,7 +1485,6 @@ func ensureOwnParticipantProfileTx(ctx context.Context, tx pgx.Tx, claims *auth.
 			$1,
 			$2,
 			$3,
-			TRUE,
 			ARRAY['Participant']::TEXT[],
 			$4
 		)

@@ -6,7 +6,6 @@ const participant = (id: number, roles: string[]): ParticipantProfile => ({
   id,
   full_name: `Participant ${id}`,
   email: `p${id}@example.com`,
-  jumper: true,
   roles,
   ratings: [],
   disciplines: [],

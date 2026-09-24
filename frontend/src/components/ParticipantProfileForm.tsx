@@ -258,7 +258,6 @@ export const createParticipantFormState = (
     instagram: profile?.instagram ?? seed?.instagram ?? '',
     citizenship: profile?.citizenship ?? seed?.citizenship ?? '',
     date_of_birth: profile?.date_of_birth ?? seed?.date_of_birth ?? '',
-    jumper: hasSkydiverRole(roles) ? true : (profile?.jumper ?? seed?.jumper ?? false),
     years_in_sport: profile?.years_in_sport ?? seed?.years_in_sport,
     jump_count: profile?.jump_count ?? seed?.jump_count,
     recent_jump_count: profile?.recent_jump_count ?? seed?.recent_jump_count,
@@ -296,13 +295,12 @@ export const toParticipantPayload = (form: CreateParticipantPayload): CreatePart
   instagram: form.instagram?.trim() || undefined,
   citizenship: form.citizenship?.trim() || undefined,
   date_of_birth: form.date_of_birth?.trim() || undefined,
-  jumper: !!form.jumper,
   years_in_sport: form.years_in_sport,
   jump_count: form.jump_count,
   recent_jump_count: form.recent_jump_count,
   main_canopy: form.main_canopy?.trim() || undefined,
   wingload: form.wingload?.trim() || undefined,
-  license: form.license?.trim() === 'Non jumper' ? undefined : form.license?.trim() || undefined,
+  license: form.license?.trim() || undefined,
   uses_packer: form.uses_packer?.trim() || undefined,
   roles: normalizeList(form.roles).length ? normalizeList(form.roles) : ['Participant'],
   ratings: normalizeList(form.ratings),
@@ -343,15 +341,14 @@ const ParticipantProfileForm = ({
   const updateField = <K extends keyof CreateParticipantPayload>(key: K, value: CreateParticipantPayload[K]) => {
     onChange({ ...form, [key]: value });
   };
-  const isNonJumper = form.license === 'Non jumper' || !form.jumper;
+  const isNonJumper = !hasSkydiverRole(form.roles);
 
   const updateLicense = (value: string) => {
-    const nextJumper = value !== 'Non jumper';
-    onChange({
-      ...form,
-      license: value,
-      jumper: nextJumper,
-      roles: syncSkydiverRole(form.roles, nextJumper)
+	const isSkydiver = value !== 'Non jumper';
+	    onChange({
+	      ...form,
+	      license: value,
+	      roles: syncSkydiverRole(form.roles, isSkydiver)
     });
   };
   const toggleCard = (key: string) => {
@@ -497,8 +494,7 @@ const ParticipantProfileForm = ({
                           const nextRoles = toggleValue(form.roles, role, event.target.checked);
                           onChange({
                             ...form,
-                            roles: nextRoles,
-                            jumper: role === 'Skydiver' ? event.target.checked : form.jumper
+	                            roles: nextRoles
                           });
                         }}
                       />

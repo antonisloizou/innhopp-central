@@ -169,7 +169,7 @@ const InteractiveDonutWithLegend = ({
 
 const activeStatuses = new Set<RegistrationStatus>(['deposit_pending', 'deposit_paid', 'main_invoice_pending', 'completed']);
 
-const isSkydiver = (profile?: ParticipantProfile) => Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+const isSkydiver = (profile?: ParticipantProfile) => Boolean(profile?.roles.includes('Skydiver'));
 
 const isStaff = (profile?: ParticipantProfile) => {
   const hasRole = (roles: string[] | undefined, role: string) =>
@@ -335,7 +335,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
 
   const participantTypeCounts = useMemo(() => {
     const activeRows = rows.filter((row) => activeStatuses.has(row.registration.status));
-    const skydivers = activeRows.filter((row) => row.profile?.jumper || row.profile?.roles.includes('Skydiver')).length;
+    const skydivers = activeRows.filter((row) => row.profile?.roles.includes('Skydiver')).length;
     return [
       { label: 'Skydivers', count: skydivers },
       { label: 'Non-jumpers', count: activeRows.length - skydivers }
@@ -423,7 +423,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     ];
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       const wingload = Number.parseFloat(profile?.wingload?.replace(',', '.') || '');
       if (!isSkydiver) return;
       if (!Number.isFinite(wingload)) {
@@ -442,7 +442,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
       const license = profile?.license?.trim().toUpperCase();
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       if (!isSkydiver) {
         counts.set('Non-jumper', (counts.get('Non-jumper') || 0) + 1);
         return;
@@ -457,7 +457,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     const counts = new Map<string, number>([...disciplineOptions, 'N/A'].map((discipline) => [discipline, 0]));
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       if (!isSkydiver) return;
       const disciplines = (profile?.disciplines || []).map((discipline) => discipline.trim()).filter(Boolean);
       if (disciplines.length === 0) counts.set('N/A', (counts.get('N/A') || 0) + 1);
@@ -477,7 +477,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     const counts = new Map<string, number>(ratingOptions.map((rating) => [rating, 0]));
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       if (!isSkydiver) return;
       profile?.ratings.forEach((rating) => {
         const label = rating.trim();
@@ -491,7 +491,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     const counts = new Map([...usesPackerOptions, 'N/A'].map((label) => [label, 0]));
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       if (!isSkydiver) return;
       const packerPreference = profile?.uses_packer?.trim();
       const label = packerPreference && usesPackerOptions.includes(packerPreference as typeof usesPackerOptions[number]) ? packerPreference : 'N/A';
@@ -504,7 +504,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
     const counts = new Map([...canopyCourseOptions, 'N/A'].map((label) => [label, 0]));
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
       const profile = row.profile;
-      const isSkydiver = Boolean(profile?.jumper || profile?.roles.includes('Skydiver'));
+      const isSkydiver = Boolean(profile?.roles.includes('Skydiver'));
       if (!isSkydiver) return;
       const course = profile?.canopy_course?.trim();
       const label = course && canopyCourseOptions.includes(course as typeof canopyCourseOptions[number]) ? course : 'N/A';

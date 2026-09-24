@@ -9,7 +9,6 @@ const completeProfile: ParticipantProfile = {
   emergency_contact_name: 'Grace Hopper',
   emergency_contact_phone: '+49 123 456',
   whatsapp: '+49 987 654',
-  jumper: true,
   years_in_sport: 4,
   jump_count: 300,
   recent_jump_count: 25,

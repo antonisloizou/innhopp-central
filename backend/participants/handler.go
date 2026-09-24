@@ -55,7 +55,6 @@ type Profile struct {
 	Instagram             string    `json:"instagram,omitempty"`
 	Citizenship           string    `json:"citizenship,omitempty"`
 	DateOfBirth           string    `json:"date_of_birth,omitempty"`
-	Jumper                bool      `json:"jumper"`
 	YearsInSport          *int      `json:"years_in_sport,omitempty"`
 	JumpCount             *int      `json:"jump_count,omitempty"`
 	RecentJumpCount       *int      `json:"recent_jump_count,omitempty"`
@@ -93,7 +92,6 @@ type profilePayload struct {
 	Instagram             string   `json:"instagram"`
 	Citizenship           string   `json:"citizenship"`
 	DateOfBirth           string   `json:"date_of_birth"`
-	Jumper                bool     `json:"jumper"`
 	YearsInSport          *int     `json:"years_in_sport"`
 	JumpCount             *int     `json:"jump_count"`
 	RecentJumpCount       *int     `json:"recent_jump_count"`
@@ -131,7 +129,6 @@ const profileSelectColumns = `
 	COALESCE(instagram, ''),
 	COALESCE(citizenship, ''),
 	COALESCE(date_of_birth, ''),
-	jumper,
 	years_in_sport,
 	jump_count,
 	recent_jump_count,
@@ -217,6 +214,26 @@ func syncParticipantRolesWithAccountRoles(roles []string, accountRoles []string)
 			current["Staff"] = struct{}{}
 			break
 		}
+	}
+	out := make([]string, 0, len(current))
+	for role := range current {
+		out = append(out, role)
+	}
+	return normalizeRoles(out)
+}
+
+// syncSkydiverRoleWithLicense keeps the roster role aligned with an explicit
+// licence selection. Empty licences leave an existing role unchanged.
+func syncSkydiverRoleWithLicense(roles []string, license string) []string {
+	current := make(map[string]struct{})
+	for _, role := range normalizeRoles(roles) {
+		current[role] = struct{}{}
+	}
+	switch strings.ToUpper(strings.TrimSpace(license)) {
+	case "A", "B", "C", "D":
+		current["Skydiver"] = struct{}{}
+	case "NON JUMPER", "NON-JUMPER", "NONJUMPER":
+		delete(current, "Skydiver")
 	}
 	out := make([]string, 0, len(current))
 	for role := range current {
@@ -388,7 +405,6 @@ func scanProfile(scanner interface{ Scan(dest ...any) error }) (*Profile, error)
 		&profile.Instagram,
 		&profile.Citizenship,
 		&profile.DateOfBirth,
-		&profile.Jumper,
 		&profile.YearsInSport,
 		&profile.JumpCount,
 		&profile.RecentJumpCount,
@@ -542,7 +558,8 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	payload.HSSQualities = normalizeHSSQualities(payload.HSSQualities)
 	payload.AccountRoles = normalizeAccountRoles(payload.AccountRoles)
 
-	return fullName, email, syncParticipantRolesWithAccountRoles(payload.Roles, payload.AccountRoles)
+	roles := syncParticipantRolesWithAccountRoles(payload.Roles, payload.AccountRoles)
+	return fullName, email, syncSkydiverRoleWithLicense(roles, payload.License)
 }
 
 func (h *Handler) loadProfileByID(ctx context.Context, profileID int64) (*Profile, error) {
@@ -614,7 +631,6 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 			instagram,
 			citizenship,
 			date_of_birth,
-			jumper,
 			years_in_sport,
 			jump_count,
 			recent_jump_count,
@@ -687,7 +703,6 @@ func (h *Handler) createProfile(w http.ResponseWriter, r *http.Request) {
 		payload.Instagram,
 		payload.Citizenship,
 		payload.DateOfBirth,
-		payload.Jumper,
 		payload.YearsInSport,
 		payload.JumpCount,
 		payload.RecentJumpCount,
@@ -807,7 +822,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullName, email, _ := sanitizePayload(&payload, claims.FullName, claims.Email)
+	fullName, email, requestedRoles := sanitizePayload(&payload, claims.FullName, claims.Email)
 	if email == "" {
 		httpx.Error(w, http.StatusBadRequest, "email is required")
 		return
@@ -836,7 +851,8 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		accountRoles = normalizeAccountRoles(claims.Roles)
 	}
 
-	roles = allowSelfRoleRemoval(existingRoles, payload.Roles)
+	roles = allowSelfRoleRemoval(existingRoles, requestedRoles)
+	roles = syncSkydiverRoleWithLicense(roles, payload.License)
 	accountRoles = allowSelfAccountRoleRemoval(accountRoles, payload.AccountRoles)
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -852,7 +868,6 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 				instagram,
 				citizenship,
 				date_of_birth,
-				jumper,
 				years_in_sport,
 				jump_count,
 				recent_jump_count,
@@ -880,7 +895,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			)
 			VALUES (
 				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-				$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35
+			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
 			)
 			RETURNING `+profileSelectColumns,
 			fullName,
@@ -893,7 +908,6 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			payload.Instagram,
 			payload.Citizenship,
 			payload.DateOfBirth,
-			payload.Jumper,
 			payload.YearsInSport,
 			payload.JumpCount,
 			payload.RecentJumpCount,
@@ -954,7 +968,7 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		SET
 			full_name = $1,
 			email = $2,
-			account_id = COALESCE($36, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
+			account_id = COALESCE($35, account_id, (SELECT id FROM accounts WHERE lower(email) = lower($2) ORDER BY id ASC LIMIT 1)),
 			phone = $3,
 			notes = $4,
 			emergency_contact = $5,
@@ -962,32 +976,31 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 			instagram = $7,
 			citizenship = $8,
 			date_of_birth = $9,
-			jumper = $10,
-			years_in_sport = $11,
-			jump_count = $12,
-			recent_jump_count = $13,
-			main_canopy = $14,
-			wingload = $15,
-			license = $16,
-			roles = $17,
-			ratings = $18,
-			disciplines = $19,
-			other_air_sports = $20,
-			canopy_course = $21,
-			landing_area_preference = $22,
-			tshirt_size = $23,
-			tshirt_gender = $24,
-			account_roles = $25,
-			dietary_restrictions = $26,
-			medical_conditions = $27,
-			medical_expertise = $28,
-			hss_qualities = $29,
-			emergency_contact_name = $30,
-			emergency_contact_phone = $31,
-			accommodation = $32,
-			accommodation_roommate = $33,
-			uses_packer = $34
-		WHERE id = $35
+			years_in_sport = $10,
+			jump_count = $11,
+			recent_jump_count = $12,
+			main_canopy = $13,
+			wingload = $14,
+			license = $15,
+			roles = $16,
+			ratings = $17,
+			disciplines = $18,
+			other_air_sports = $19,
+			canopy_course = $20,
+			landing_area_preference = $21,
+			tshirt_size = $22,
+			tshirt_gender = $23,
+			account_roles = $24,
+			dietary_restrictions = $25,
+			medical_conditions = $26,
+			medical_expertise = $27,
+			hss_qualities = $28,
+			emergency_contact_name = $29,
+			emergency_contact_phone = $30,
+			accommodation = $31,
+			accommodation_roommate = $32,
+			uses_packer = $33
+		WHERE id = $34
 	`,
 		fullName,
 		email,
@@ -998,7 +1011,6 @@ func (h *Handler) upsertOwnProfile(w http.ResponseWriter, r *http.Request) {
 		payload.Instagram,
 		payload.Citizenship,
 		payload.DateOfBirth,
-		payload.Jumper,
 		payload.YearsInSport,
 		payload.JumpCount,
 		payload.RecentJumpCount,
@@ -1090,32 +1102,31 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 			instagram = $7,
 			citizenship = $8,
 			date_of_birth = $9,
-			jumper = $10,
-			years_in_sport = $11,
-			jump_count = $12,
-			recent_jump_count = $13,
-			main_canopy = $14,
-			wingload = $15,
-			license = $16,
-			roles = $17,
-			ratings = $18,
-			disciplines = $19,
-			other_air_sports = $20,
-			canopy_course = $21,
-			landing_area_preference = $22,
-			tshirt_size = $23,
-			tshirt_gender = $24,
-			account_roles = $25,
-			dietary_restrictions = $26,
-			medical_conditions = $27,
-			medical_expertise = $28,
-			hss_qualities = $29,
-			emergency_contact_name = $30,
-			emergency_contact_phone = $31,
-			accommodation = $32,
-			accommodation_roommate = $33,
-			uses_packer = $34
-		WHERE id = $35
+			years_in_sport = $10,
+			jump_count = $11,
+			recent_jump_count = $12,
+			main_canopy = $13,
+			wingload = $14,
+			license = $15,
+			roles = $16,
+			ratings = $17,
+			disciplines = $18,
+			other_air_sports = $19,
+			canopy_course = $20,
+			landing_area_preference = $21,
+			tshirt_size = $22,
+			tshirt_gender = $23,
+			account_roles = $24,
+			dietary_restrictions = $25,
+			medical_conditions = $26,
+			medical_expertise = $27,
+			hss_qualities = $28,
+			emergency_contact_name = $29,
+			emergency_contact_phone = $30,
+			accommodation = $31,
+			accommodation_roommate = $32,
+			uses_packer = $33
+		WHERE id = $34
 	`,
 		fullName,
 		email,
@@ -1126,7 +1137,6 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		payload.Instagram,
 		payload.Citizenship,
 		payload.DateOfBirth,
-		payload.Jumper,
 		payload.YearsInSport,
 		payload.JumpCount,
 		payload.RecentJumpCount,
