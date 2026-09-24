@@ -9,6 +9,7 @@ import {
   createCampaign,
   createEmailTemplate,
   getAudiencePreview,
+  getEveryoneAudiencePreview,
   listEmailTemplates,
   listEventCampaigns,
   EmailTemplate,
@@ -1063,6 +1064,8 @@ const CommunicationsPage = ({ fixedEventId }: CommunicationsPageProps) => {
     return availableEvents.map((event) => event.id);
   }, [availableEvents, eventScoped, fixedEventId, selectedEventIds]);
 
+  const allParticipantsAudience = !eventScoped && selectedEventIds.length === 0;
+
   const eventMap = useMemo(
     () => new Map(availableEvents.map((event) => [event.id, event])),
     [availableEvents]
@@ -1409,6 +1412,10 @@ const insertIntoActiveTemplateField = (snippet: string) => {
   useEffect(() => {
     let cancelled = false;
     const loadManualAddOptions = async () => {
+      if (allParticipantsAudience) {
+        setManualAddOptions([]);
+        return;
+      }
       if (effectiveEventIds.length === 0) {
         setManualAddOptions([]);
         return;
@@ -1435,11 +1442,38 @@ const insertIntoActiveTemplateField = (snippet: string) => {
     return () => {
       cancelled = true;
     };
-  }, [effectiveEventIds]);
+  }, [allParticipantsAudience, effectiveEventIds]);
 
   useEffect(() => {
     let cancelled = false;
     const loadPreview = async () => {
+      if (allParticipantsAudience) {
+        setPreviewLoading(true);
+        setError(null);
+        try {
+          const preview = await getEveryoneAudiencePreview(filter);
+          if (cancelled) return;
+          const recipients = sortAudienceRecipients(
+            preview.recipients.map((recipient) => ({
+              ...recipient,
+              // Campaigns are event-owned, so record this global send against the first available event.
+              event_id: effectiveEventIds[0]
+            }))
+          );
+          setAudiencePreview({ count: recipients.length, recipients });
+          setSelectedPreviewRecipientKey((prev) => {
+            if (recipients.length === 0) return null;
+            return prev && recipients.some((recipient) => getRecipientKey(recipient) === prev)
+              ? prev
+              : getRecipientKey(recipients[0]);
+          });
+        } catch (err) {
+          if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load audience preview');
+        } finally {
+          if (!cancelled) setPreviewLoading(false);
+        }
+        return;
+      }
       if (effectiveEventIds.length === 0) {
         setAudiencePreview({ count: 0, recipients: [] });
         return;
@@ -1485,7 +1519,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
     return () => {
       cancelled = true;
     };
-  }, [effectiveEventIds, filter]);
+  }, [allParticipantsAudience, effectiveEventIds, filter]);
 
   const handleDelete = async () => {
     if (!fixedEventId) return;
@@ -2366,7 +2400,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                   <CheckboxMultiSelect
                     summary={
                       selectedEventIds.length === 0
-                        ? 'All events'
+                        ? 'Everyone'
                         : selectedEventIds.length === 1
                           ? (availableEvents.find((event) => event.id === selectedEventIds[0])?.name || '1 event selected')
                           : `${selectedEventIds.length} events selected`
@@ -2545,34 +2579,38 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                               </svg>
                               <span>Profile</span>
                             </Link>
-                            <Link
-                              to={`/registrations/${recipient.registration_id}`}
-                              className="comms-audience-action-link"
-                              aria-label={`Open registration for ${recipient.participant_name}`}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm6 1.5V9h4.5M9 13h6M9 17h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                              <span>Registration</span>
-                            </Link>
-                            <button
-                              className="comms-audience-action-link"
-                              type="button"
-                              aria-label={`Remove ${recipient.participant_name} from this audience`}
-                              onClick={() => handleRemoveRecipient(recipient.registration_id)}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path
-                                  d="M6 7h12M9.5 7V5.8c0-.44.36-.8.8-.8h3.4c.44 0 .8.36.8.8V7M8.5 10v7M12 10v7M15.5 10v7M7.5 7l.7 11.1c.03.48.42.85.9.85h5.8c.48 0 .87-.37.9-.85L16.5 7"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                              <span>Remove</span>
-                            </button>
+                            {recipient.registration_id > 0 && (
+                              <>
+                                <Link
+                                  to={`/registrations/${recipient.registration_id}`}
+                                  className="comms-audience-action-link"
+                                  aria-label={`Open registration for ${recipient.participant_name}`}
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm6 1.5V9h4.5M9 13h6M9 17h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                  <span>Registration</span>
+                                </Link>
+                                <button
+                                  className="comms-audience-action-link"
+                                  type="button"
+                                  aria-label={`Remove ${recipient.participant_name} from this audience`}
+                                  onClick={() => handleRemoveRecipient(recipient.registration_id)}
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path
+                                      d="M6 7h12M9.5 7V5.8c0-.44.36-.8.8-.8h3.4c.44 0 .8.36.8.8V7M8.5 10v7M12 10v7M15.5 10v7M7.5 7l.7 11.1c.03.48.42.85.9.85h5.8c.48 0 .87-.37.9-.85L16.5 7"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                  <span>Remove</span>
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                         <td>
@@ -2596,7 +2634,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                 </tbody>
               </table>
             </div>
-            <div className="form-grid comms-filter-grid">
+            {!allParticipantsAudience && <div className="form-grid comms-filter-grid">
               <label className="form-field comms-field-span">
                 <span>Add recipient</span>
                 <div className="comms-add-recipient-row">
@@ -2634,7 +2672,7 @@ const insertIntoActiveTemplateField = (snippet: string) => {
                   </div>
                 </div>
               </label>
-            </div>
+            </div>}
             {!audiencePreview && previewLoading ? <p className="muted">Loading audience…</p> : null}
           </>
         )}

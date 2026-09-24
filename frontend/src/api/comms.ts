@@ -105,6 +105,16 @@ export const updateEmailTemplate = (templateId: number, payload: UpdateTemplateP
   });
 
 export const getAudiencePreview = (eventId: number, filter: AudienceFilter) => {
+	const query = audienceFilterQuery(filter);
+	return apiRequest<AudiencePreviewResponse>(`/comms/events/${eventId}/audience-preview${query ? `?${query}` : ''}`);
+};
+
+export const getEveryoneAudiencePreview = (filter: AudienceFilter) => {
+	const query = audienceFilterQuery(filter);
+	return apiRequest<AudiencePreviewResponse>(`/comms/audience-preview${query ? `?${query}` : ''}`);
+};
+
+const audienceFilterQuery = (filter: AudienceFilter) => {
   const params = new URLSearchParams();
   if (filter.status) params.set('status', filter.status);
   if (filter.deposit_state) params.set('deposit_state', filter.deposit_state);
@@ -119,8 +129,7 @@ export const getAudiencePreview = (eventId: number, filter: AudienceFilter) => {
   (filter.included_participant_ids || []).forEach((id) =>
     params.append('included_participant_id', String(id))
   );
-  const query = params.toString();
-  return apiRequest<AudiencePreviewResponse>(`/comms/events/${eventId}/audience-preview${query ? `?${query}` : ''}`);
+  return params.toString();
 };
 
 export const listEventCampaigns = (eventId: number) =>

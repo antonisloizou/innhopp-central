@@ -40,6 +40,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/templates", h.listTemplates)
 	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Post("/templates", h.createTemplate)
 	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Put("/templates/{templateID}", h.updateTemplate)
+	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/audience-preview", h.everyoneAudiencePreview)
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/events/{eventID}/audience-preview", h.audiencePreview)
 	r.With(enforcer.Authorize(rbac.PermissionViewComms)).Get("/events/{eventID}/campaigns", h.listEventCampaigns)
 	r.With(enforcer.Authorize(rbac.PermissionManageComms)).Post("/campaigns", h.createCampaign)
@@ -487,6 +488,52 @@ func loadAudienceRecipientsByParticipantIDs(ctx context.Context, q interface {
 	return recipients, rows.Err()
 }
 
+// loadEveryoneAudienceRecipients includes every email-enabled participant profile,
+// regardless of whether they have registered for an event.
+func loadEveryoneAudienceRecipients(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, filter AudienceFilter) ([]AudienceRecipient, error) {
+	filter.Roles = normalizeAudienceRoles(filter.Roles)
+	rows, err := q.Query(ctx, `
+		SELECT p.id, COALESCE(p.full_name, ''), COALESCE(p.email, ''), COALESCE(p.roles, ARRAY[]::TEXT[])
+		FROM participant_profiles p
+		WHERE COALESCE(p.email, '') <> ''
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		ORDER BY p.full_name, p.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := make([]AudienceRecipient, 0)
+	for rows.Next() {
+		var recipient AudienceRecipient
+		var participantRoles []string
+		if err := rows.Scan(&recipient.ParticipantID, &recipient.ParticipantName, &recipient.ParticipantEmail, &participantRoles); err != nil {
+			return nil, err
+		}
+		recipient.ParticipantEmail = strings.ToLower(strings.TrimSpace(recipient.ParticipantEmail))
+		recipient.Status = "profile"
+		recipient.DepositState = "none"
+		recipient.MainInvoiceState = "none"
+		if filter.Status != "" && recipient.Status != filter.Status {
+			continue
+		}
+		if filter.DepositState != "" && recipient.DepositState != filter.DepositState {
+			continue
+		}
+		if filter.MainInvoiceState != "" && recipient.MainInvoiceState != filter.MainInvoiceState {
+			continue
+		}
+		if !matchesAudienceRoleFilter(participantRoles, filter.Roles) {
+			continue
+		}
+		recipients = append(recipients, recipient)
+	}
+	return recipients, rows.Err()
+}
+
 func resolveAudienceRecipients(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, eventID int64, filter AudienceFilter) ([]AudienceRecipient, error) {
@@ -885,6 +932,21 @@ func (h *Handler) audiencePreview(w http.ResponseWriter, r *http.Request) {
 		Count:      len(recipients),
 		Recipients: recipients,
 	})
+}
+
+func (h *Handler) everyoneAudiencePreview(w http.ResponseWriter, r *http.Request) {
+	filter := AudienceFilter{
+		Status:           strings.TrimSpace(r.URL.Query().Get("status")),
+		DepositState:     strings.TrimSpace(r.URL.Query().Get("deposit_state")),
+		MainInvoiceState: strings.TrimSpace(r.URL.Query().Get("main_invoice_state")),
+		Roles:            r.URL.Query()["role"],
+	}
+	recipients, err := loadEveryoneAudienceRecipients(r.Context(), h.db, filter)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load audience preview")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, AudiencePreviewResponse{Count: len(recipients), Recipients: recipients})
 }
 
 func (h *Handler) listEventCampaigns(w http.ResponseWriter, r *http.Request) {
