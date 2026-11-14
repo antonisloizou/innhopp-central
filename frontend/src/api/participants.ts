@@ -4,6 +4,7 @@ export interface ParticipantProfile {
   id: number;
   full_name: string;
   email: string;
+  email_aliases?: string[];
   phone?: string;
   notes?: string;
   emergency_contact?: string;
@@ -99,6 +100,12 @@ export const updateParticipantProfile = (id: number, payload: CreateParticipantP
   apiRequest<ParticipantProfile>(`/participants/profiles/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload)
+  });
+
+export const assignParticipantEmailAlias = (id: number, email: string) =>
+  apiRequest<ParticipantProfile>(`/participants/profiles/${id}/email-aliases`, {
+    method: 'POST',
+    body: JSON.stringify({ email })
   });
 
 export const deleteParticipantProfile = (id: number) =>

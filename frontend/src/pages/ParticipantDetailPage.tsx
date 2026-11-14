@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 import {
   CreateParticipantPayload,
   ParticipantProfile,
+  assignParticipantEmailAlias,
   getParticipantProfile,
+  listParticipantProfiles,
   updateParticipantProfile,
   deleteParticipantProfile
 } from '../api/participants';
@@ -28,6 +31,14 @@ const ParticipantDetailPage = () => {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
+  const [showEmailPicker, setShowEmailPicker] = useState(false);
+  const [emailSearch, setEmailSearch] = useState('');
+  const [emailCandidates, setEmailCandidates] = useState<ParticipantProfile[]>([]);
+  const [selectedEmailProfile, setSelectedEmailProfile] = useState<ParticipantProfile | null>(null);
+  const [loadingEmailCandidates, setLoadingEmailCandidates] = useState(false);
+  const [assigningEmail, setAssigningEmail] = useState(false);
+  const [aliasError, setAliasError] = useState<string | null>(null);
+  const [aliasSaved, setAliasSaved] = useState(false);
   const { locked, toggleLocked, editGuardProps, lockNotice, showLockedNoticeAtEvent } = useDetailPageLock();
   const { impersonateParticipant, user } = useAuth();
   const canManageAccountRoles = user?.roles?.includes('admin') ?? false;
@@ -36,6 +47,34 @@ const ParticipantDetailPage = () => {
     (user?.roles?.includes('admin') ?? false) &&
     !user?.impersonator &&
     profile?.email !== user?.email;
+
+  const openEmailPicker = async () => {
+    if (locked) return;
+    setShowEmailPicker(true);
+    setEmailSearch('');
+    setSelectedEmailProfile(null);
+    setAliasError(null);
+    setLoadingEmailCandidates(true);
+    try {
+      const candidates = await listParticipantProfiles();
+      const currentEmail = profile?.email.trim().toLowerCase();
+      setEmailCandidates(
+        candidates.filter(
+          (candidate) =>
+            candidate.id !== profile?.id && candidate.email.trim().toLowerCase() !== currentEmail
+        )
+      );
+    } catch (err) {
+      setAliasError(err instanceof Error ? err.message : 'Failed to load participant emails');
+    } finally {
+      setLoadingEmailCandidates(false);
+    }
+  };
+
+  const filteredEmailCandidates = emailCandidates.filter((candidate) => {
+    const search = emailSearch.trim().toLowerCase();
+    return !search || candidate.full_name.toLowerCase().includes(search) || candidate.email.toLowerCase().includes(search);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +148,19 @@ const ParticipantDetailPage = () => {
           <p className="muted">{profile.email}</p>
         </div>
         <div className="card-actions">
+          <button
+            className="primary"
+            type="button"
+            onClick={(event) => {
+              if (locked) {
+                showLockedNoticeAtEvent(event);
+                return;
+              }
+              void openEmailPicker();
+            }}
+          >
+            Assign other email
+          </button>
           {canImpersonate && (
             <button
               className="primary"
@@ -179,6 +231,8 @@ const ParticipantDetailPage = () => {
         </div>
       </header>
 
+      {aliasSaved && <p className="success-text">Profiles merged. The other email and all participant history now belong here.</p>}
+
       <ParticipantEventsCard
         participantId={profile.id}
         participantName={profile.full_name}
@@ -200,6 +254,95 @@ const ParticipantDetailPage = () => {
         showAdminRoleControl={canManageAccountRoles}
         canEditAdminRole={canManageAccountRoles}
       />
+      {showEmailPicker && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="participant-email-picker-backdrop"
+              role="presentation"
+              onClick={() => !assigningEmail && setShowEmailPicker(false)}
+            >
+              <form
+                className="card participant-email-picker-panel"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="participant-email-picker-title"
+                onClick={(event) => event.stopPropagation()}
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  if (!selectedEmailProfile) return;
+                  try {
+                    setAssigningEmail(true);
+                    setAliasError(null);
+                    setAliasSaved(false);
+                    const updated = await assignParticipantEmailAlias(profile.id, selectedEmailProfile.email);
+                    setProfile(updated);
+                    setAliasSaved(true);
+                    setShowEmailPicker(false);
+                  } catch (err) {
+                    setAliasError(err instanceof Error ? err.message : 'Failed to assign old email');
+                  } finally {
+                    setAssigningEmail(false);
+                  }
+                }}
+              >
+                <div className="participant-email-picker-heading">
+                  <div>
+                    <h3 id="participant-email-picker-title">Assign other email</h3>
+                    <p className="muted">Select a duplicate profile to merge into {profile.email}.</p>
+                  </div>
+                  <button className="ghost" type="button" disabled={assigningEmail} onClick={() => setShowEmailPicker(false)}>
+                    Close
+                  </button>
+                </div>
+                <label className="form-field participant-email-picker-search">
+                  <span>Search by name or email</span>
+                  <input
+                    autoFocus
+                    type="search"
+                    value={emailSearch}
+                    placeholder="Start typing…"
+                    onChange={(event) => {
+                      setEmailSearch(event.target.value);
+                      setSelectedEmailProfile(null);
+                    }}
+                  />
+                </label>
+                <div className="participant-email-picker-results">
+                  {loadingEmailCandidates && <p className="muted">Loading emails…</p>}
+                  {!loadingEmailCandidates && filteredEmailCandidates.length === 0 && (
+                    <p className="muted">No matching participant emails.</p>
+                  )}
+                  {filteredEmailCandidates.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      className={`participant-email-picker-option${selectedEmailProfile?.id === candidate.id ? ' selected' : ''}`}
+                      type="button"
+                      onClick={() => setSelectedEmailProfile(candidate)}
+                    >
+                      <strong>{candidate.full_name}</strong>
+                      <span>{candidate.email}</span>
+                    </button>
+                  ))}
+                </div>
+                {selectedEmailProfile && (
+                  <p className="muted">
+                    <strong>{selectedEmailProfile.email}</strong> and its registrations, assignments, and check-in history will move to {profile.email}. The duplicate profile will be removed.
+                  </p>
+                )}
+                {aliasError && <p className="error-text">{aliasError}</p>}
+                <div className="card-actions">
+                  <button className="ghost" type="button" disabled={assigningEmail} onClick={() => setShowEmailPicker(false)}>
+                    Cancel
+                  </button>
+                  <button className="primary" type="submit" disabled={!selectedEmailProfile || assigningEmail}>
+                    {assigningEmail ? 'Assigning…' : 'Assign selected email'}
+                  </button>
+                </div>
+              </form>
+            </div>,
+            document.body
+          )
+        : null}
       {lockNotice}
     </section>
   );

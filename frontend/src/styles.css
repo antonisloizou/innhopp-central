@@ -6768,6 +6768,104 @@ button.ghost.event-route-preview-overlay-button {
   padding: 1.25rem;
 }
 
+.participant-email-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(4px);
+}
+
+.participant-email-picker-panel {
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 2rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  font-family: inherit;
+  color: var(--text-color);
+}
+
+.participant-email-picker-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.participant-email-picker-heading h3,
+.participant-email-picker-heading p,
+.participant-email-picker-panel > p {
+  margin: 0;
+}
+
+.participant-email-picker-heading h3 {
+  color: var(--text-strong);
+  font-family: inherit;
+  font-size: 1.4rem;
+  line-height: 1.25;
+}
+
+.participant-email-picker-search {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.participant-email-picker-search input[type='search'] {
+  width: 100%;
+  min-height: 2.85rem;
+  padding: 0.7rem 0.85rem;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.participant-email-picker-results {
+  min-height: 5rem;
+  max-height: min(22rem, 45dvh);
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.participant-email-picker-option {
+  width: 100%;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 0.65rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.participant-email-picker-option:hover,
+.participant-email-picker-option.selected {
+  border-color: #3985a5;
+  background: color-mix(in srgb, #3985a5 12%, transparent);
+}
+
+.participant-email-picker-option span {
+  color: var(--muted-text);
+}
+
+.participant-email-picker-panel > .card-actions {
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+
 .event-schedule-import-panel {
   width: min(520px, 100%);
   max-height: calc(100dvh - 2rem);

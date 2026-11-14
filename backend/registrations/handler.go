@@ -1371,10 +1371,17 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 
 	var participantID int64
 	err := tx.QueryRow(ctx, `
-		SELECT id
-		FROM participant_profiles
-		WHERE lower(email) = lower($1)
-		ORDER BY id ASC
+		SELECT participant_id
+		FROM (
+			SELECT participant_id, 0 AS priority
+			FROM participant_email_aliases
+			WHERE lower(btrim(email)) = lower(btrim($1))
+			UNION ALL
+			SELECT id AS participant_id, 1 AS priority
+			FROM participant_profiles
+			WHERE lower(btrim(email)) = lower(btrim($1))
+		) matched_participants
+		ORDER BY priority, participant_id
 		LIMIT 1
 	`, email).Scan(&participantID)
 	if err == nil {
@@ -1466,9 +1473,16 @@ func ensureOwnParticipantProfileTx(ctx context.Context, tx pgx.Tx, claims *auth.
 	var participantID int64
 	err := tx.QueryRow(ctx, `
 		SELECT id
-		FROM participant_profiles
-		WHERE ($1 > 0 AND account_id = $1) OR lower(email) = $2
-		ORDER BY CASE WHEN $1 > 0 AND account_id = $1 THEN 0 ELSE 1 END, id ASC
+		FROM participant_profiles p
+		WHERE ($1 > 0 AND p.account_id = $1)
+		   OR lower(p.email) = $2
+		   OR EXISTS (
+			   SELECT 1 FROM participant_email_aliases a
+			   WHERE a.participant_id = p.id AND lower(btrim(a.email)) = $2
+		   )
+		ORDER BY CASE WHEN $1 > 0 AND p.account_id = $1 THEN 0
+		              WHEN EXISTS (SELECT 1 FROM participant_email_aliases a WHERE a.participant_id = p.id AND lower(btrim(a.email)) = $2) THEN 1
+		              ELSE 2 END, id ASC
 		LIMIT 1
 	`, claims.AccountID, email).Scan(&participantID)
 	if err == nil {
@@ -1879,7 +1893,8 @@ func (h *Handler) listOwnRegistrations(w http.ResponseWriter, r *http.Request) {
 			       r.registered_at
 			FROM event_registrations r
 			JOIN participant_profiles p ON p.id = r.participant_id
-			WHERE (($1 > 0 AND p.account_id = $1) OR lower(p.email) = $2)
+			WHERE (($1 > 0 AND p.account_id = $1) OR lower(p.email) = $2
+			   OR EXISTS (SELECT 1 FROM participant_email_aliases a WHERE a.participant_id = p.id AND lower(btrim(a.email)) = $2))
 			ORDER BY
 				r.event_id,
 				CASE WHEN r.cancelled_at IS NULL AND r.expired_at IS NULL THEN 0 ELSE 1 END,
@@ -1941,7 +1956,8 @@ func (h *Handler) getOwnRegistration(w http.ResponseWriter, r *http.Request) {
 			FROM event_registrations r
 			JOIN participant_profiles p ON p.id = r.participant_id
 			WHERE r.id = $1
-			  AND (($2 > 0 AND p.account_id = $2) OR lower(p.email) = $3)
+			  AND (($2 > 0 AND p.account_id = $2) OR lower(p.email) = $3
+			   OR EXISTS (SELECT 1 FROM participant_email_aliases a WHERE a.participant_id = p.id AND lower(btrim(a.email)) = $3))
 		)
 	`, registrationID, claims.AccountID, email).Scan(&owned)
 	if err != nil {

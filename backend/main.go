@@ -411,6 +411,16 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS emergency_contact_phone TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS medical_expertise TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS hss_qualities TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+		`CREATE TABLE IF NOT EXISTS participant_email_aliases (
+    id BIGSERIAL PRIMARY KEY,
+    participant_id INTEGER NOT NULL REFERENCES participant_profiles(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS participant_email_aliases_email_idx
+            ON participant_email_aliases ((lower(btrim(email))))`,
+		`CREATE INDEX IF NOT EXISTS participant_email_aliases_participant_idx
+            ON participant_email_aliases (participant_id)`,
 		`UPDATE participant_profiles
 		 SET hss_qualities = array_remove(hss_qualities, 'Experiment with drugs')
 		 WHERE hss_qualities @> ARRAY['Experiment with drugs']::TEXT[]`,

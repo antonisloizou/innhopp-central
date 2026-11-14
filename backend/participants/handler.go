@@ -38,6 +38,7 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles", h.createProfile)
 	r.With(enforcer.Authorize(rbac.PermissionViewParticipants)).Get("/profiles/{profileID}", h.getProfile)
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Put("/profiles/{profileID}", h.updateProfile)
+	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Post("/profiles/{profileID}/email-aliases", h.assignEmailAlias)
 	r.With(enforcer.Authorize(rbac.PermissionManageParticipants)).Delete("/profiles/{profileID}", h.deleteProfile)
 	return r
 }
@@ -46,6 +47,7 @@ type Profile struct {
 	ID                    int64     `json:"id"`
 	FullName              string    `json:"full_name"`
 	Email                 string    `json:"email"`
+	EmailAliases          []string  `json:"email_aliases"`
 	Phone                 string    `json:"phone,omitempty"`
 	Notes                 string    `json:"notes,omitempty"`
 	EmergencyContact      string    `json:"emergency_contact,omitempty"`
@@ -114,6 +116,10 @@ type profilePayload struct {
 	MedicalExpertise      []string `json:"medical_expertise"`
 	HSSQualities          []string `json:"hss_qualities"`
 	AccountRoles          []string `json:"account_roles"`
+}
+
+type emailAliasPayload struct {
+	Email string `json:"email"`
 }
 
 const profileSelectColumns = `
@@ -484,6 +490,28 @@ func (h *Handler) enrichAccountRoles(ctx context.Context, profile *Profile) erro
 	merged := append([]string{}, profile.AccountRoles...)
 	merged = append(merged, roles...)
 	profile.AccountRoles = normalizeAccountRoles(merged)
+
+	aliasRows, err := h.db.Query(ctx, `
+		SELECT lower(btrim(email))
+		FROM participant_email_aliases
+		WHERE participant_id = $1
+		ORDER BY lower(btrim(email))
+	`, profile.ID)
+	if err != nil {
+		return err
+	}
+	defer aliasRows.Close()
+	profile.EmailAliases = []string{}
+	for aliasRows.Next() {
+		var email string
+		if err := aliasRows.Scan(&email); err != nil {
+			return err
+		}
+		profile.EmailAliases = append(profile.EmailAliases, email)
+	}
+	if err := aliasRows.Err(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1209,6 +1237,224 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	httpx.WriteJSON(w, http.StatusOK, profile)
+}
+
+// assignEmailAlias makes an old address resolve to the selected canonical
+// participant and moves that old profile's registrations to the canonical ID.
+func (h *Handler) assignEmailAlias(w http.ResponseWriter, r *http.Request) {
+	profileID, err := strconv.ParseInt(chi.URLParam(r, "profileID"), 10, 64)
+	if err != nil || profileID <= 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid participant id")
+		return
+	}
+	var payload emailAliasPayload
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	oldEmail := strings.ToLower(strings.TrimSpace(payload.Email))
+	if oldEmail == "" {
+		httpx.Error(w, http.StatusBadRequest, "old email is required")
+		return
+	}
+
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to assign email")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var canonicalEmail string
+	if err := tx.QueryRow(r.Context(), `SELECT lower(btrim(email)) FROM participant_profiles WHERE id = $1 FOR UPDATE`, profileID).Scan(&canonicalEmail); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "participant not found")
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, "failed to assign email")
+		}
+		return
+	}
+	if oldEmail == canonicalEmail {
+		httpx.Error(w, http.StatusBadRequest, "old email is already the participant's main email")
+		return
+	}
+
+	var aliasOwner int64
+	err = tx.QueryRow(r.Context(), `SELECT participant_id FROM participant_email_aliases WHERE lower(btrim(email)) = $1`, oldEmail).Scan(&aliasOwner)
+	if err == nil {
+		if aliasOwner != profileID {
+			httpx.Error(w, http.StatusConflict, "email is already assigned to another participant")
+			return
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusInternalServerError, "failed to assign email")
+		return
+	}
+
+	var sourceID int64
+	err = tx.QueryRow(r.Context(), `SELECT id FROM participant_profiles WHERE lower(btrim(email)) = $1 FOR UPDATE`, oldEmail).Scan(&sourceID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusInternalServerError, "failed to assign email")
+		return
+	}
+	if err == nil && sourceID == profileID {
+		httpx.Error(w, http.StatusBadRequest, "email belongs to the selected participant")
+		return
+	}
+	if sourceID > 0 {
+		// Preserve all registration child history before consolidating duplicate
+		// registrations for events where both profiles were registered.
+		for _, statement := range []string{
+			`UPDATE registration_payments child SET registration_id = main.id
+			 FROM event_registrations old
+			 JOIN event_registrations main ON main.event_id = old.event_id AND main.participant_id = $1
+			 WHERE child.registration_id = old.id AND old.participant_id = $2`,
+			`UPDATE registration_activity child SET registration_id = main.id
+			 FROM event_registrations old
+			 JOIN event_registrations main ON main.event_id = old.event_id AND main.participant_id = $1
+			 WHERE child.registration_id = old.id AND old.participant_id = $2`,
+			`UPDATE email_deliveries child SET registration_id = main.id
+			 FROM event_registrations old
+			 JOIN event_registrations main ON main.event_id = old.event_id AND main.participant_id = $1
+			 WHERE child.registration_id = old.id AND old.participant_id = $2`,
+		} {
+			if _, err := tx.Exec(r.Context(), statement, profileID, sourceID); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to merge registration history")
+				return
+			}
+		}
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE event_registrations main
+			SET registered_at = LEAST(main.registered_at, old.registered_at),
+			    deposit_due_at = COALESCE(main.deposit_due_at, old.deposit_due_at),
+			    deposit_paid_at = COALESCE(main.deposit_paid_at, old.deposit_paid_at),
+			    main_invoice_due_at = COALESCE(main.main_invoice_due_at, old.main_invoice_due_at),
+			    main_invoice_paid_at = COALESCE(main.main_invoice_paid_at, old.main_invoice_paid_at),
+			    tags = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.tags, ARRAY[]::TEXT[]) || COALESCE(old.tags, ARRAY[]::TEXT[])) value ORDER BY value),
+			    internal_notes = CASE
+			      WHEN btrim(COALESCE(main.internal_notes, '')) = '' THEN old.internal_notes
+			      WHEN btrim(COALESCE(old.internal_notes, '')) = '' OR main.internal_notes = old.internal_notes THEN main.internal_notes
+			      ELSE main.internal_notes || E'\n\nMerged profile notes:\n' || old.internal_notes
+			    END,
+			    registration_checklist = COALESCE(old.registration_checklist, '{}'::JSONB) || COALESCE(main.registration_checklist, '{}'::JSONB),
+			    updated_at = NOW()
+			FROM event_registrations old
+			WHERE main.event_id = old.event_id
+			  AND main.participant_id = $1
+			  AND old.participant_id = $2
+		`, profileID, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to consolidate registrations")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `
+			DELETE FROM event_registrations old
+			USING event_registrations main
+			WHERE old.event_id = main.event_id
+			  AND old.participant_id = $2
+			  AND main.participant_id = $1
+		`, profileID, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to consolidate registrations")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE event_registrations SET participant_id = $1, updated_at = NOW() WHERE participant_id = $2`, profileID, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to move registrations")
+			return
+		}
+
+		// Collapse duplicate manifest, crew, and check-in membership before moving
+		// the remaining references to the canonical profile.
+		mergeStatements := []string{
+			`DELETE FROM manifest_participants old USING manifest_participants main
+			 WHERE old.manifest_id = main.manifest_id AND old.participant_id = $2 AND main.participant_id = $1`,
+			`UPDATE manifest_participants SET participant_id = $1 WHERE participant_id = $2`,
+			`DELETE FROM crew_assignments old USING crew_assignments main
+			 WHERE old.manifest_id = main.manifest_id AND lower(btrim(old.role)) = lower(btrim(main.role))
+			   AND old.participant_id = $2 AND main.participant_id = $1`,
+			`UPDATE crew_assignments SET participant_id = $1 WHERE participant_id = $2`,
+			`UPDATE roster_check_in_entries main
+			 SET is_present = main.is_present OR old.is_present,
+			     distance_from_target_meters = COALESCE(main.distance_from_target_meters, old.distance_from_target_meters),
+			     updated_at = GREATEST(main.updated_at, old.updated_at)
+			 FROM roster_check_in_entries old
+			 WHERE main.roster_check_in_id = old.roster_check_in_id
+			   AND main.participant_id = $1 AND old.participant_id = $2`,
+			`DELETE FROM roster_check_in_entries old USING roster_check_in_entries main
+			 WHERE old.roster_check_in_id = main.roster_check_in_id
+			   AND old.participant_id = $2 AND main.participant_id = $1`,
+			`UPDATE roster_check_in_entries SET participant_id = $1 WHERE participant_id = $2`,
+		}
+		for _, statement := range mergeStatements {
+			if _, err := tx.Exec(r.Context(), statement, profileID, sourceID); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to merge participant assignments")
+				return
+			}
+		}
+
+		if _, err := tx.Exec(r.Context(), `
+			UPDATE participant_profiles main
+			SET roles = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.roles, ARRAY[]::TEXT[]) || COALESCE(old.roles, ARRAY[]::TEXT[])) value ORDER BY value),
+			    ratings = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.ratings, ARRAY[]::TEXT[]) || COALESCE(old.ratings, ARRAY[]::TEXT[])) value ORDER BY value),
+			    disciplines = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.disciplines, ARRAY[]::TEXT[]) || COALESCE(old.disciplines, ARRAY[]::TEXT[])) value ORDER BY value),
+			    other_air_sports = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.other_air_sports, ARRAY[]::TEXT[]) || COALESCE(old.other_air_sports, ARRAY[]::TEXT[])) value ORDER BY value),
+			    dietary_restrictions = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.dietary_restrictions, ARRAY[]::TEXT[]) || COALESCE(old.dietary_restrictions, ARRAY[]::TEXT[])) value ORDER BY value),
+			    medical_expertise = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.medical_expertise, ARRAY[]::TEXT[]) || COALESCE(old.medical_expertise, ARRAY[]::TEXT[])) value ORDER BY value),
+			    hss_qualities = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.hss_qualities, ARRAY[]::TEXT[]) || COALESCE(old.hss_qualities, ARRAY[]::TEXT[])) value ORDER BY value),
+			    account_roles = ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(main.account_roles, ARRAY[]::TEXT[]) || COALESCE(old.account_roles, ARRAY[]::TEXT[])) value ORDER BY value),
+			    phone = COALESCE(NULLIF(btrim(main.phone), ''), old.phone),
+			    emergency_contact = COALESCE(NULLIF(btrim(main.emergency_contact), ''), old.emergency_contact),
+			    emergency_contact_name = COALESCE(NULLIF(btrim(main.emergency_contact_name), ''), old.emergency_contact_name),
+			    emergency_contact_phone = COALESCE(NULLIF(btrim(main.emergency_contact_phone), ''), old.emergency_contact_phone),
+			    notes = COALESCE(NULLIF(btrim(main.notes), ''), old.notes),
+			    whatsapp = COALESCE(NULLIF(btrim(main.whatsapp), ''), old.whatsapp),
+			    instagram = COALESCE(NULLIF(btrim(main.instagram), ''), old.instagram),
+			    citizenship = COALESCE(NULLIF(btrim(main.citizenship), ''), old.citizenship),
+			    date_of_birth = COALESCE(NULLIF(btrim(main.date_of_birth), ''), old.date_of_birth),
+			    years_in_sport = COALESCE(main.years_in_sport, old.years_in_sport),
+			    jump_count = COALESCE(main.jump_count, old.jump_count),
+			    recent_jump_count = COALESCE(main.recent_jump_count, old.recent_jump_count),
+			    main_canopy = COALESCE(NULLIF(btrim(main.main_canopy), ''), old.main_canopy),
+			    wingload = COALESCE(NULLIF(btrim(main.wingload), ''), old.wingload),
+			    license = COALESCE(NULLIF(btrim(main.license), ''), old.license),
+			    uses_packer = COALESCE(NULLIF(btrim(main.uses_packer), ''), old.uses_packer),
+			    canopy_course = COALESCE(NULLIF(btrim(main.canopy_course), ''), old.canopy_course),
+			    landing_area_preference = COALESCE(NULLIF(btrim(main.landing_area_preference), ''), old.landing_area_preference),
+			    tshirt_size = COALESCE(NULLIF(btrim(main.tshirt_size), ''), old.tshirt_size),
+			    tshirt_gender = COALESCE(NULLIF(btrim(main.tshirt_gender), ''), old.tshirt_gender),
+			    accommodation_roommate = COALESCE(NULLIF(btrim(main.accommodation_roommate), ''), old.accommodation_roommate),
+			    medical_conditions = COALESCE(NULLIF(btrim(main.medical_conditions), ''), old.medical_conditions)
+			FROM participant_profiles old
+			WHERE main.id = $1 AND old.id = $2
+		`, profileID, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to merge participant details")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE participant_email_aliases SET participant_id = $1 WHERE participant_id = $2`, profileID, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to move email aliases")
+			return
+		}
+		if _, err := tx.Exec(r.Context(), `DELETE FROM participant_profiles WHERE id = $1`, sourceID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to remove merged participant")
+			return
+		}
+	}
+	if _, err := tx.Exec(r.Context(), `
+		INSERT INTO participant_email_aliases (participant_id, email)
+		VALUES ($1, $2)
+		ON CONFLICT ((lower(btrim(email)))) DO NOTHING
+	`, profileID, oldEmail); err != nil {
+		httpx.Error(w, http.StatusConflict, "email could not be assigned")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to assign email")
+		return
+	}
+	profile, err := h.loadProfileByID(r.Context(), profileID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "email assigned but participant could not be reloaded")
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, profile)
 }
 
