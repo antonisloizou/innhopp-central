@@ -224,6 +224,14 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to link participant profile")
 		return
 	}
+	if err := h.backfillRegistrationIntentsForAccount(r.Context(), account.ID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to prepare registration onboarding")
+		return
+	}
+	if err := h.createRegistrationIntentFromRedirect(r.Context(), account.ID, redirectPath); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to start event registration")
+		return
+	}
 
 	participantRoles, err := h.loadParticipantRoles(r.Context(), account.ID, account.Email)
 	if err != nil {
@@ -290,12 +298,21 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 type sessionResponse struct {
-	AccountID    int64               `json:"account_id"`
-	Email        string              `json:"email"`
-	FullName     string              `json:"full_name"`
-	Roles        []string            `json:"roles"`
-	Impersonator *ImpersonatorClaims `json:"impersonator,omitempty"`
-	Token        string              `json:"token,omitempty"`
+	AccountID           int64                `json:"account_id"`
+	Email               string               `json:"email"`
+	FullName            string               `json:"full_name"`
+	Roles               []string             `json:"roles"`
+	Impersonator        *ImpersonatorClaims  `json:"impersonator,omitempty"`
+	Token               string               `json:"token,omitempty"`
+	OnboardingRequired  bool                 `json:"onboarding_required"`
+	PendingRegistration *pendingRegistration `json:"pending_registration,omitempty"`
+}
+
+type pendingRegistration struct {
+	EventID              int64  `json:"event_id"`
+	EventName            string `json:"event_name"`
+	EventSlug            string `json:"event_slug"`
+	ExistingRegistration bool   `json:"existing_registration"`
 }
 
 func (h *Handler) sessionInfo(w http.ResponseWriter, r *http.Request) {
@@ -321,8 +338,131 @@ func (h *Handler) sessionInfo(w http.ResponseWriter, r *http.Request) {
 		Roles:        claims.Roles,
 		Impersonator: claims.Impersonator,
 	}
+	if !hasElevatedAccess(claims.Roles) {
+		if err := h.backfillRegistrationIntentsForAccount(r.Context(), claims.AccountID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to prepare registration onboarding")
+			return
+		}
+		pending, err := h.loadPendingRegistration(r.Context(), claims.AccountID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load registration onboarding state")
+			return
+		}
+		resp.PendingRegistration = pending
+		resp.OnboardingRequired = pending != nil
+	}
 
 	httpx.WriteJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) backfillRegistrationIntentsForAccount(ctx context.Context, accountID int64) error {
+	if accountID <= 0 {
+		return nil
+	}
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO registration_intents (account_id, event_id, status, created_at, completed_at)
+		SELECT p.account_id, r.event_id, 'pending', NOW(), NULL
+		FROM event_registrations r
+		JOIN participant_profiles p ON p.id = r.participant_id
+		JOIN events e ON e.id = r.event_id
+		WHERE p.account_id = $1
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		  AND COALESCE(e.status, 'draft') NOT IN ('past', 'cancelled')
+		  AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+		  AND (
+			btrim(COALESCE(r.event_details->>'attendance_type', '')) = ''
+			OR btrim(COALESCE(r.event_details->>'payment_method', '')) = ''
+			OR btrim(COALESCE(r.event_details->>'heard_about_project', '')) = ''
+			OR btrim(COALESCE(r.event_details->>'heard_about_event', '')) = ''
+		  )
+		ON CONFLICT (account_id, event_id) DO UPDATE
+		SET status = 'pending', completed_at = NULL
+	`, accountID)
+	return err
+}
+
+func hasElevatedAccess(roles []string) bool {
+	for _, role := range roles {
+		if normalized := strings.ToLower(strings.TrimSpace(role)); normalized != "" && normalized != string(rbac.RoleParticipant) {
+			return true
+		}
+	}
+	return false
+}
+
+func registrationSlugFromRedirect(redirectPath string) string {
+	parsed, err := url.Parse(redirectPath)
+	if err != nil || parsed.Path != profilePostLoginPath {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Query().Get("registrationSlug"))
+}
+
+func (h *Handler) createRegistrationIntentFromRedirect(ctx context.Context, accountID int64, redirectPath string) error {
+	slug := registrationSlugFromRedirect(redirectPath)
+	if slug == "" || accountID <= 0 {
+		return nil
+	}
+	_, err := h.db.Exec(ctx, `
+		INSERT INTO registration_intents (account_id, event_id, status, created_at, completed_at)
+		SELECT $1, e.id, 'pending', NOW(), NULL
+		FROM events e
+		WHERE e.public_registration_slug = $2
+		  AND e.public_registration_enabled = TRUE
+		  AND (e.registration_open_at IS NULL OR e.registration_open_at <= NOW())
+		  AND e.starts_at > NOW()
+		  AND COALESCE(e.deposit_amount, 0) > 0
+		  AND e.slots > (
+			SELECT COUNT(*)
+			FROM event_registrations r
+			JOIN participant_profiles participant ON participant.id = r.participant_id
+			WHERE r.event_id = e.id
+			  AND r.cancelled_at IS NULL
+			  AND r.expired_at IS NULL
+			  AND NOT ('Staff' = ANY(COALESCE(participant.roles, ARRAY[]::TEXT[])))
+		  )
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_registrations r
+			JOIN participant_profiles p ON p.id = r.participant_id
+			WHERE r.event_id = e.id
+			  AND p.account_id = $1
+			  AND r.cancelled_at IS NULL
+			  AND r.expired_at IS NULL
+		  )
+		ON CONFLICT (account_id, event_id) DO UPDATE
+		SET status = 'pending', created_at = NOW(), completed_at = NULL
+	`, accountID, slug)
+	return err
+}
+
+func (h *Handler) loadPendingRegistration(ctx context.Context, accountID int64) (*pendingRegistration, error) {
+	var pending pendingRegistration
+	err := h.db.QueryRow(ctx, `
+		SELECT e.id, e.name, COALESCE(e.public_registration_slug, ''),
+		       EXISTS (
+			   SELECT 1
+			   FROM event_registrations r
+			   JOIN participant_profiles p ON p.id = r.participant_id
+			   WHERE r.event_id = e.id
+			     AND p.account_id = i.account_id
+			     AND r.cancelled_at IS NULL
+			     AND r.expired_at IS NULL
+		       )
+		FROM registration_intents i
+		JOIN events e ON e.id = i.event_id
+		WHERE i.account_id = $1 AND i.status = 'pending'
+		ORDER BY i.created_at ASC, i.id ASC
+		LIMIT 1
+	`, accountID).Scan(&pending.EventID, &pending.EventName, &pending.EventSlug, &pending.ExistingRegistration)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pending, nil
 }
 
 func (h *Handler) impersonate(w http.ResponseWriter, r *http.Request) {

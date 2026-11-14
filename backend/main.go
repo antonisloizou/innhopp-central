@@ -55,6 +55,9 @@ func main() {
 	if err := ensureSchema(ctx, pool); err != nil {
 		log.Fatalf("failed to ensure schema: %v", err)
 	}
+	if err := budgets.BackfillMissingEventBudgets(ctx, pool); err != nil {
+		log.Fatalf("failed to backfill event budgets: %v", err)
+	}
 	if err := checklists.EnsureTemplates(ctx, pool); err != nil {
 		log.Fatalf("failed to seed checklist templates: %v", err)
 	}
@@ -165,6 +168,7 @@ func main() {
 	)
 	router.Use(sessionManager.Middleware)
 	router.Use(auth.RoleRefreshMiddleware(pool))
+	router.Use(auth.OnboardingGateMiddleware(pool))
 
 	router.Get("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1171,6 +1175,58 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS internal_notes TEXT`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS registration_checklist JSONB NOT NULL DEFAULT '{}'::JSONB`,
+		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS event_details JSONB NOT NULL DEFAULT '{}'::JSONB`,
+		`UPDATE event_registrations r
+            SET event_details = COALESCE(r.event_details, '{}'::JSONB) || jsonb_build_object(
+                'accommodation', COALESCE(NULLIF(btrim(p.accommodation), ''), 'Shared (usually 2 per room)'),
+                'accommodation_roommate', COALESCE(p.accommodation_roommate, '')
+            )
+            FROM participant_profiles p
+            WHERE p.id = r.participant_id
+              AND NOT (COALESCE(r.event_details, '{}'::JSONB) ? 'accommodation')`,
+		`CREATE TABLE IF NOT EXISTS event_non_jumper_activities (
+            id SERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('opt_in', 'opt_out')),
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            cost NUMERIC(12,2),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE INDEX IF NOT EXISTS event_non_jumper_activities_event_idx ON event_non_jumper_activities (event_id, kind, sort_order, id)`,
+		`ALTER TABLE event_non_jumper_activities ADD COLUMN IF NOT EXISTS cost_currency TEXT NOT NULL DEFAULT 'EUR'`,
+		`CREATE TABLE IF NOT EXISTS registration_intents (
+            id SERIAL PRIMARY KEY,
+            account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ,
+            UNIQUE (account_id, event_id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS registration_intents_pending_account_idx
+            ON registration_intents (account_id, created_at)
+            WHERE status = 'pending'`,
+		`INSERT INTO registration_intents (account_id, event_id, status, created_at, completed_at)
+            SELECT p.account_id, r.event_id, 'pending', NOW(), NULL
+            FROM event_registrations r
+            JOIN participant_profiles p ON p.id = r.participant_id
+            JOIN events e ON e.id = r.event_id
+            WHERE p.account_id IS NOT NULL
+              AND r.cancelled_at IS NULL
+              AND r.expired_at IS NULL
+              AND COALESCE(e.status, 'draft') NOT IN ('past', 'cancelled')
+              AND NOT ('Staff' = ANY(COALESCE(p.roles, ARRAY[]::TEXT[])))
+              AND (
+                btrim(COALESCE(r.event_details->>'attendance_type', '')) = ''
+                OR btrim(COALESCE(r.event_details->>'payment_method', '')) = ''
+                OR btrim(COALESCE(r.event_details->>'heard_about_project', '')) = ''
+                OR btrim(COALESCE(r.event_details->>'heard_about_event', '')) = ''
+              )
+            ON CONFLICT (account_id, event_id) DO UPDATE
+            SET status = 'pending', completed_at = NULL`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`ALTER TABLE event_registrations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`DO $$

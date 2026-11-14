@@ -2,9 +2,52 @@ package auth
 
 import (
 	"context"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestRegistrationSlugFromRedirect(t *testing.T) {
+	if got := registrationSlugFromRedirect("/profile?publicRegistration=1&registrationSlug=summer-2027"); got != "summer-2027" {
+		t.Fatalf("registrationSlugFromRedirect() = %q", got)
+	}
+	if got := registrationSlugFromRedirect("/events?registrationSlug=summer-2027"); got != "" {
+		t.Fatalf("registration slug must only be accepted on the profile redirect, got %q", got)
+	}
+}
+
+func TestOnboardingPathAllowed(t *testing.T) {
+	allowed := []string{
+		"/api/auth/session",
+		"/auth/login",
+		"/api/participants/profiles/me",
+		"/participants/profiles/me",
+		"/api/registrations/me",
+		"/api/registrations/public/events/summer/claim",
+		"/api/events?summary=true",
+	}
+	for _, target := range allowed {
+		if !onboardingPathAllowed(httptest.NewRequest("GET", target, nil)) {
+			t.Fatalf("expected onboarding path to be allowed: %s", target)
+		}
+	}
+	if onboardingPathAllowed(httptest.NewRequest("GET", "/api/events/42", nil)) {
+		t.Fatal("event detail API must remain blocked during onboarding")
+	}
+}
+
+func TestOnboardingPathProtectedNeverIncludesAuthentication(t *testing.T) {
+	for _, target := range []string{"/api/auth/login", "/auth/session", "/proxy/api/auth/callback"} {
+		if onboardingPathProtected(httptest.NewRequest("GET", target, nil)) {
+			t.Fatalf("authentication path must never be protected by onboarding: %s", target)
+		}
+	}
+	for _, target := range []string{"/api/events/42", "/events/42", "/proxy/api/logistics"} {
+		if !onboardingPathProtected(httptest.NewRequest("GET", target, nil)) {
+			t.Fatalf("application API path must remain protected: %s", target)
+		}
+	}
+}
 
 func TestEnsureParticipantProfileSQLHasClosedColumnList(t *testing.T) {
 	if !strings.Contains(ensureParticipantProfileSQL, "account_roles\n\t\t)") {

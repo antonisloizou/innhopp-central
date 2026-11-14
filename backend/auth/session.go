@@ -161,6 +161,86 @@ func RoleRefreshMiddleware(db *pgxpool.Pool) func(http.Handler) http.Handler {
 	}
 }
 
+// OnboardingGateMiddleware prevents participant-only accounts with an
+// unfinished public registration from using the rest of the authenticated API.
+func OnboardingGateMiddleware(db *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := FromContext(r.Context())
+			if claims == nil || claims.AccountID <= 0 || hasElevatedAccess(claims.Roles) || onboardingPathAllowed(r) || !onboardingPathProtected(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			var pending bool
+			if err := db.QueryRow(r.Context(), `
+				SELECT EXISTS (
+					SELECT 1 FROM registration_intents
+					WHERE account_id = $1 AND status = 'pending'
+				)
+			`, claims.AccountID).Scan(&pending); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "failed to verify registration onboarding state")
+				return
+			}
+			if !pending {
+				next.ServeHTTP(w, r)
+				return
+			}
+			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{
+				"error": "complete your event registration before continuing",
+				"code":  "REGISTRATION_ONBOARDING_REQUIRED",
+			})
+		})
+	}
+}
+
+func onboardingPathAllowed(r *http.Request) bool {
+	path := normalizedAPIPath(r.URL.Path)
+	if path == "/health" || path == "/auth" || strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/registrations/public/events/") {
+		return true
+	}
+	if path == "/participants/profiles/me" || strings.HasPrefix(path, "/registrations/me") {
+		return true
+	}
+	if path == "/registrations/onboarding/complete" {
+		return true
+	}
+	return r.Method == http.MethodGet && path == "/events" && r.URL.Query().Get("summary") == "true"
+}
+
+func normalizedAPIPath(raw string) string {
+	path := strings.TrimSpace(raw)
+	if index := strings.Index(path, "/api/"); index >= 0 {
+		path = path[index+len("/api"):]
+	}
+	if path == "" || path[0] != '/' {
+		path = "/" + path
+	}
+	return path
+}
+
+func onboardingPathProtected(r *http.Request) bool {
+	path := normalizedAPIPath(r.URL.Path)
+	protectedPrefixes := []string{
+		"/events",
+		"/participants",
+		"/registrations",
+		"/comms",
+		"/rbac",
+		"/logistics",
+		"/innhopps",
+		"/checklists",
+		"/roster-check-ins",
+		"/budgets",
+		"/accounting",
+	}
+	for _, prefix := range protectedPrefixes {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 func loadCurrentRoles(ctx context.Context, db *pgxpool.Pool, accountID int64) ([]string, error) {
 	rows, err := db.Query(ctx, `
 		SELECT role_name

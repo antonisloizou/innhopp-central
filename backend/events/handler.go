@@ -21,6 +21,7 @@ import (
 
 	"github.com/innhopp/central/backend/airfields"
 	"github.com/innhopp/central/backend/auth"
+	"github.com/innhopp/central/backend/budgets"
 	"github.com/innhopp/central/backend/httpx"
 	"github.com/innhopp/central/backend/internal/timeutil"
 	"github.com/innhopp/central/backend/logistics"
@@ -104,6 +105,10 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}", h.updateEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/copy", h.copyEvent)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}", h.deleteEvent)
+	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/non-jumper-activities", h.listNonJumperActivities)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/non-jumper-activities", h.createNonJumperActivity)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/non-jumper-activities/{activityID}", h.updateNonJumperActivity)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}/non-jumper-activities/{activityID}", h.deleteNonJumperActivity)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/innhopps", h.createInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/accommodations", h.listAccommodations)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/accommodations", h.createAccommodation)
@@ -111,6 +116,189 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/accommodations/{accID}", h.updateAccommodation)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}/accommodations/{accID}", h.deleteAccommodation)
 	return r
+}
+
+type NonJumperActivity struct {
+	ID           int64   `json:"id"`
+	EventID      int64   `json:"event_id"`
+	Kind         string  `json:"kind"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Cost         *string `json:"cost,omitempty"`
+	CostCurrency string  `json:"cost_currency,omitempty"`
+	SortOrder    int     `json:"sort_order"`
+}
+
+type nonJumperActivityPayload struct {
+	Kind         string  `json:"kind"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Cost         *string `json:"cost"`
+	CostCurrency string  `json:"cost_currency"`
+	SortOrder    int     `json:"sort_order"`
+}
+
+func parsePositiveIDParam(r *http.Request, name string) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New("invalid id")
+	}
+	return id, nil
+}
+
+func validateNonJumperActivity(p *nonJumperActivityPayload) error {
+	p.Kind = strings.ToLower(strings.TrimSpace(p.Kind))
+	p.Title = strings.TrimSpace(p.Title)
+	p.Description = strings.TrimSpace(p.Description)
+	if p.Kind != "opt_in" && p.Kind != "opt_out" {
+		return errors.New("kind must be opt_in or opt_out")
+	}
+	if p.Title == "" {
+		return errors.New("title is required")
+	}
+	if p.Kind == "opt_out" {
+		p.Cost = nil
+		p.CostCurrency = ""
+	}
+	p.CostCurrency = strings.ToUpper(strings.TrimSpace(p.CostCurrency))
+	if p.Kind == "opt_in" && (len(p.CostCurrency) != 3) {
+		return errors.New("cost_currency must be a three-letter currency code")
+	}
+	if p.Cost != nil {
+		value := strings.TrimSpace(*p.Cost)
+		if value == "" {
+			p.Cost = nil
+		} else {
+			if _, err := strconv.ParseFloat(value, 64); err != nil {
+				return errors.New("cost must be a number")
+			}
+			p.Cost = &value
+		}
+	}
+	return nil
+}
+
+func (h *Handler) validateActivityBudgetCurrency(ctx context.Context, eventID int64, p *nonJumperActivityPayload) error {
+	if p.Kind != "opt_in" {
+		return nil
+	}
+	var available bool
+	err := h.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event_budgets b LEFT JOIN budget_currencies c ON c.budget_id=b.id WHERE b.event_id=$1 AND ($2=b.base_currency OR $2=c.currency_code))`, eventID, p.CostCurrency).Scan(&available)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return errors.New("cost_currency is not enabled in the event budget")
+	}
+	return nil
+}
+
+func scanNonJumperActivity(row pgx.Row) (NonJumperActivity, error) {
+	var a NonJumperActivity
+	err := row.Scan(&a.ID, &a.EventID, &a.Kind, &a.Title, &a.Description, &a.Cost, &a.CostCurrency, &a.SortOrder)
+	return a, err
+}
+
+func (h *Handler) listNonJumperActivities(w http.ResponseWriter, r *http.Request) {
+	eventID, err := parsePositiveIDParam(r, "eventID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	rows, err := h.db.Query(r.Context(), `SELECT id,event_id,kind,title,description,cost::text,cost_currency,sort_order FROM event_non_jumper_activities WHERE event_id=$1 ORDER BY kind,sort_order,id`, eventID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load non-jumper activities")
+		return
+	}
+	defer rows.Close()
+	items := []NonJumperActivity{}
+	for rows.Next() {
+		a, e := scanNonJumperActivity(rows)
+		if e != nil {
+			httpx.Error(w, 500, "failed to load non-jumper activities")
+			return
+		}
+		items = append(items, a)
+	}
+	httpx.WriteJSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createNonJumperActivity(w http.ResponseWriter, r *http.Request) {
+	eventID, err := parsePositiveIDParam(r, "eventID")
+	if err != nil {
+		httpx.Error(w, 400, "invalid event id")
+		return
+	}
+	var p nonJumperActivityPayload
+	if err = json.NewDecoder(r.Body).Decode(&p); err != nil {
+		httpx.Error(w, 400, "invalid request body")
+		return
+	}
+	if err = validateNonJumperActivity(&p); err != nil {
+		httpx.Error(w, 400, err.Error())
+		return
+	}
+	if err = h.validateActivityBudgetCurrency(r.Context(), eventID, &p); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a, err := scanNonJumperActivity(h.db.QueryRow(r.Context(), `INSERT INTO event_non_jumper_activities(event_id,kind,title,description,cost,cost_currency,sort_order) VALUES($1,$2,$3,$4,$5::numeric,$6,$7) RETURNING id,event_id,kind,title,description,cost::text,cost_currency,sort_order`, eventID, p.Kind, p.Title, p.Description, p.Cost, p.CostCurrency, p.SortOrder))
+	if err != nil {
+		httpx.Error(w, 500, "failed to create non-jumper activity")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, a)
+}
+
+func (h *Handler) updateNonJumperActivity(w http.ResponseWriter, r *http.Request) {
+	eventID, e1 := parsePositiveIDParam(r, "eventID")
+	activityID, e2 := parsePositiveIDParam(r, "activityID")
+	if e1 != nil || e2 != nil {
+		httpx.Error(w, 400, "invalid id")
+		return
+	}
+	var p nonJumperActivityPayload
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		httpx.Error(w, 400, "invalid request body")
+		return
+	}
+	if err := validateNonJumperActivity(&p); err != nil {
+		httpx.Error(w, 400, err.Error())
+		return
+	}
+	if err := h.validateActivityBudgetCurrency(r.Context(), eventID, &p); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a, err := scanNonJumperActivity(h.db.QueryRow(r.Context(), `UPDATE event_non_jumper_activities SET kind=$3,title=$4,description=$5,cost=$6::numeric,cost_currency=$7,sort_order=$8,updated_at=NOW() WHERE id=$1 AND event_id=$2 RETURNING id,event_id,kind,title,description,cost::text,cost_currency,sort_order`, activityID, eventID, p.Kind, p.Title, p.Description, p.Cost, p.CostCurrency, p.SortOrder))
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, 404, "activity not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, 500, "failed to update non-jumper activity")
+		return
+	}
+	httpx.WriteJSON(w, 200, a)
+}
+
+func (h *Handler) deleteNonJumperActivity(w http.ResponseWriter, r *http.Request) {
+	eventID, e1 := parsePositiveIDParam(r, "eventID")
+	activityID, e2 := parsePositiveIDParam(r, "activityID")
+	if e1 != nil || e2 != nil {
+		httpx.Error(w, 400, "invalid id")
+		return
+	}
+	tag, err := h.db.Exec(r.Context(), `DELETE FROM event_non_jumper_activities WHERE id=$1 AND event_id=$2`, activityID, eventID)
+	if err != nil {
+		httpx.Error(w, 500, "failed to delete non-jumper activity")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, 404, "activity not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type Season struct {
@@ -825,6 +1013,10 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to create event")
 		return
 	}
+	if _, err := budgets.EnsureEventBudgetTx(ctx, tx, event.ID, event.Name, event.Currency); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to initialize event budget")
+		return
+	}
 
 	if err := registrations.SyncEventRosterToRegistrationsTx(ctx, tx, event.ID, participantIDs, "event_roster"); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to sync registrations")
@@ -1297,6 +1489,10 @@ func (h *Handler) copyEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := row.Scan(&created.ID, &created.CreatedAt); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to copy event")
+		return
+	}
+	if _, err := budgets.EnsureEventBudgetTx(ctx, tx, created.ID, created.Name, created.Currency); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to initialize copied event budget")
 		return
 	}
 

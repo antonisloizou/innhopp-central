@@ -10,7 +10,6 @@ export const isProfileCompleteForRegistration = (profile: ParticipantProfile) =>
   hasText(profile.emergency_contact_phone) &&
   hasText(profile.license) &&
   hasText(profile.uses_packer) &&
-  hasText(profile.accommodation) &&
   hasText(profile.main_canopy) &&
   hasText(profile.wingload) &&
   typeof profile.years_in_sport === 'number' &&

@@ -10,6 +10,13 @@ type ImpersonatorSession = {
 
 export type AuthSession = ImpersonatorSession & {
   impersonator?: ImpersonatorSession;
+  onboarding_required: boolean;
+  pending_registration?: {
+    event_id: number;
+    event_name: string;
+    event_slug: string;
+    existing_registration: boolean;
+  };
 };
 
 type LoginResponse = {

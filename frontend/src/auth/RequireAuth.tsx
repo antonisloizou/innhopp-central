@@ -19,6 +19,14 @@ const RequireAuth = () => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
+  if (user.onboarding_required && location.pathname !== '/profile') {
+    const slug = user.pending_registration?.event_slug;
+    const target = slug
+      ? `/profile?publicRegistration=1&registrationSlug=${encodeURIComponent(slug)}`
+      : '/profile?publicRegistration=1';
+    return <Navigate to={target} replace />;
+  }
+
   return <Outlet />;
 };
 

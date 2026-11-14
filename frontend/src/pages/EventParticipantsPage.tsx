@@ -604,7 +604,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
   const accommodationCounts = useMemo(() => {
     const counts = new Map([...accommodationOptions, 'N/A'].map((label) => [label, 0]));
     rows.filter((row) => activeStatuses.has(row.registration.status)).forEach((row) => {
-      const accommodation = row.profile?.accommodation?.trim();
+      const accommodation = row.registration.event_details?.accommodation?.trim();
       const label = accommodation && accommodationOptions.includes(accommodation as typeof accommodationOptions[number]) ? accommodation : 'N/A';
       counts.set(label, (counts.get(label) || 0) + 1);
     });
@@ -998,7 +998,7 @@ export const ParticipantRosterStats = ({ source }: { source?: RosterStatsSource 
             <h3 className="registration-stat-label">Accommodation</h3>
             <InteractiveDonutWithLegend segments={accommodationCounts} colors={chartPalette} ariaLabel={`${accommodationTotal} participants by accommodation`} onSelect={(label) => openChartFilter(`Accommodation: ${label}`, (row) => {
                 if (!activeStatuses.has(row.registration.status)) return false;
-                const accommodation = row.profile?.accommodation?.trim();
+                const accommodation = row.registration.event_details?.accommodation?.trim();
                 const selected = accommodationCounts.find((item) => item.label === label);
                 return label === 'N/A' ? !accommodation || !accommodationOptions.includes(accommodation as typeof accommodationOptions[number]) : accommodation === selected?.value;
               })} />

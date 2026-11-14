@@ -60,12 +60,22 @@ const baseParticipantColumns: Array<Column<ParticipantRow>> = [
   { label: 'T-shirt size', value: (row) => profileValue(row, 'tshirt_size'), width: 14 },
   { label: 'T-shirt gender', value: (row) => profileValue(row, 'tshirt_gender'), width: 16 },
   { label: 'Dietary restrictions', value: (row) => profileValue(row, 'dietary_restrictions'), width: 30 },
-  { label: 'Accommodation', value: (row) => profileValue(row, 'accommodation'), width: 24 },
-  { label: 'Accommodation roommate', value: (row) => profileValue(row, 'accommodation_roommate'), width: 26 },
   { label: 'Medical conditions', value: (row) => profileValue(row, 'medical_conditions'), width: 30 },
   { label: 'Medical expertise', value: (row) => profileValue(row, 'medical_expertise'), width: 28 },
   { label: 'HSS qualities', value: (row) => profileValue(row, 'hss_qualities'), width: 28 },
   { label: 'Profile notes', value: (row) => profileValue(row, 'notes'), width: 38 },
+  { label: 'Coming solo or in group', value: (row) => titleCase(row.registration.event_details?.attendance_type || ''), width: 24 },
+  { label: 'Group size', value: (row) => row.registration.event_details?.group_size, width: 13 },
+  { label: 'Group names', value: (row) => row.registration.event_details?.group_names, width: 36 },
+  { label: 'Accommodation preference', value: (row) => row.registration.event_details?.accommodation, width: 30 },
+  { label: 'Preferred roommate', value: (row) => row.registration.event_details?.accommodation_roommate, width: 28 },
+  { label: 'Main payment method', value: (row) => row.registration.event_details?.payment_method === 'bank_transfer' ? 'Bank transfer' : row.registration.event_details?.payment_method === 'stripe' ? 'Secure Online Payment via Stripe' : '', width: 34 },
+  { label: 'Discount eligibility and previous events', value: (row) => row.registration.event_details?.discount_eligibility, width: 42 },
+  { label: 'How they heard about The Innhopp Project', value: (row) => row.registration.event_details?.heard_about_project, width: 42 },
+  { label: 'How they heard about this event', value: (row) => row.registration.event_details?.heard_about_event, width: 42 },
+  { label: 'Additional registration information', value: (row) => row.registration.event_details?.additional_information, width: 42 },
+  { label: 'Non-jumper opt-in activities', value: (row) => (row.registration.event_details?.non_jumper_opt_ins || []).map((item) => `${item.title}${item.cost ? ` (COST: ${item.cost} ${item.cost_currency || ''})` : ''}`).join(', '), width: 42 },
+  { label: 'Non-jumper opt-out activities', value: (row) => (row.registration.event_details?.non_jumper_opt_outs || []).map((item) => item.title).join(', '), width: 42 },
   { label: 'Registration status', value: (row) => row.registration.status, width: 22 },
   { label: 'Registered date', value: (row) => dateOnly(row.registration.registered_at), width: 17 },
   { label: 'Deposit paid date', value: (row) => dateOnly(row.registration.deposit_paid_at), width: 19 },
@@ -113,7 +123,7 @@ const missingRequiredColumn = (row: ParticipantRow, label: string) => {
   const profile = row.profile;
   if (!profile) return new Set([
     'Name', 'Email', 'Phone', 'Emergency contact name', 'Emergency contact phone', 'Years in sport',
-    'Jump count', 'Recent jump count', 'Main canopy', 'Wingload', 'License', 'Uses packer', 'Accommodation'
+    'Jump count', 'Recent jump count', 'Main canopy', 'Wingload', 'License', 'Uses packer'
   ]).has(label);
   const checks: Record<string, boolean> = {
     Name: !hasText(profile.full_name),
@@ -127,8 +137,7 @@ const missingRequiredColumn = (row: ParticipantRow, label: string) => {
     'Main canopy': !hasText(profile.main_canopy),
     Wingload: !hasText(profile.wingload),
     License: !hasText(profile.license),
-    'Uses packer': !hasText(profile.uses_packer),
-    Accommodation: !hasText(profile.accommodation)
+    'Uses packer': !hasText(profile.uses_packer)
   };
   return checks[label] || false;
 };

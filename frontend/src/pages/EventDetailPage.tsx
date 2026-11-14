@@ -21,7 +21,7 @@ import {
   listAircraft,
   listEvents,
   listSeasons,
-  updateEvent
+  updateEvent, NonJumperActivity, listNonJumperActivities, createNonJumperActivity, deleteNonJumperActivity
 } from '../api/events';
 import {
   CreateParticipantPayload,
@@ -71,6 +71,7 @@ import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { ISO_CURRENCY_CODES } from '../constants/currencies';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { getBudgetCurrencies, getEventBudget } from '../api/budgets';
 
 const hasText = (value?: string | null) => !!value && value.trim().length > 0;
 
@@ -411,7 +412,7 @@ const currentSignature = useMemo(
       setError(null);
 
       try {
-        const [event, eventRegistrations, accommodationData, transportData, groundCrewData, otherData, mealData] =
+        const [event, eventRegistrations, accommodationData, transportData, groundCrewData, otherData, mealData, nonJumperData, budgetCurrencyData] =
           await Promise.all([
             getEvent(targetEventID),
             listEventRegistrations(targetEventID),
@@ -419,7 +420,7 @@ const currentSignature = useMemo(
             listTransports(),
             listGroundCrews(),
             listOthers(),
-            listMeals()
+            listMeals(), listNonJumperActivities(targetEventID), getEventBudget(targetEventID).then((budget) => getBudgetCurrencies(budget.id))
           ]);
 
         const normalizedInnhopps = normalizeInnhopps(event);
@@ -460,6 +461,8 @@ const currentSignature = useMemo(
         setGroundCrews(Array.isArray(groundCrewData) ? groundCrewData.filter((g) => g.event_id === targetEventID) : []);
         setOthers(Array.isArray(otherData) ? otherData.filter((o) => o.event_id === targetEventID) : []);
         setMeals(Array.isArray(mealData) ? mealData.filter((m) => m.event_id === targetEventID) : []);
+        setNonJumperActivities(Array.isArray(nonJumperData) ? nonJumperData : []);
+        setActivityCurrencyOptions(Array.from(new Set([budgetCurrencyData.base_currency, ...(budgetCurrencyData.currencies || [])].map(code => code.trim().toUpperCase()).filter(Boolean))));
         setLastSavedSignature(
           buildSignature(nextForm, normalizedParticipants, normalizedAirfields, normalizedInnhopps, normalizedAircraft)
         );
@@ -541,6 +544,12 @@ const currentSignature = useMemo(
     notes: ''
 });
 const [transports, setTransports] = useState<Transport[]>([]);
+  const [nonJumperActivities, setNonJumperActivities] = useState<NonJumperActivity[]>([]);
+  const [activityCurrencyOptions, setActivityCurrencyOptions] = useState<string[]>([]);
+  const [activityDrafts, setActivityDrafts] = useState({opt_in:{title:'',description:'',cost:'',cost_currency:''},opt_out:{title:'',description:'',cost:'',cost_currency:''}});
+  const [showActivityForms, setShowActivityForms] = useState({ opt_in: false, opt_out: false });
+  const saveActivity = async (kind:'opt_in'|'opt_out') => { if(!eventId)return; const draft=activityDrafts[kind]; try { const created=await createNonJumperActivity(Number(eventId),{kind,title:draft.title,description:draft.description,cost:kind==='opt_in'?draft.cost:null,cost_currency:kind==='opt_in'?(draft.cost_currency||normalizedRegistrationCurrency):null,sort_order:nonJumperActivities.filter(a=>a.kind===kind).length});setNonJumperActivities(p=>[...p,created]);setActivityDrafts(p=>({...p,[kind]:{title:'',description:'',cost:'',cost_currency:''}}));setShowActivityForms(p=>({...p,[kind]:false})); } catch(err){setError(err instanceof Error?err.message:'Failed to add activity')} };
+  const removeActivity = async (id:number) => {if(!eventId)return;try{await deleteNonJumperActivity(Number(eventId),id);setNonJumperActivities(p=>p.filter(a=>a.id!==id))}catch(err){setError(err instanceof Error?err.message:'Failed to delete activity')}};
   const [groundCrews, setGroundCrews] = useState<GroundCrew[]>([]);
   const [others, setOthers] = useState<OtherLogistic[]>([]);
   const [meals, setMeals] = useState<Meal[]>([]);
@@ -686,6 +695,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     | 'airfields'
     | 'participants'
     | 'staff'
+    | 'nonJumperActivities'
     | 'accommodations'
     | 'transports'
     | 'groundCrews'
@@ -699,6 +709,7 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
     airfields: false,
     participants: false,
     staff: false,
+    nonJumperActivities: false,
     accommodations: false,
     transports: false,
     groundCrews: false,
@@ -3510,6 +3521,31 @@ const missingOtherCoords = !hasText(otherForm.coordinates);
         )}
           </>
         )}
+      </article>
+
+      <article className="card">
+        <header className="card-header event-detail-section-header" onClick={() => toggleSection('nonJumperActivities')}>
+          <div className="event-detail-section-header-main"><button className="ghost" type="button" onClick={(e)=>{e.stopPropagation();toggleSection('nonJumperActivities')}}>{openSections.nonJumperActivities?'▾':'▸'}</button><h3 className="event-detail-section-title">Non-jumper activities</h3></div>
+          <span className="badge neutral">{nonJumperActivities.length} ACTIVITIES</span>
+        </header>
+        {openSections.nonJumperActivities && <div className="stack event-detail-top-margin">
+          {(['opt_in','opt_out'] as const).map((kind)=><section className="stack" key={kind}>
+            <h4>{kind==='opt_in'?'Opt In':'Opt Out'}</h4>
+            {nonJumperActivities.filter(a=>a.kind===kind).map((a)=><article className="non-jumper-activity-row" key={a.id}>
+              <div className="non-jumper-activity-copy">
+                <div className="non-jumper-activity-title"><strong>{a.title}</strong>{kind==='opt_in'&&a.cost?<span className="badge neutral">COST: {a.cost} {a.cost_currency || normalizedRegistrationCurrency}</span>:null}</div>
+                {a.description?<p className="muted">{a.description}</p>:null}
+              </div>
+              <button type="button" className="ghost danger" onClick={()=>void removeActivity(a.id)}>Delete</button>
+            </article>)}
+            {!showActivityForms[kind] ? <div><button type="button" className="primary" onClick={()=>setShowActivityForms(p=>({...p,[kind]:true}))}>Add {kind==='opt_in'?'opt-in':'opt-out'} activity</button></div> : <div className="form-grid non-jumper-activity-create-form">
+              <label className="form-field"><span>Title</span><input value={activityDrafts[kind].title} onChange={e=>setActivityDrafts(p=>({...p,[kind]:{...p[kind],title:e.target.value}}))}/></label>
+              {kind==='opt_in'&&<><label className="form-field"><span>Cost</span><input type="number" min="0" step="0.01" value={activityDrafts[kind].cost} onChange={e=>setActivityDrafts(p=>({...p,[kind]:{...p[kind],cost:e.target.value}}))}/></label><label className="form-field"><span>Currency</span><select value={activityDrafts[kind].cost_currency || activityCurrencyOptions[0] || normalizedRegistrationCurrency} onChange={e=>setActivityDrafts(p=>({...p,[kind]:{...p[kind],cost_currency:e.target.value}}))}>{activityCurrencyOptions.map(code=><option key={code} value={code}>{code}</option>)}</select></label></>}
+              <label className="form-field form-field-full-span"><span>Description</span><textarea value={activityDrafts[kind].description} onChange={e=>setActivityDrafts(p=>({...p,[kind]:{...p[kind],description:e.target.value}}))}/></label>
+              <div className="form-actions"><button type="button" className="primary" disabled={!activityDrafts[kind].title.trim()} onClick={()=>void saveActivity(kind)}>Add activity</button><button type="button" className="ghost" onClick={()=>setShowActivityForms(p=>({...p,[kind]:false}))}>Cancel</button></div>
+            </div>}
+          </section>)}
+        </div>}
       </article>
 
       <article className="card">

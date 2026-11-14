@@ -5058,6 +5058,25 @@ button.ghost {
   color: var(--text-strong);
 }
 
+.event-registration-details-list {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.event-registration-details-list > div {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--divider-color);
+}
+
+.event-registration-details-list > div:first-child {
+  padding-top: 0;
+}
+
+.event-registration-details-list > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 .card-footer {
   display: flex;
   flex-wrap: wrap;
@@ -8435,3 +8454,20 @@ button.ghost.event-route-preview-overlay-button {
     max-width: 100%;
   }
 }
+.registration-activity-fieldset { min-width:0; margin:0; padding:1rem; border:1px solid var(--panel-input-border); border-radius:.85rem; }
+.registration-activity-fieldset legend { padding:0 .45rem; color:var(--text-strong); font-size:1rem; font-weight:700; }
+.registration-activity-list { display:grid; gap:.65rem; }
+.form-field .registration-activity-choice { display:flex; gap:.85rem; align-items:flex-start; padding:1rem; border:1px solid var(--panel-input-border); border-radius:.75rem; background:var(--panel-input-bg); cursor:pointer; transition:border-color .15s ease, background .15s ease, transform .15s ease; }
+.form-field .registration-activity-choice:hover { border-color:#2563eb; background:color-mix(in srgb, var(--panel-input-bg) 88%, #2563eb 12%); }
+.form-field .registration-activity-choice:has(input:checked) { border-color:#2563eb; background:color-mix(in srgb, var(--panel-input-bg) 84%, #2563eb 16%); }
+.form-field .registration-activity-choice > input[type='checkbox'] { flex:0 0 auto; width:1.2rem; height:1.2rem; min-width:1.2rem; margin:.15rem 0 0; padding:0; accent-color:#2563eb; }
+.form-field .registration-activity-choice > span { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.35rem .75rem; flex:1; min-width:0; color:var(--text-strong); font-size:1rem; letter-spacing:normal; text-transform:none; }
+.registration-activity-choice strong { min-width:0; overflow-wrap:anywhere; }
+.form-field .registration-activity-choice .badge { grid-column:2; grid-row:1; align-self:start; justify-self:end; color:var(--text-strong); font-size:.75rem; letter-spacing:.05em; white-space:nowrap; }
+.form-field .registration-activity-choice small { grid-column:1 / -1; line-height:1.45; letter-spacing:normal; text-transform:none; }
+@media (max-width:640px) { .form-field .registration-activity-choice > span { grid-template-columns:1fr; } .form-field .registration-activity-choice .badge { grid-column:1; grid-row:auto; justify-self:start; } }
+.non-jumper-activity-row { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; padding:.85rem 1rem; border:1px solid var(--border-color, #d8d8d8); border-radius:.75rem; background:rgba(255,255,255,.35); }
+.non-jumper-activity-copy { min-width:0; display:grid; gap:.3rem; }
+.non-jumper-activity-copy p { margin:0; white-space:pre-wrap; }
+.non-jumper-activity-title { display:flex; align-items:center; flex-wrap:wrap; gap:.65rem; }
+.non-jumper-activity-create-form { padding:1rem; border:1px solid var(--border-color, #d8d8d8); border-radius:.75rem; }

@@ -72,8 +72,11 @@ func NewHandler(db *pgxpool.Pool, streams ...*realtime.Hub) *Handler {
 func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r := chi.NewRouter()
 	r.Get("/public/events/{slug}", h.getPublicEvent)
+	r.Get("/public/event-ids/{eventID}/non-jumper-activities", h.getPublicNonJumperActivities)
+	r.Post("/public/events/{slug}/intent", h.createPublicRegistrationIntent)
 	r.Post("/public/events/{slug}/register", h.createPublicRegistration)
 	r.Post("/public/events/{slug}/claim", h.createClaimedPublicRegistration)
+	r.Post("/onboarding/complete", h.completeExistingRegistrationOnboarding)
 	r.Get("/me", h.listOwnRegistrations)
 	r.Get("/me/{registrationID}", h.getOwnRegistration)
 	r.With(enforcer.Authorize(rbac.PermissionViewRegistrations)).Get("/events/{eventID}", h.listEventRegistrations)
@@ -90,31 +93,58 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 }
 
 type Registration struct {
-	ID                  int64                  `json:"id"`
-	EventID             int64                  `json:"event_id"`
-	EventName           string                 `json:"event_name,omitempty"`
-	ParticipantID       int64                  `json:"participant_id"`
-	ParticipantName     string                 `json:"participant_name,omitempty"`
-	ParticipantEmail    string                 `json:"participant_email,omitempty"`
-	Status              string                 `json:"status"`
-	Source              string                 `json:"source,omitempty"`
-	RegisteredAt        time.Time              `json:"registered_at"`
-	DepositDueAt        *time.Time             `json:"deposit_due_at,omitempty"`
-	DepositPaidAt       *time.Time             `json:"deposit_paid_at,omitempty"`
-	MainInvoiceDueAt    *time.Time             `json:"main_invoice_due_at,omitempty"`
-	MainInvoicePaidAt   *time.Time             `json:"main_invoice_paid_at,omitempty"`
-	CancelledAt         *time.Time             `json:"cancelled_at,omitempty"`
-	ExpiredAt           *time.Time             `json:"expired_at,omitempty"`
-	WaitlistPosition    *int                   `json:"waitlist_position,omitempty"`
-	StaffOwnerAccountID *int64                 `json:"staff_owner_account_id,omitempty"`
-	Tags                []string               `json:"tags"`
-	InternalNotes       string                 `json:"internal_notes,omitempty"`
-	Checklist           map[string]bool        `json:"checklist"`
-	ChecklistText       map[string]string      `json:"checklist_text"`
-	CreatedAt           time.Time              `json:"created_at"`
-	UpdatedAt           time.Time              `json:"updated_at"`
-	Payments            []RegistrationPayment  `json:"payments,omitempty"`
-	Activities          []RegistrationActivity `json:"activities,omitempty"`
+	ID                  int64                    `json:"id"`
+	EventID             int64                    `json:"event_id"`
+	EventName           string                   `json:"event_name,omitempty"`
+	ParticipantID       int64                    `json:"participant_id"`
+	ParticipantName     string                   `json:"participant_name,omitempty"`
+	ParticipantEmail    string                   `json:"participant_email,omitempty"`
+	Status              string                   `json:"status"`
+	Source              string                   `json:"source,omitempty"`
+	RegisteredAt        time.Time                `json:"registered_at"`
+	DepositDueAt        *time.Time               `json:"deposit_due_at,omitempty"`
+	DepositPaidAt       *time.Time               `json:"deposit_paid_at,omitempty"`
+	MainInvoiceDueAt    *time.Time               `json:"main_invoice_due_at,omitempty"`
+	MainInvoicePaidAt   *time.Time               `json:"main_invoice_paid_at,omitempty"`
+	CancelledAt         *time.Time               `json:"cancelled_at,omitempty"`
+	ExpiredAt           *time.Time               `json:"expired_at,omitempty"`
+	WaitlistPosition    *int                     `json:"waitlist_position,omitempty"`
+	StaffOwnerAccountID *int64                   `json:"staff_owner_account_id,omitempty"`
+	Tags                []string                 `json:"tags"`
+	InternalNotes       string                   `json:"internal_notes,omitempty"`
+	EventDetails        RegistrationEventDetails `json:"event_details"`
+	Checklist           map[string]bool          `json:"checklist"`
+	ChecklistText       map[string]string        `json:"checklist_text"`
+	CreatedAt           time.Time                `json:"created_at"`
+	UpdatedAt           time.Time                `json:"updated_at"`
+	Payments            []RegistrationPayment    `json:"payments,omitempty"`
+	Activities          []RegistrationActivity   `json:"activities,omitempty"`
+}
+
+type RegistrationEventDetails struct {
+	AttendanceType        string                    `json:"attendance_type"`
+	GroupSize             *int                      `json:"group_size,omitempty"`
+	GroupNames            string                    `json:"group_names,omitempty"`
+	Accommodation         string                    `json:"accommodation"`
+	AccommodationRoommate string                    `json:"accommodation_roommate,omitempty"`
+	PaymentMethod         string                    `json:"payment_method"`
+	DiscountEligibility   string                    `json:"discount_eligibility,omitempty"`
+	HeardAboutProject     string                    `json:"heard_about_project"`
+	HeardAboutEvent       string                    `json:"heard_about_event"`
+	AdditionalInformation string                    `json:"additional_information,omitempty"`
+	NonJumperOptInIDs     []int64                   `json:"non_jumper_opt_in_ids,omitempty"`
+	NonJumperOptOutIDs    []int64                   `json:"non_jumper_opt_out_ids,omitempty"`
+	NonJumperOptIns       []PublicNonJumperActivity `json:"non_jumper_opt_ins,omitempty"`
+	NonJumperOptOuts      []PublicNonJumperActivity `json:"non_jumper_opt_outs,omitempty"`
+}
+
+type PublicNonJumperActivity struct {
+	ID           int64   `json:"id"`
+	Kind         string  `json:"kind"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Cost         *string `json:"cost,omitempty"`
+	CostCurrency string  `json:"cost_currency,omitempty"`
 }
 
 type RegistrationPayment struct {
@@ -221,39 +251,41 @@ type registrationEventSettings struct {
 }
 
 type PublicRegistrationEvent struct {
-	ID                            int64      `json:"id"`
-	Name                          string     `json:"name"`
-	Location                      string     `json:"location,omitempty"`
-	Slots                         int        `json:"slots"`
-	RemainingSlots                int        `json:"remaining_slots"`
-	StartsAt                      time.Time  `json:"starts_at"`
-	EndsAt                        *time.Time `json:"ends_at,omitempty"`
-	PublicRegistrationSlug        string     `json:"public_registration_slug"`
-	RegistrationOpenAt            *time.Time `json:"registration_open_at,omitempty"`
-	MainInvoiceDeadline           *time.Time `json:"main_invoice_deadline,omitempty"`
-	DepositAmount                 string     `json:"deposit_amount,omitempty"`
-	MainInvoiceAmount             string     `json:"main_invoice_amount,omitempty"`
-	Currency                      string     `json:"currency"`
-	MinimumRegistrations          int        `json:"minimum_registrations"`
-	CommercialStatus              string     `json:"commercial_status"`
-	RegistrationAvailable         bool       `json:"registration_available"`
-	RegistrationUnavailableReason string     `json:"registration_unavailable_reason,omitempty"`
+	ID                            int64                     `json:"id"`
+	Name                          string                    `json:"name"`
+	Location                      string                    `json:"location,omitempty"`
+	Slots                         int                       `json:"slots"`
+	RemainingSlots                int                       `json:"remaining_slots"`
+	StartsAt                      time.Time                 `json:"starts_at"`
+	EndsAt                        *time.Time                `json:"ends_at,omitempty"`
+	PublicRegistrationSlug        string                    `json:"public_registration_slug"`
+	RegistrationOpenAt            *time.Time                `json:"registration_open_at,omitempty"`
+	MainInvoiceDeadline           *time.Time                `json:"main_invoice_deadline,omitempty"`
+	DepositAmount                 string                    `json:"deposit_amount,omitempty"`
+	MainInvoiceAmount             string                    `json:"main_invoice_amount,omitempty"`
+	Currency                      string                    `json:"currency"`
+	MinimumRegistrations          int                       `json:"minimum_registrations"`
+	CommercialStatus              string                    `json:"commercial_status"`
+	RegistrationAvailable         bool                      `json:"registration_available"`
+	RegistrationUnavailableReason string                    `json:"registration_unavailable_reason,omitempty"`
+	NonJumperActivities           []PublicNonJumperActivity `json:"non_jumper_activities"`
 }
 
 type publicRegistrationPayload struct {
-	FullName         string `json:"full_name"`
-	Email            string `json:"email"`
-	Phone            string `json:"phone"`
-	Notes            string `json:"notes"`
-	EmergencyContact string `json:"emergency_contact"`
-	Whatsapp         string `json:"whatsapp"`
-	Instagram        string `json:"instagram"`
-	Citizenship      string `json:"citizenship"`
-	DateOfBirth      string `json:"date_of_birth"`
-	YearsInSport     *int   `json:"years_in_sport"`
-	JumpCount        *int   `json:"jump_count"`
-	RecentJumpCount  *int   `json:"recent_jump_count"`
-	License          string `json:"license"`
+	FullName         string                   `json:"full_name"`
+	Email            string                   `json:"email"`
+	Phone            string                   `json:"phone"`
+	Notes            string                   `json:"notes"`
+	EmergencyContact string                   `json:"emergency_contact"`
+	Whatsapp         string                   `json:"whatsapp"`
+	Instagram        string                   `json:"instagram"`
+	Citizenship      string                   `json:"citizenship"`
+	DateOfBirth      string                   `json:"date_of_birth"`
+	YearsInSport     *int                     `json:"years_in_sport"`
+	JumpCount        *int                     `json:"jump_count"`
+	RecentJumpCount  *int                     `json:"recent_jump_count"`
+	License          string                   `json:"license"`
+	EventDetails     RegistrationEventDetails `json:"event_details"`
 }
 
 const registrationSelectColumns = `
@@ -277,6 +309,7 @@ const registrationSelectColumns = `
 	COALESCE(r.tags, ARRAY[]::TEXT[]),
 	COALESCE(r.internal_notes, ''),
 	COALESCE(r.registration_checklist, '{}'::JSONB),
+	COALESCE(r.event_details, '{}'::JSONB),
 	r.created_at,
 	r.updated_at
 `
@@ -397,6 +430,7 @@ func currentAccountID(ctx context.Context) *int64 {
 func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registration, error) {
 	var registration Registration
 	var checklistJSON []byte
+	var eventDetailsJSON []byte
 	if err := scanner.Scan(
 		&registration.ID,
 		&registration.EventID,
@@ -418,6 +452,7 @@ func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registrati
 		&registration.Tags,
 		&registration.InternalNotes,
 		&checklistJSON,
+		&eventDetailsJSON,
 		&registration.CreatedAt,
 		&registration.UpdatedAt,
 	); err != nil {
@@ -426,7 +461,101 @@ func scanRegistration(scanner interface{ Scan(dest ...any) error }) (*Registrati
 	registration.ParticipantEmail = strings.ToLower(strings.TrimSpace(registration.ParticipantEmail))
 	registration.Tags = normalizeTags(registration.Tags)
 	registration.Checklist, registration.ChecklistText = normalizeRegistrationChecklistJSON(checklistJSON)
+	if len(eventDetailsJSON) > 0 && string(eventDetailsJSON) != "null" {
+		if err := json.Unmarshal(eventDetailsJSON, &registration.EventDetails); err != nil {
+			return nil, err
+		}
+	}
 	return &registration, nil
+}
+
+func normalizeRegistrationEventDetails(details RegistrationEventDetails) (RegistrationEventDetails, error) {
+	details.AttendanceType = strings.ToLower(strings.TrimSpace(details.AttendanceType))
+	details.GroupNames = strings.TrimSpace(details.GroupNames)
+	details.Accommodation = strings.TrimSpace(details.Accommodation)
+	details.AccommodationRoommate = strings.TrimSpace(details.AccommodationRoommate)
+	details.PaymentMethod = strings.ToLower(strings.TrimSpace(details.PaymentMethod))
+	details.DiscountEligibility = strings.TrimSpace(details.DiscountEligibility)
+	details.HeardAboutProject = strings.TrimSpace(details.HeardAboutProject)
+	details.HeardAboutEvent = strings.TrimSpace(details.HeardAboutEvent)
+	details.AdditionalInformation = strings.TrimSpace(details.AdditionalInformation)
+	details.NonJumperOptInIDs = uniquePositiveIDs(details.NonJumperOptInIDs)
+	details.NonJumperOptOutIDs = uniquePositiveIDs(details.NonJumperOptOutIDs)
+	if details.AttendanceType != "solo" && details.AttendanceType != "group" {
+		return details, errors.New("attendance_type must be solo or group")
+	}
+	if details.AttendanceType == "group" {
+		if details.GroupSize == nil || *details.GroupSize < 2 {
+			return details, errors.New("group_size must be at least 2 when registering as a group")
+		}
+		if details.GroupNames == "" {
+			return details, errors.New("group_names is required when registering as a group")
+		}
+	} else {
+		details.GroupSize = nil
+		details.GroupNames = ""
+	}
+	if details.Accommodation != "Shared (usually 2 per room)" && details.Accommodation != "Single Room (additional cost)" {
+		return details, errors.New("accommodation must be shared or single room")
+	}
+	if details.Accommodation != "Shared (usually 2 per room)" {
+		details.AccommodationRoommate = ""
+	}
+	if details.PaymentMethod != "bank_transfer" && details.PaymentMethod != "stripe" {
+		return details, errors.New("payment_method must be bank_transfer or stripe")
+	}
+	if details.HeardAboutProject == "" || details.HeardAboutEvent == "" {
+		return details, errors.New("heard_about_project and heard_about_event are required")
+	}
+	return details, nil
+}
+
+func uniquePositiveIDs(values []int64) []int64 {
+	seen := map[int64]bool{}
+	out := make([]int64, 0, len(values))
+	for _, v := range values {
+		if v > 0 && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func hydrateNonJumperSelections(ctx context.Context, tx pgx.Tx, eventID int64, details *RegistrationEventDetails) error {
+	details.NonJumperOptIns = nil
+	details.NonJumperOptOuts = nil
+	ids := append(append([]int64{}, details.NonJumperOptInIDs...), details.NonJumperOptOutIDs...)
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id,kind,title,description,cost::text,cost_currency FROM event_non_jumper_activities WHERE event_id=$1 AND id=ANY($2::bigint[]) ORDER BY kind,sort_order,id`, eventID, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	in := map[int64]bool{}
+	out := map[int64]bool{}
+	for _, id := range details.NonJumperOptInIDs {
+		in[id] = true
+	}
+	for _, id := range details.NonJumperOptOutIDs {
+		out[id] = true
+	}
+	for rows.Next() {
+		var a PublicNonJumperActivity
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Title, &a.Description, &a.Cost, &a.CostCurrency); err != nil {
+			return err
+		}
+		if a.Kind == "opt_in" && in[a.ID] {
+			details.NonJumperOptIns = append(details.NonJumperOptIns, a)
+		}
+		if a.Kind == "opt_out" && out[a.ID] {
+			a.Cost = nil
+			details.NonJumperOptOuts = append(details.NonJumperOptOuts, a)
+		}
+	}
+	return rows.Err()
 }
 
 var validRegistrationChecklistItems = map[string]struct{}{
@@ -1278,6 +1407,7 @@ func validateDepositRequired(depositAmount string) error {
 
 func loadPublicRegistrationEvent(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, slug string) (*PublicRegistrationEvent, error) {
 	var event PublicRegistrationEvent
 	if err := q.QueryRow(ctx, `
@@ -1354,7 +1484,41 @@ func loadPublicRegistrationEvent(ctx context.Context, q interface {
 			event.RegistrationUnavailableReason = err.Error()
 		}
 	}
+	event.NonJumperActivities, _ = loadPublicNonJumperActivities(ctx, q, event.ID)
 	return &event, nil
+}
+
+func loadPublicNonJumperActivities(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, eventID int64) ([]PublicNonJumperActivity, error) {
+	rows, err := q.Query(ctx, `SELECT id,kind,title,description,cost::text,cost_currency FROM event_non_jumper_activities WHERE event_id=$1 ORDER BY kind,sort_order,id`, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PublicNonJumperActivity{}
+	for rows.Next() {
+		var a PublicNonJumperActivity
+		if err := rows.Scan(&a.ID, &a.Kind, &a.Title, &a.Description, &a.Cost, &a.CostCurrency); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+func (h *Handler) getPublicNonJumperActivities(w http.ResponseWriter, r *http.Request) {
+	eventID, err := strconv.ParseInt(chi.URLParam(r, "eventID"), 10, 64)
+	if err != nil || eventID <= 0 {
+		httpx.Error(w, 400, "invalid event id")
+		return
+	}
+	items, err := loadPublicNonJumperActivities(r.Context(), h.db, eventID)
+	if err != nil {
+		httpx.Error(w, 500, "failed to load non-jumper activities")
+		return
+	}
+	httpx.WriteJSON(w, 200, items)
 }
 
 func publicDepositDueAt(now time.Time, event *PublicRegistrationEvent) *time.Time {
@@ -1534,7 +1698,6 @@ func isProfileCompleteForRegistrationTx(ctx context.Context, tx pgx.Tx, particip
 			AND btrim(COALESCE(emergency_contact_phone, '')) <> ''
 			AND btrim(COALESCE(license, '')) <> ''
 			AND btrim(COALESCE(uses_packer, '')) <> ''
-			AND btrim(COALESCE(accommodation, '')) <> ''
 			AND btrim(COALESCE(main_canopy, '')) <> ''
 			AND btrim(COALESCE(wingload, '')) <> ''
 			AND years_in_sport IS NOT NULL
@@ -1574,7 +1737,7 @@ func normalizeAccountRoles(values []string) []string {
 	return roles
 }
 
-func createPublicRegistrationTx(ctx context.Context, tx pgx.Tx, event *PublicRegistrationEvent, participantID int64, source, activitySummary string, accountID *int64) (int64, error) {
+func createPublicRegistrationTx(ctx context.Context, tx pgx.Tx, event *PublicRegistrationEvent, participantID int64, source, activitySummary string, details RegistrationEventDetails, accountID *int64) (int64, error) {
 	if event == nil {
 		return 0, errors.New("public registration event not found")
 	}
@@ -1597,16 +1760,31 @@ func createPublicRegistrationTx(ctx context.Context, tx pgx.Tx, event *PublicReg
 	depositDueAt := publicDepositDueAt(registeredAt, event)
 	mainInvoiceDueAt := toOptionalUTCDate(event.MainInvoiceDeadline)
 	status := "deposit_pending"
+	var participantLicense string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(license,'') FROM participant_profiles WHERE id=$1`, participantID).Scan(&participantLicense); err != nil {
+		return 0, err
+	}
+	if !strings.EqualFold(strings.TrimSpace(participantLicense), "Non jumper") {
+		details.NonJumperOptInIDs = nil
+		details.NonJumperOptOutIDs = nil
+	}
+	if err := hydrateNonJumperSelections(ctx, tx, event.ID, &details); err != nil {
+		return 0, err
+	}
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return 0, err
+	}
 
 	var registrationID int64
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO event_registrations (
-			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at, tags, internal_notes
+			event_id, participant_id, status, source, registered_at, deposit_due_at, main_invoice_due_at, tags, internal_notes, event_details
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], ''
+			$1, $2, $3, $4, $5, $6, $7, ARRAY[]::TEXT[], '', $8::jsonb
 		)
 		RETURNING id
-	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt).Scan(&registrationID); err != nil {
+	`, event.ID, participantID, status, strings.TrimSpace(source), registeredAt, depositDueAt, mainInvoiceDueAt, string(detailsJSON)).Scan(&registrationID); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -1697,6 +1875,58 @@ func (h *Handler) getPublicEvent(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, event)
 }
 
+func (h *Handler) createPublicRegistrationIntent(w http.ResponseWriter, r *http.Request) {
+	claims := auth.FromContext(r.Context())
+	if claims == nil || claims.AccountID <= 0 {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
+	if slug == "" {
+		httpx.Error(w, http.StatusBadRequest, "registration slug is required")
+		return
+	}
+	event, err := loadPublicRegistrationEvent(r.Context(), h.db, slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "public registration event not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load public registration event")
+		return
+	}
+	if !event.RegistrationAvailable {
+		httpx.Error(w, http.StatusForbidden, event.RegistrationUnavailableReason)
+		return
+	}
+	result, err := h.db.Exec(r.Context(), `
+		INSERT INTO registration_intents (account_id, event_id, status, created_at, completed_at)
+		SELECT $1, e.id, 'pending', NOW(), NULL
+		FROM events e
+		WHERE e.public_registration_slug = $2
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM event_registrations r
+			JOIN participant_profiles p ON p.id = r.participant_id
+			WHERE r.event_id = e.id
+			  AND p.account_id = $1
+			  AND r.cancelled_at IS NULL
+			  AND r.expired_at IS NULL
+		  )
+		ON CONFLICT (account_id, event_id) DO UPDATE
+		SET status = 'pending', created_at = NOW(), completed_at = NULL
+	`, claims.AccountID, slug)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to start event registration")
+		return
+	}
+	if result.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "public registration event not found or already registered")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]bool{"onboarding_required": true})
+}
+
 func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimSpace(chi.URLParam(r, "slug"))
 	if slug == "" {
@@ -1713,6 +1943,12 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusBadRequest, "full_name and email are required")
 		return
 	}
+	normalizedDetails, err := normalizeRegistrationEventDetails(payload.EventDetails)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	payload.EventDetails = normalizedDetails
 
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
@@ -1758,7 +1994,7 @@ func (h *Handler) createPublicRegistration(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	registrationID, err := createPublicRegistrationTx(ctx, tx, event, participantID, "public_link", "Public registration submitted", nil)
+	registrationID, err := createPublicRegistrationTx(ctx, tx, event, participantID, "public_link", "Public registration submitted", payload.EventDetails, nil)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.Is(err, errActiveRegistrationExists) || (errors.As(err, &pgErr) && pgErr.Code == "23505") {
@@ -1793,6 +2029,19 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 		httpx.Error(w, http.StatusBadRequest, "registration slug is required")
 		return
 	}
+	var payload struct {
+		EventDetails RegistrationEventDetails `json:"event_details"`
+	}
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	normalizedDetails, err := normalizeRegistrationEventDetails(payload.EventDetails)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	payload.EventDetails = normalizedDetails
 
 	ctx := r.Context()
 	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
@@ -1835,6 +2084,7 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 		participantID,
 		"public_google",
 		"Public registration claimed after Google sign-in",
+		payload.EventDetails,
 		&accountID,
 	)
 	if err != nil {
@@ -1855,6 +2105,14 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to normalize staff registration: %v", err))
 		return
 	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE registration_intents
+		SET status = 'completed', completed_at = NOW()
+		WHERE account_id = $1 AND event_id = $2 AND status = 'pending'
+	`, claims.AccountID, event.ID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to complete registration onboarding")
+		return
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to commit registration: %v", err))
@@ -1868,6 +2126,102 @@ func (h *Handler) createClaimedPublicRegistration(w http.ResponseWriter, r *http
 	}
 	h.publishRegistrationUpdate(registration, "registration.public_claimed")
 	httpx.WriteJSON(w, http.StatusCreated, registration)
+}
+
+func (h *Handler) completeExistingRegistrationOnboarding(w http.ResponseWriter, r *http.Request) {
+	claims := auth.FromContext(r.Context())
+	if claims == nil || claims.AccountID <= 0 {
+		httpx.Error(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var payload struct {
+		EventDetails RegistrationEventDetails `json:"event_details"`
+	}
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	normalized, err := normalizeRegistrationEventDetails(payload.EventDetails)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx := r.Context()
+	tx, err := h.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to complete registration onboarding")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	var intentID, eventID, registrationID int64
+	var participantLicense string
+	err = tx.QueryRow(ctx, `
+		SELECT i.id, i.event_id, r.id, COALESCE(p.license,'')
+		FROM registration_intents i
+		JOIN participant_profiles p ON p.account_id = i.account_id
+		JOIN event_registrations r ON r.event_id = i.event_id AND r.participant_id = p.id
+		WHERE i.account_id = $1
+		  AND i.status = 'pending'
+		  AND r.cancelled_at IS NULL
+		  AND r.expired_at IS NULL
+		ORDER BY i.created_at ASC, i.id ASC, r.registered_at DESC
+		LIMIT 1
+		FOR UPDATE OF i, r
+	`, claims.AccountID).Scan(&intentID, &eventID, &registrationID, &participantLicense)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusNotFound, "pending existing registration was not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load pending registration")
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(participantLicense), "Non jumper") {
+		normalized.NonJumperOptInIDs = nil
+		normalized.NonJumperOptOutIDs = nil
+	}
+	if err := hydrateNonJumperSelections(ctx, tx, eventID, &normalized); err != nil {
+		httpx.Error(w, 500, "failed to validate non-jumper activities")
+		return
+	}
+	detailsJSON, err := json.Marshal(normalized)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to encode registration details")
+		return
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE event_registrations
+		SET event_details = $2::jsonb, updated_at = NOW()
+		WHERE id = $1
+	`, registrationID, string(detailsJSON)); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save registration details")
+		return
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE registration_intents
+		SET status = 'completed', completed_at = NOW()
+		WHERE id = $1
+	`, intentID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to complete registration onboarding")
+		return
+	}
+	accountID := claims.AccountID
+	if err := createActivityTx(ctx, tx, registrationID, "note", "Event-specific registration details completed", map[string]any{"event_id": eventID}, &accountID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to record registration update")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to commit registration details")
+		return
+	}
+	registration, err := h.loadRegistration(ctx, registrationID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load updated registration")
+		return
+	}
+	h.publishRegistrationUpdate(registration, "registration.onboarding_completed")
+	httpx.WriteJSON(w, http.StatusOK, registration)
 }
 
 func (h *Handler) listOwnRegistrations(w http.ResponseWriter, r *http.Request) {
@@ -2017,6 +2371,7 @@ func (h *Handler) listEventRegistrations(w http.ResponseWriter, r *http.Request)
 			       tags,
 			       internal_notes,
 			       registration_checklist,
+			       event_details,
 			       created_at,
 			       updated_at
 			FROM event_registrations

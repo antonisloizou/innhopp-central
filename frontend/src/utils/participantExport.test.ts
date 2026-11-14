@@ -29,6 +29,13 @@ const registration = (id: number, participantId: number, status: Registration['s
   status,
   registered_at: '2026-01-01T10:00:00Z',
   tags: [],
+  event_details: {
+    attendance_type: 'solo',
+    accommodation: 'Shared (usually 2 per room)',
+    payment_method: 'bank_transfer',
+    heard_about_project: '',
+    heard_about_event: ''
+  },
   created_at: '2026-01-01T10:00:00Z',
   updated_at: '2026-01-01T10:00:00Z'
 });
@@ -54,7 +61,7 @@ describe('createParticipantExportXlsx', () => {
     const blob = createParticipantExportXlsx({
       event: { id: 7, name: 'Test Event' } as Event,
       registrations: [
-        { ...registration(1, 11), checklist: { waiver: true }, checklist_text: { waiver: 'Signed online' }, deposit_paid_at: '2026-01-02T12:30:00Z' },
+        { ...registration(1, 11), checklist: { waiver: true }, checklist_text: { waiver: 'Signed online' }, deposit_paid_at: '2026-01-02T12:30:00Z', event_details: { attendance_type: 'group', group_size: 3, group_names: 'Alex, Bea, Chris', accommodation: 'Shared (usually 2 per room)', accommodation_roommate: 'Bea', payment_method: 'stripe', discount_eligibility: 'Returning guest', heard_about_project: 'A friend', heard_about_event: 'Instagram', additional_information: 'Vegetarian dinner' } },
         registration(2, 22),
         { ...registration(3, 33, 'cancelled'), cancelled_at: '2026-01-03T15:45:00Z' }
       ],
@@ -75,6 +82,10 @@ describe('createParticipantExportXlsx', () => {
     expect(files.get('xl/worksheets/sheet1.xml')).not.toContain('Checklist:');
     expect(files.get('xl/worksheets/sheet1.xml')).not.toContain('Checklist note:');
     expect(files.get('xl/worksheets/sheet1.xml')).toContain('Signed online');
+    expect(files.get('xl/worksheets/sheet1.xml')).toContain('Coming solo or in group');
+    expect(files.get('xl/worksheets/sheet1.xml')).toContain('Alex, Bea, Chris');
+    expect(files.get('xl/worksheets/sheet1.xml')).toContain('Secure Online Payment via Stripe');
+    expect(files.get('xl/worksheets/sheet1.xml')).toContain('Vegetarian dinner');
     expect(files.get('xl/worksheets/sheet1.xml')).toContain('2026-01-02');
     expect(files.get('xl/worksheets/sheet1.xml')).not.toContain('2026-01-02T12:30:00Z');
     expect(files.get('xl/worksheets/sheet1.xml')).not.toContain('Profile created');

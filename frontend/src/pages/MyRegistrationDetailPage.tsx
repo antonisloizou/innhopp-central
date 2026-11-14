@@ -52,6 +52,23 @@ const MyRegistrationDetailPage = () => {
       </section>
 
       <article className="card stack">
+        <h3>Registration details</h3>
+        <dl className="card-details event-registration-details-list">
+          <div><dt>Group size</dt><dd>{registration.event_details?.attendance_type === 'group' ? `Group of ${registration.event_details.group_size || '—'}` : registration.event_details?.attendance_type ? 'Solo' : '—'}</dd></div>
+          {registration.event_details?.attendance_type === 'group' ? <div><dt>Group names</dt><dd>{registration.event_details.group_names || '—'}</dd></div> : null}
+          <div><dt>Accommodation preference</dt><dd>{registration.event_details?.accommodation || '—'}</dd></div>
+          {registration.event_details?.accommodation === 'Shared (usually 2 per room)' ? <div><dt>Preferred roommate</dt><dd>{registration.event_details.accommodation_roommate || '—'}</dd></div> : null}
+          <div><dt>Main payment method</dt><dd>{registration.event_details?.payment_method === 'bank_transfer' ? 'Bank transfer' : registration.event_details?.payment_method === 'stripe' ? 'Secure Online Payment via Stripe' : '—'}</dd></div>
+          <div><dt>Discounts and previous events</dt><dd>{registration.event_details?.discount_eligibility || '—'}</dd></div>
+          <div><dt>Heard about The Innhopp Project</dt><dd>{registration.event_details?.heard_about_project || '—'}</dd></div>
+          <div><dt>Heard about this event</dt><dd>{registration.event_details?.heard_about_event || '—'}</dd></div>
+          <div><dt>Anything else</dt><dd>{registration.event_details?.additional_information || '—'}</dd></div>
+          <div><dt>Non-jumper opt-ins</dt><dd>{(registration.event_details?.non_jumper_opt_ins || []).map(item => `${item.title}${item.cost ? ` (COST: ${item.cost} ${item.cost_currency || ''})` : ''}`).join(', ') || '—'}</dd></div>
+          <div><dt>Non-jumper opt-outs</dt><dd>{(registration.event_details?.non_jumper_opt_outs || []).map(item => item.title).join(', ') || '—'}</dd></div>
+        </dl>
+      </article>
+
+      <article className="card stack">
         <h3>Payments</h3>
         {payments.length === 0 ? <p className="muted">No payment records yet.</p> : payments.map((payment) => (
           <div key={payment.id} className="registration-payment-card">

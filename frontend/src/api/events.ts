@@ -127,6 +127,13 @@ export interface Event {
   created_at: string;
 }
 
+export interface NonJumperActivity { id:number; event_id:number; kind:'opt_in'|'opt_out'; title:string; description:string; cost?:string|null; cost_currency?:string|null; sort_order:number }
+export type NonJumperActivityPayload = Omit<NonJumperActivity,'id'|'event_id'>;
+export const listNonJumperActivities = (eventId:number) => apiRequest<NonJumperActivity[]>(`/events/${eventId}/non-jumper-activities`);
+export const createNonJumperActivity = (eventId:number,payload:NonJumperActivityPayload) => apiRequest<NonJumperActivity>(`/events/${eventId}/non-jumper-activities`,{method:'POST',body:JSON.stringify(payload)});
+export const updateNonJumperActivity = (eventId:number,id:number,payload:NonJumperActivityPayload) => apiRequest<NonJumperActivity>(`/events/${eventId}/non-jumper-activities/${id}`,{method:'PUT',body:JSON.stringify(payload)});
+export const deleteNonJumperActivity = (eventId:number,id:number) => apiRequest<void>(`/events/${eventId}/non-jumper-activities/${id}`,{method:'DELETE'});
+
 export interface Accommodation {
   id: number;
   event_id: number;

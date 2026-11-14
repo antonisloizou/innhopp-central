@@ -39,6 +39,25 @@ export interface RegistrationActivity {
   created_at: string;
 }
 
+export interface RegistrationEventDetails {
+  attendance_type: 'solo' | 'group';
+  group_size?: number | null;
+  group_names?: string;
+  accommodation: 'Shared (usually 2 per room)' | 'Single Room (additional cost)';
+  accommodation_roommate?: string;
+  payment_method: 'bank_transfer' | 'stripe';
+  discount_eligibility?: string;
+  heard_about_project: string;
+  heard_about_event: string;
+  additional_information?: string;
+  non_jumper_opt_in_ids?: number[];
+  non_jumper_opt_out_ids?: number[];
+  non_jumper_opt_ins?: { id:number; title:string; description:string; cost?:string|null; cost_currency?:string|null }[];
+  non_jumper_opt_outs?: { id:number; title:string; description:string }[];
+}
+
+export interface PublicNonJumperActivity { id:number; kind:'opt_in'|'opt_out'; title:string; description:string; cost?:string|null; cost_currency?:string|null }
+
 export interface Registration {
   id: number;
   event_id: number;
@@ -59,6 +78,7 @@ export interface Registration {
   staff_owner_account_id?: number | null;
   tags: string[];
   internal_notes?: string;
+  event_details?: RegistrationEventDetails;
   checklist?: Record<string, boolean>;
   checklist_text?: Record<string, string>;
   created_at: string;
@@ -130,6 +150,7 @@ export interface PublicRegistrationEvent {
   commercial_status: string;
   registration_available: boolean;
   registration_unavailable_reason?: string | null;
+  non_jumper_activities: PublicNonJumperActivity[];
 }
 
 export interface PublicRegistrationPayload {
@@ -146,6 +167,7 @@ export interface PublicRegistrationPayload {
   jump_count?: number;
   recent_jump_count?: number;
   license?: string;
+  event_details: RegistrationEventDetails;
 }
 
 export const listEventRegistrations = (eventId: number) =>
@@ -208,6 +230,13 @@ export const createRegistrationActivity = (registrationId: number, payload: Regi
 
 export const getPublicRegistrationEvent = (slug: string) =>
   apiRequest<PublicRegistrationEvent>(`/registrations/public/events/${encodeURIComponent(slug)}`);
+export const getPublicNonJumperActivities = (eventId:number) =>
+  apiRequest<PublicNonJumperActivity[]>(`/registrations/public/event-ids/${eventId}/non-jumper-activities`);
+
+export const startPublicRegistration = (slug: string) =>
+  apiRequest<{ onboarding_required: boolean }>(`/registrations/public/events/${encodeURIComponent(slug)}/intent`, {
+    method: 'POST'
+  });
 
 export const createPublicRegistration = (slug: string, payload: PublicRegistrationPayload) =>
   apiRequest<Registration>(`/registrations/public/events/${encodeURIComponent(slug)}/register`, {
@@ -215,7 +244,14 @@ export const createPublicRegistration = (slug: string, payload: PublicRegistrati
     body: JSON.stringify(payload)
   });
 
-export const claimPublicRegistration = (slug: string) =>
+export const claimPublicRegistration = (slug: string, eventDetails: RegistrationEventDetails) =>
   apiRequest<Registration>(`/registrations/public/events/${encodeURIComponent(slug)}/claim`, {
-    method: 'POST'
+    method: 'POST',
+    body: JSON.stringify({ event_details: eventDetails })
+  });
+
+export const completeExistingRegistrationOnboarding = (eventDetails: RegistrationEventDetails) =>
+  apiRequest<Registration>('/registrations/onboarding/complete', {
+    method: 'POST',
+    body: JSON.stringify({ event_details: eventDetails })
   });

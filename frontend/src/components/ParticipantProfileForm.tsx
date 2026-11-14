@@ -802,10 +802,10 @@ const ParticipantProfileForm = ({
       </CollapsibleCard>
 
       <CollapsibleCard
-        title="Meals and Accommodation"
+        title="Meals"
         open={expandedCards.mealsAccommodation}
         onToggle={() => toggleCard('mealsAccommodation')}
-        hasMissingRequired={!hasText(form.accommodation)}
+        hasMissingRequired={false}
       >
         <div className="form-grid">
           <MultiSelectField
@@ -817,29 +817,6 @@ const ParticipantProfileForm = ({
             }
             customLabel="Add another restriction"
           />
-          <label className={`form-field participant-profile-full-span participant-profile-max-420 ${!hasText(form.accommodation) ? 'field-missing' : ''}`}>
-            <span>Accommodation</span>
-            <select
-              value={form.accommodation || accommodationOptions[0]}
-              onChange={(event) => updateField('accommodation', event.target.value)}
-            >
-              {accommodationOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          {form.accommodation === accommodationOptions[0] ? (
-            <label className="form-field participant-profile-full-span participant-profile-max-420">
-              <span>I would like to share a room with</span>
-              <input
-                type="text"
-                value={form.accommodation_roommate || ''}
-                onChange={(event) => updateField('accommodation_roommate', event.target.value)}
-              />
-            </label>
-          ) : null}
         </div>
         <CardSaveAction submitting={submitting} saved={saved} error={error} />
       </CollapsibleCard>

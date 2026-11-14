@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import logo from '../assets/logo.webp';
 import { useAuth } from '../auth/AuthProvider';
-import { getPublicRegistrationEvent, PublicRegistrationEvent } from '../api/registrations';
+import { getPublicRegistrationEvent, PublicRegistrationEvent, startPublicRegistration } from '../api/registrations';
 
 const PENDING_PUBLIC_REGISTRATION_KEY = 'innhopp-pending-public-registration';
 
@@ -15,7 +15,7 @@ const toSentenceCase = (value?: string | null) => {
 const PublicEventRegistrationPage = () => {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const { user, isLoading, startLogin } = useAuth();
+  const { user, isLoading, refreshSession, startLogin } = useAuth();
   const [event, setEvent] = useState<PublicRegistrationEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [continuing, setContinuing] = useState(false);
@@ -63,13 +63,21 @@ const PublicEventRegistrationPage = () => {
       window.sessionStorage.setItem(PENDING_PUBLIC_REGISTRATION_KEY, slug);
     }
     if (user) {
-      navigate('/profile?publicRegistration=1');
+      try {
+        setContinuing(true);
+        await startPublicRegistration(slug);
+        await refreshSession();
+        navigate(`/profile?publicRegistration=1&registrationSlug=${encodeURIComponent(slug)}`);
+      } catch (err) {
+        setContinuing(false);
+        setError(err instanceof Error ? err.message : 'Unable to start registration.');
+      }
       return;
     }
     try {
       setContinuing(true);
       setError(null);
-      await startLogin('/profile?publicRegistration=1');
+      await startLogin(`/profile?publicRegistration=1&registrationSlug=${encodeURIComponent(slug)}`);
     } catch (err) {
       setContinuing(false);
       setError(err instanceof Error ? err.message : 'Unable to start Google sign-in.');
