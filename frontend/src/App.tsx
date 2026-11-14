@@ -55,6 +55,7 @@ import EventPrintPage from './pages/EventPrintPage';
 import ChecklistsPage from './pages/ChecklistsPage';
 import EventLeaderboardPage from './pages/EventLeaderboardPage';
 import EventParticipantsPage from './pages/EventParticipantsPage';
+import TasksPage from './pages/TasksPage';
 import { budgetsV1Enabled } from './config/flags';
 
 const App = () => (
@@ -66,6 +67,8 @@ const App = () => (
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/events" replace />} />
           <Route path="events" element={<EventCalendarPage />} />
+          <Route path="tasks" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><TasksPage /></StaffRouteGuard>} />
+          <Route path="events/:eventId/tasks" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><TasksPage /></StaffRouteGuard>} />
           <Route path="checklists" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><ChecklistsPage /></StaffRouteGuard>} />
           <Route path="events/:eventId/checklists" element={<StaffRouteGuard allowedRoles={['jump_master', 'jump_leader', 'ground_crew', 'boat_crew', 'driver', 'packer']}><ChecklistsPage /></StaffRouteGuard>} />
           <Route path="events/:eventId/leaderboard" element={<StaffRouteGuard><EventLeaderboardPage /></StaffRouteGuard>} />

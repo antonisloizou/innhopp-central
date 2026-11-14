@@ -9,6 +9,8 @@ import { budgetsV1Enabled } from '../config/flags';
 import { incompleteProfileWarning, isProfileCompleteForRegistration } from '../utils/profileCompleteness';
 import { isEventLaunchedOrLater } from '../utils/eventStatus';
 import AppHeader from './AppHeader';
+import { getTaskNotificationSummary } from '../api/tasks';
+import { useResourceStream } from '../hooks/useResourceStream';
 
 const Layout = () => {
   const { logout, stopImpersonating, user } = useAuth();
@@ -18,6 +20,7 @@ const Layout = () => {
   const [profileCompletionChecked, setProfileCompletionChecked] = useState(false);
   const [hasPendingPayments, setHasPendingPayments] = useState(false);
   const [registeredEvents, setRegisteredEvents] = useState<Event[]>([]);
+  const [unreadTasks, setUnreadTasks] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
   const participantOnly = isParticipantOnlySession(user);
@@ -31,6 +34,7 @@ const Layout = () => {
       : [
         { to: '/events', label: 'Events' },
         { to: '/checklists', label: 'Operational Checks' },
+        { to: '/tasks', label: 'Tasks' },
         { to: '/participants', label: 'The Innhopp Family' },
         { to: '/logistics', label: 'Logistics' },
         ...(budgetsV1Enabled ? [{ to: '/finance', label: 'Finance' }] : []),
@@ -52,6 +56,24 @@ const Layout = () => {
         }),
     [registeredEvents]
   );
+
+  useEffect(() => {
+    if (!user || participantOnly) { setUnreadTasks(0); return; }
+    let cancelled = false;
+    const load = () => void getTaskNotificationSummary().then((summary) => { if (!cancelled) setUnreadTasks(summary.unread_count); }).catch(() => undefined);
+    load();
+    const timer = window.setInterval(load, 60_000);
+    window.addEventListener('tasks-notifications-changed', load);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('tasks-notifications-changed', load); };
+  }, [participantOnly, user?.account_id]);
+
+  useResourceStream({
+    path: !participantOnly && user ? '/tasks/stream' : null,
+    event: 'task.updated',
+    onMessage: () => {
+      void getTaskNotificationSummary().then((summary) => setUnreadTasks(summary.unread_count)).catch(() => undefined);
+    }
+  });
 
   useEffect(() => {
     const selectNumberInputValue = (event: FocusEvent | MouseEvent) => {
@@ -241,7 +263,10 @@ const Layout = () => {
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
                   onClick={handleNavClick}
                 >
-                  {item.label}
+                  <span className="nav-user-label">
+                    <span>{item.label}</span>
+                    {item.to === '/tasks' && unreadTasks > 0 ? <span className="nav-user-warning" title="Unread task activity" aria-label="Unread task activity">!</span> : null}
+                  </span>
                 </NavLink>
                 {participantOnly && item.to === '/events' && registeredUpcomingEvents.length > 0 && (
                   <ul className="nav-event-links" aria-label="Your upcoming events">

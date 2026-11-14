@@ -26,6 +26,7 @@ import (
 	"github.com/innhopp/central/backend/realtime"
 	"github.com/innhopp/central/backend/registrations"
 	"github.com/innhopp/central/backend/rostercheckins"
+	"github.com/innhopp/central/backend/tasks"
 )
 
 func main() {
@@ -206,6 +207,7 @@ func main() {
 	router.Mount("/api/innhopps", innhopps.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/checklists", checklists.NewHandler(pool, streams).Routes(enforcer))
 	router.Mount("/api/roster-check-ins", rostercheckins.NewHandler(pool).Routes(enforcer))
+	router.Mount("/api/tasks", tasks.NewHandler(pool, streams, emailSender, authConfig.FrontendURL).Routes(enforcer))
 	if budgetsV1Enabled {
 		router.Mount("/api/budgets", budgets.NewHandler(pool, streams).Routes(enforcer))
 		router.Mount("/api/accounting", accounting.NewHandler(pool).Routes(enforcer))
@@ -1573,6 +1575,75 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             CHECK (distance_from_target_meters IS NULL OR distance_from_target_meters >= 0)
         )`,
 		`CREATE INDEX IF NOT EXISTS roster_check_in_entries_check_in_idx ON roster_check_in_entries (roster_check_in_id)`,
+		`CREATE TABLE IF NOT EXISTS tasks (
+            id BIGSERIAL PRIMARY KEY,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            title TEXT NOT NULL CHECK (length(btrim(title)) BETWEEN 1 AND 200),
+            description TEXT NOT NULL CHECK (length(btrim(description)) BETWEEN 1 AND 10000),
+            assignee_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            assignee_display_name_snapshot TEXT,
+            due_on DATE,
+            completed_at TIMESTAMPTZ,
+            completed_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            completed_by_display_name_snapshot TEXT,
+            created_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            created_by_display_name_snapshot TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            deleted_by_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            deleted_by_display_name_snapshot TEXT,
+            deleted_reason TEXT,
+            deleted_at TIMESTAMPTZ
+        )`,
+		`CREATE INDEX IF NOT EXISTS tasks_event_active_idx ON tasks (event_id, completed_at, due_on, created_at DESC) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS tasks_assignee_active_idx ON tasks (assignee_account_id, updated_at DESC) WHERE deleted_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS tasks_deleted_idx ON tasks (deleted_at DESC) WHERE deleted_at IS NOT NULL`,
+		`CREATE TABLE IF NOT EXISTS task_comments (
+            id BIGSERIAL PRIMARY KEY,
+            task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            body TEXT NOT NULL CHECK (length(btrim(body)) BETWEEN 1 AND 10000),
+            author_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            author_display_name_snapshot TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE INDEX IF NOT EXISTS task_comments_task_idx ON task_comments (task_id, created_at, id)`,
+		`CREATE TABLE IF NOT EXISTS task_audit_events (
+            id BIGSERIAL PRIMARY KEY,
+            task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            action TEXT NOT NULL CHECK (action IN ('created','edited','assigned','unassigned','completed','reopened','deleted','restored','commented')),
+            actor_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+            actor_display_name_snapshot TEXT NOT NULL,
+            changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+		`CREATE INDEX IF NOT EXISTS task_audit_task_idx ON task_audit_events (task_id, created_at DESC, id DESC)`,
+		`CREATE TABLE IF NOT EXISTS task_notifications (
+            id BIGSERIAL PRIMARY KEY,
+            task_id BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            recipient_account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK (kind IN ('assigned','commented')),
+            source_audit_event_id BIGINT NOT NULL REFERENCES task_audit_events(id) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            read_at TIMESTAMPTZ,
+            UNIQUE (recipient_account_id, source_audit_event_id)
+        )`,
+		`CREATE INDEX IF NOT EXISTS task_notifications_unread_idx ON task_notifications (recipient_account_id, created_at DESC) WHERE read_at IS NULL`,
+		`CREATE TABLE IF NOT EXISTS task_email_deliveries (
+            id BIGSERIAL PRIMARY KEY,
+            task_notification_id BIGINT NOT NULL UNIQUE REFERENCES task_notifications(id) ON DELETE CASCADE,
+            recipient_email TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sending','sent','failed')),
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            provider_message_id TEXT,
+            last_error TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            sent_at TIMESTAMPTZ
+        )`,
+		`CREATE INDEX IF NOT EXISTS task_email_delivery_queue_idx ON task_email_deliveries (status, created_at) WHERE status IN ('queued','failed')`,
 	}
 
 	for _, stmt := range stmts {

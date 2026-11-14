@@ -48,6 +48,11 @@ const (
 	PermissionOverrideChecklists       Permission = "checklists:override"
 	PermissionResetChecklists          Permission = "checklists:reset"
 	PermissionManageChecklistTemplates Permission = "checklists:manage_templates"
+	PermissionViewTasks                Permission = "tasks:view"
+	PermissionManageTasks              Permission = "tasks:manage"
+	PermissionCommentTasks             Permission = "tasks:comment"
+	PermissionViewTaskAudit            Permission = "tasks:view_audit"
+	PermissionRestoreTasks             Permission = "tasks:restore"
 )
 
 // RoleMatrix enumerates which roles satisfy a permission. The list is
@@ -193,4 +198,9 @@ var RoleMatrix = map[Permission][]Role{
 	PermissionOverrideChecklists:       {RoleAdmin, RoleStaff, RoleJumpMaster},
 	PermissionResetChecklists:          {RoleAdmin, RoleStaff},
 	PermissionManageChecklistTemplates: {RoleAdmin, RoleStaff},
+	PermissionViewTasks:                {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionManageTasks:              {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionCommentTasks:             {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionViewTaskAudit:            {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
+	PermissionRestoreTasks:             {RoleAdmin, RoleStaff, RoleJumpMaster, RoleJumpLeader, RoleGroundCrew, RoleBoatCrew, RoleDriver, RolePacker},
 }

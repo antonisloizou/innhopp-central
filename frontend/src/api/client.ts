@@ -30,8 +30,9 @@ export const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T
 
   if (!response.ok) {
     const message = typeof payload === 'string' ? payload : payload?.error || 'Request failed';
-    const err = new Error(message) as Error & { status?: number };
+    const err = new Error(message) as Error & { status?: number; payload?: unknown };
     err.status = response.status;
+    err.payload = payload;
     throw err;
   }
 

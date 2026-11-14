@@ -20,6 +20,7 @@ export type EventGearMenuPage =
   | 'print'
   | 'details'
   | 'route'
+  | 'tasks'
   | 'budget'
   | 'accounting'
   | 'registrations'
@@ -47,6 +48,7 @@ const eventMenuPages: EventMenuPage[] = [
   { key: 'details', label: 'Details', path: (eventId) => `/events/${eventId}/details` },
   { key: 'checklists', label: 'Operational Checks', path: (eventId) => `/events/${eventId}/checklists` },
   { key: 'route', label: 'Route', path: (eventId) => `/events/${eventId}/route` },
+  { key: 'tasks', label: 'Tasks', path: (eventId) => `/events/${eventId}/tasks` },
   { key: 'manifest', label: 'Manifest', path: (eventId) => `/manifests?eventId=${eventId}` },
   { key: 'communications', label: 'Communications', path: (eventId) => `/events/${eventId}/comms` }
 ];

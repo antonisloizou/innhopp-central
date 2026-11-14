@@ -17,6 +17,7 @@ type Router interface {
 	Get(pattern string, handler http.HandlerFunc)
 	Post(pattern string, handler http.HandlerFunc)
 	Put(pattern string, handler http.HandlerFunc)
+	Patch(pattern string, handler http.HandlerFunc)
 	Delete(pattern string, handler http.HandlerFunc)
 	Mount(pattern string, h http.Handler)
 }
@@ -96,6 +97,10 @@ func (m *mux) Post(pattern string, handler http.HandlerFunc) {
 
 func (m *mux) Put(pattern string, handler http.HandlerFunc) {
 	m.addRoute(http.MethodPut, pattern, handler)
+}
+
+func (m *mux) Patch(pattern string, handler http.HandlerFunc) {
+	m.addRoute(http.MethodPatch, pattern, handler)
 }
 
 func (m *mux) Delete(pattern string, handler http.HandlerFunc) {
@@ -260,6 +265,10 @@ func (s *scopedMux) Post(pattern string, handler http.HandlerFunc) {
 
 func (s *scopedMux) Put(pattern string, handler http.HandlerFunc) {
 	s.mux.addRouteWithMiddlewares(http.MethodPut, pattern, handler, s.middlewares)
+}
+
+func (s *scopedMux) Patch(pattern string, handler http.HandlerFunc) {
+	s.mux.addRouteWithMiddlewares(http.MethodPatch, pattern, handler, s.middlewares)
 }
 
 func (s *scopedMux) Delete(pattern string, handler http.HandlerFunc) {
