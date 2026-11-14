@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
@@ -90,20 +92,17 @@ func main() {
 	}
 
 	authConfig := auth.Config{
-		Issuer:       os.Getenv("OIDC_ISSUER"),
-		ClientID:     os.Getenv("OIDC_CLIENT_ID"),
-		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-		RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
-		FrontendURL:  os.Getenv("FRONTEND_URL"),
-		DevAllowAll:  strings.EqualFold(os.Getenv("DEV_ALLOW_ALL"), "true"),
+		Issuer:           os.Getenv("OIDC_ISSUER"),
+		ClientID:         os.Getenv("OIDC_CLIENT_ID"),
+		ClientSecret:     os.Getenv("OIDC_CLIENT_SECRET"),
+		RedirectURL:      os.Getenv("OIDC_REDIRECT_URL"),
+		FrontendURL:      os.Getenv("FRONTEND_URL"),
+		DevAllowAll:      strings.EqualFold(os.Getenv("DEV_ALLOW_ALL"), "true"),
+		EmailCallbackURL: os.Getenv("AUTH_EMAIL_CALLBACK_URL"),
 	}
 	logMissingOIDCConfig(authConfig)
 	budgetsV1Enabled := !strings.EqualFold(strings.TrimSpace(os.Getenv("BUDGETS_V1")), "false")
 
-	authHandler, err := auth.NewHandler(pool, sessionManager, authConfig)
-	if err != nil {
-		log.Fatalf("failed to configure auth handler: %v", err)
-	}
 	streams := realtime.NewHub()
 
 	var emailSender comms.EmailSender
@@ -148,6 +147,21 @@ func main() {
 			emailSender = comms.NewSentFolderCopyingSender(emailSender, imapStore, log.Printf)
 			log.Printf("sent-folder copy configured for %s", imapHost)
 		}
+	}
+	if emailSender != nil {
+		authConfig.SendMagicLink = func(ctx context.Context, to, link string) error {
+			_, sendErr := emailSender.Send(ctx, comms.EmailMessage{
+				To:        to,
+				Subject:   "Your Innhopp sign-in link",
+				PlainText: fmt.Sprintf("Sign in to Innhopp Central:\n\n%s\n\nThis link expires in 15 minutes and can only be used once. If you did not request it, you can ignore this email.", link),
+				HTML:      fmt.Sprintf(`<p>Sign in to Innhopp Central:</p><p><a href="%s">Sign in</a></p><p>This link expires in 15 minutes and can only be used once. If you did not request it, you can ignore this email.</p>`, html.EscapeString(link)),
+			})
+			return sendErr
+		}
+	}
+	authHandler, err := auth.NewHandler(pool, sessionManager, authConfig)
+	if err != nil {
+		log.Fatalf("failed to configure auth handler: %v", err)
 	}
 
 	router := chi.NewRouter()
@@ -1130,6 +1144,15 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             full_name TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`,
+		`CREATE TABLE IF NOT EXISTS auth_magic_links (
+			token_hash BYTEA PRIMARY KEY,
+			email TEXT NOT NULL,
+			redirect_path TEXT NOT NULL DEFAULT '',
+			expires_at TIMESTAMPTZ NOT NULL,
+			consumed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE INDEX IF NOT EXISTS auth_magic_links_email_created_idx ON auth_magic_links (email, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS roles (
             name TEXT PRIMARY KEY,
             description TEXT,

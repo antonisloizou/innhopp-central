@@ -28,6 +28,7 @@ type AuthContextValue = {
   isLoading: boolean;
   refreshSession: () => Promise<void>;
   startLogin: (redirectTo?: string) => Promise<void>;
+  startEmailLogin: (email: string, redirectTo?: string) => Promise<string>;
   impersonateParticipant: (participantId: number) => Promise<void>;
   impersonateNewUser: () => Promise<void>;
   stopImpersonating: () => Promise<void>;
@@ -103,6 +104,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     window.location.assign(response.authorization_url);
   }, []);
 
+  const startEmailLogin = useCallback(async (email: string, redirectTo?: string) => {
+    const response = await apiRequest<{ message: string }>('/auth/email/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, redirect_to: redirectTo || '' })
+    });
+    return response.message;
+  }, []);
+
   const impersonateParticipant = useCallback(async (participantId: number) => {
     const session = await apiRequest<AuthSession>('/auth/impersonate', {
       method: 'POST',
@@ -137,6 +146,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoading,
         refreshSession,
         startLogin,
+        startEmailLogin,
         impersonateParticipant,
         impersonateNewUser,
         stopImpersonating,

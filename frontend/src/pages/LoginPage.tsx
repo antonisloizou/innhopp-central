@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import logo from '../assets/logo.webp';
 import { useAuth } from '../auth/AuthProvider';
 
 const LoginPage = () => {
-  const { user, isLoading, startLogin } = useAuth();
+  const { user, isLoading, startLogin, startEmailLogin } = useAuth();
   const location = useLocation();
   const [error, setError] = useState<string | null>(null);
+  const [emailMode, setEmailMode] = useState(false);
+  const [email, setEmail] = useState('');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailMessage, setEmailMessage] = useState<string | null>(null);
   const from = location.state?.from?.pathname;
 
   useEffect(() => {
@@ -30,11 +35,24 @@ const LoginPage = () => {
     }
   };
 
+  const handleEmailLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    try {
+      setError(null);
+      setEmailSending(true);
+      setEmailMessage(await startEmailLogin(email, typeof from === 'string' ? from : undefined));
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : 'Unable to send the sign-in link.');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
   return (
     <div className="login-layout">
       <section className="login-panel">
         <img src={logo} alt="Innhopp Central logo" className="login-logo" />
-        <button
+        {!emailMode && <button
           type="button"
           className="google-signin-button"
           onClick={() => void handleLogin()}
@@ -64,7 +82,45 @@ const LoginPage = () => {
           <span className="google-signin-button__label">
             {isLoading ? 'Checking session…' : 'Sign in with Google'}
           </span>
-        </button>
+        </button>}
+        {!emailMode && (
+          <button
+            type="button"
+            className="google-signin-button"
+            onClick={() => setEmailMode(true)}
+            disabled={isLoading}
+          >
+            <span className="google-signin-button__icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2Zm0 4-8 5-8-5V6l8 5 8-5v2Z" />
+              </svg>
+            </span>
+            <span className="google-signin-button__label">Sign in with Email</span>
+          </button>
+        )}
+        {emailMode && !emailMessage && (
+          <form className="email-signin-form" onSubmit={(event) => void handleEmailLogin(event)}>
+            <label htmlFor="login-email" className="sr-only">Email address</label>
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="email"
+              placeholder="Enter your email address"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              autoFocus
+              disabled={emailSending}
+            />
+            <button type="submit" className="google-signin-button" disabled={emailSending}>
+              {emailSending ? 'Sending…' : 'Sign In'}
+            </button>
+            <button type="button" className="email-signin-back" onClick={() => setEmailMode(false)} disabled={emailSending}>
+              Back to Google sign-in
+            </button>
+          </form>
+        )}
+        {emailMessage && <p className="email-signin-message">{emailMessage} Check your inbox and spam folder.</p>}
         {error && <p className="error-text">{error}</p>}
       </section>
     </div>

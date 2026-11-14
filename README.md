@@ -90,6 +90,7 @@ cd backend
 # export OIDC_CLIENT_ID="YOUR_CLIENT_ID.apps.googleusercontent.com"
 # export OIDC_CLIENT_SECRET="YOUR_CLIENT_SECRET"
 # export OIDC_REDIRECT_URL="http://localhost:8080/api/auth/callback"
+# export AUTH_EMAIL_CALLBACK_URL="http://localhost:8080/api/auth/email/callback"
 # export FRONTEND_URL="http://localhost:5173"
 # set SESSION_SECRET to a strong value; SESSION_COOKIE_SECURE=true when using HTTPS
 go mod tidy
@@ -122,6 +123,7 @@ Backend environment variables:
 | `OIDC_CLIENT_ID` | OIDC client ID | – |
 | `OIDC_CLIENT_SECRET` | OIDC client secret (if required) | – |
 | `OIDC_REDIRECT_URL` | Redirect URL registered with the OIDC provider | – |
+| `AUTH_EMAIL_CALLBACK_URL` | Public backend URL for 15-minute email sign-in links; otherwise derived from `OIDC_REDIRECT_URL` | – |
 | `FRONTEND_URL` | Frontend base URL used after successful OIDC callback | – |
 
 Frontend environment variables:

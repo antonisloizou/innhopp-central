@@ -7,18 +7,19 @@ services:
       DEV_ALLOW_ALL: "true"
       SESSION_SECRET: dev-insecure-session-secret
       SESSION_COOKIE_SECURE: "false"
-      SMTP_HOST: ""
-      SMTP_PORT: "465"
-      SMTP_USERNAME: ""
-      SMTP_PASSWORD: ""
-      SMTP_FROM_EMAIL: ""
-      SMTP_FROM_NAME: ""
-      SMTP_SECURITY: "tls"
-      IMAP_HOST: ""
-      IMAP_PORT: "993"
-      IMAP_USERNAME: ""
-      IMAP_PASSWORD: ""
-      IMAP_SENT_FOLDER: ""
+      AUTH_EMAIL_CALLBACK_URL: ${AUTH_EMAIL_CALLBACK_URL:-http://localhost:8080/api/auth/email/callback}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-tls}
+      IMAP_HOST: ${IMAP_HOST:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USERNAME: ${IMAP_USERNAME:-}
+      IMAP_PASSWORD: ${IMAP_PASSWORD:-}
+      IMAP_SENT_FOLDER: ${IMAP_SENT_FOLDER:-}
     depends_on:
       - db
 

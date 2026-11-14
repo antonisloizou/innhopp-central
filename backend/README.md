@@ -31,6 +31,7 @@ The service uses the following environment variables:
 | `SMTP_FROM_EMAIL` | Envelope/header sender address | none |
 | `SMTP_FROM_NAME` | Optional display name for sender | empty |
 | `SMTP_SECURITY` | SMTP transport mode: `starttls`, `tls`, or `none` | `tls` |
+| `AUTH_EMAIL_CALLBACK_URL` | Public URL for the email sign-in callback (for example, `https://central.innhopp.com/api/auth/email/callback`) | derived from `OIDC_REDIRECT_URL` |
 | `IMAP_HOST` | IMAP server hostname for saving sent copies | derived from `SMTP_HOST` when possible |
 | `IMAP_PORT` | IMAP TLS port | `993` |
 | `IMAP_USERNAME` | IMAP login username | falls back to `SMTP_USERNAME` |

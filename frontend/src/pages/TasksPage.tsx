@@ -9,6 +9,8 @@ import {
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { parseEventLocal } from '../utils/eventDate';
+import { isPastEvent } from '../utils/eventStatus';
 
 type FormState = { event_id: string; title: string; description: string; assignee_account_id: string; due_on: string };
 const blankForm = (eventId?: number): FormState => ({ event_id: eventId ? String(eventId) : '', title: '', description: '', assignee_account_id: '', due_on: '' });
@@ -40,6 +42,13 @@ const TasksPage = () => {
   const search = params.get('q') || '';
   const selectedId = Number(params.get('taskId') || 0);
   const lockedEvent = events.find((event) => event.id === lockedEventId);
+  const taskFormEvents = useMemo(() => [...events]
+    .filter((event) => !isPastEvent(event) || event.id === editing?.event_id || event.id === lockedEventId)
+    .sort((left, right) => {
+      const dateDifference = (parseEventLocal(left.starts_at)?.getTime() ?? Number.MAX_SAFE_INTEGER)
+        - (parseEventLocal(right.starts_at)?.getTime() ?? Number.MAX_SAFE_INTEGER);
+      return dateDifference || left.name.localeCompare(right.name);
+    }), [events, editing, lockedEventId]);
 
   const setFilter = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -105,7 +114,12 @@ const TasksPage = () => {
 
   const openTask = (taskId: number) => setFilter('taskId', String(taskId));
   const closeTask = () => setFilter('taskId', '');
-  const beginCreate = () => { setEditing(null); setForm(blankForm(lockedEventId || (eventFilter ? Number(eventFilter) : undefined))); };
+  const beginCreate = () => {
+    const filteredEventId = eventFilter ? Number(eventFilter) : undefined;
+    const defaultEventId = lockedEventId || (filteredEventId && taskFormEvents.some((event) => event.id === filteredEventId) ? filteredEventId : undefined);
+    setEditing(null);
+    setForm(blankForm(defaultEventId));
+  };
   const beginEdit = (task: Task) => { closeTask(); setEditing(task); setForm({ event_id: String(task.event_id), title: task.title, description: task.description, assignee_account_id: task.assignee_account_id ? String(task.assignee_account_id) : '', due_on: task.due_on || '' }); };
 
   const submitForm = async (event: FormEvent) => {
@@ -157,7 +171,7 @@ const TasksPage = () => {
     {editing !== undefined && <article className="card tasks-form-card" aria-label={editing ? 'Edit task' : 'Add task'}>
       <div className="card-header"><h2>{editing ? 'Edit task' : 'Add task'}</h2><button type="button" className="ghost" onClick={() => setEditing(undefined)}>Close</button></div>
       <form onSubmit={submitForm} className="form-grid tasks-form">
-        <label className="form-field form-field-full-span"><span>Event</span><select required disabled={!!lockedEventId || !!editing} value={form.event_id} onChange={(e) => setForm({ ...form, event_id: e.target.value })}><option value="">Select event</option>{events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label>
+        <label className="form-field form-field-full-span"><span>Event</span><select required disabled={!!lockedEventId || !!editing} value={form.event_id} onChange={(e) => setForm({ ...form, event_id: e.target.value })}><option value="">Select event</option>{taskFormEvents.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}</select></label>
         <label className="form-field form-field-full-span"><span>Title</span><input required maxLength={200} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label>
         <label className="form-field form-field-full-span"><span>Description</span><textarea required maxLength={10000} rows={6} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
         <label className="form-field"><span>Assignee</span><select value={form.assignee_account_id} onChange={(e) => setForm({ ...form, assignee_account_id: e.target.value })}><option value="">Unassigned</option>{assignees.map((person) => <option key={person.id} value={person.id}>{person.name} · {person.roles.map((role) => staffRoles[role] || role).join(', ')}</option>)}</select></label>

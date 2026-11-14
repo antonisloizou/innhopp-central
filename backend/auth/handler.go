@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"crypto"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
@@ -28,13 +29,15 @@ import (
 // Config contains the OpenID Connect configuration required to perform the
 // authorization code flow.
 type Config struct {
-	Issuer       string
-	ClientID     string
-	ClientSecret string
-	RedirectURL  string
-	FrontendURL  string
-	Scopes       []string
-	DevAllowAll  bool
+	Issuer           string
+	ClientID         string
+	ClientSecret     string
+	RedirectURL      string
+	FrontendURL      string
+	Scopes           []string
+	DevAllowAll      bool
+	EmailCallbackURL string
+	SendMagicLink    func(context.Context, string, string) error
 }
 
 func (c Config) enabled() bool {
@@ -134,6 +137,8 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/login", h.beginLogin)
 	r.Get("/callback", h.handleCallback)
+	r.Post("/email/login", h.beginEmailLogin)
+	r.Get("/email/callback", h.handleEmailCallback)
 	r.Get("/session", h.sessionInfo)
 	r.Post("/impersonate", h.impersonate)
 	r.Post("/impersonate-new-user", h.impersonateNewUser)
@@ -144,6 +149,130 @@ func (h *Handler) Routes() chi.Router {
 
 type loginResponse struct {
 	AuthorizationURL string `json:"authorization_url"`
+}
+
+const magicLinkTTL = 15 * time.Minute
+
+type emailLoginRequest struct {
+	Email      string `json:"email"`
+	RedirectTo string `json:"redirect_to"`
+}
+
+func normalizeEmail(raw string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	parts := strings.Split(normalized, "@")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.ContainsAny(normalized, " <>\t\r\n") {
+		return "", false
+	}
+	return normalized, len(normalized) <= 254
+}
+
+func (h *Handler) beginEmailLogin(w http.ResponseWriter, r *http.Request) {
+	// Always return the same response for valid requests so this endpoint cannot
+	// be used to discover which email addresses already have accounts.
+	var payload emailLoginRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+	email, ok := normalizeEmail(payload.Email)
+	if !ok {
+		httpx.Error(w, http.StatusBadRequest, "enter a valid email address")
+		return
+	}
+	if h.cfg.SendMagicLink == nil {
+		httpx.Error(w, http.StatusServiceUnavailable, "email sign-in is not configured")
+		return
+	}
+
+	var recent int
+	if err := h.db.QueryRow(r.Context(), `
+		SELECT COUNT(*) FROM auth_magic_links
+		WHERE email = $1 AND created_at > NOW() - INTERVAL '1 hour'
+	`, email).Scan(&recent); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "unable to start email sign-in")
+		return
+	}
+	if recent >= 5 {
+		httpx.WriteJSON(w, http.StatusAccepted, map[string]string{"message": "If the address can receive email, a sign-in link will arrive shortly."})
+		return
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "unable to start email sign-in")
+		return
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	digest := sha256.Sum256([]byte(token))
+	redirectPath := sanitizePostLoginPath(payload.RedirectTo)
+	if _, err := h.db.Exec(r.Context(), `
+		INSERT INTO auth_magic_links (token_hash, email, redirect_path, expires_at)
+		VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes')
+	`, digest[:], email, redirectPath); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "unable to start email sign-in")
+		return
+	}
+
+	callback, err := h.emailCallbackURL(r, token)
+	if err != nil || h.cfg.SendMagicLink(r.Context(), email, callback) != nil {
+		_, _ = h.db.Exec(r.Context(), `DELETE FROM auth_magic_links WHERE token_hash = $1`, digest[:])
+		httpx.Error(w, http.StatusBadGateway, "unable to send sign-in email")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]string{"message": "If the address can receive email, a sign-in link will arrive shortly."})
+}
+
+func (h *Handler) emailCallbackURL(r *http.Request, token string) (string, error) {
+	raw := strings.TrimSpace(h.cfg.EmailCallbackURL)
+	if raw == "" && strings.TrimSpace(h.cfg.RedirectURL) != "" {
+		if parsed, err := url.Parse(h.cfg.RedirectURL); err == nil {
+			parsed.Path = "/api/auth/email/callback"
+			parsed.RawQuery = ""
+			raw = parsed.String()
+		}
+	}
+	if raw == "" {
+		scheme := "https"
+		if r.TLS == nil && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http") {
+			scheme = "http"
+		}
+		raw = scheme + "://" + r.Host + "/api/auth/email/callback"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("invalid email callback URL")
+	}
+	query := parsed.Query()
+	query.Set("token", token)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func (h *Handler) handleEmailCallback(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid or expired sign-in link")
+		return
+	}
+	digest := sha256.Sum256([]byte(token))
+	var email, redirectPath string
+	err := h.db.QueryRow(r.Context(), `
+		UPDATE auth_magic_links SET consumed_at = NOW()
+		WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > NOW()
+		RETURNING email, redirect_path
+	`, digest[:]).Scan(&email, &redirectPath)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid or expired sign-in link")
+		return
+	}
+
+	account, err := h.ensureEmailAccount(r.Context(), email)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to persist account")
+		return
+	}
+	h.finishLogin(w, r, account, nil, redirectPath)
 }
 
 func (h *Handler) beginLogin(w http.ResponseWriter, r *http.Request) {
@@ -214,7 +343,10 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "failed to persist account")
 		return
 	}
+	h.finishLogin(w, r, account, claims.AllRoles(), redirectPath)
+}
 
+func (h *Handler) finishLogin(w http.ResponseWriter, r *http.Request, account *Account, identityRoles []string, redirectPath string) {
 	if err := h.ensureParticipantProfileForAccount(r.Context(), account); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "failed to ensure participant profile")
 		return
@@ -244,7 +376,7 @@ func (h *Handler) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roleCandidates := append([]string{}, claims.AllRoles()...)
+	roleCandidates := append([]string{}, identityRoles...)
 	roleCandidates = append(roleCandidates, participantRoles...)
 	roleCandidates = append(roleCandidates, desiredAccountRoles...)
 
@@ -775,6 +907,26 @@ func (h *Handler) verifyIDToken(ctx context.Context, raw string, nonce string) (
 }
 
 func (h *Handler) ensureAccount(ctx context.Context, claims *idTokenClaims) (*Account, error) {
+	// A user may first arrive through a magic link and later choose Google (or
+	// vice versa). A verified email is the shared identity key, so reuse that
+	// account instead of creating two accounts with divergent roles/profiles.
+	var existing Account
+	err := h.db.QueryRow(ctx, `
+		UPDATE accounts
+		SET email = $1, full_name = COALESCE(NULLIF($2, ''), full_name)
+		WHERE id = (SELECT id FROM accounts WHERE lower(email) = $1 ORDER BY id LIMIT 1)
+		RETURNING id, subject, email, COALESCE(full_name, ''), false
+	`, strings.ToLower(claims.Email), claims.Name).Scan(
+		&existing.ID, &existing.Subject, &existing.Email, &existing.FullName, &existing.IsNew,
+	)
+	if err == nil {
+		existing.Roles, err = h.loadAccountRoles(ctx, existing.ID)
+		return &existing, err
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
 	row := h.db.QueryRow(ctx,
 		`INSERT INTO accounts (subject, email, full_name)
          VALUES ($1, $2, $3)
@@ -795,6 +947,42 @@ func (h *Handler) ensureAccount(ctx context.Context, claims *idTokenClaims) (*Ac
 	}
 	account.Roles = roles
 
+	return &account, nil
+}
+
+func (h *Handler) ensureEmailAccount(ctx context.Context, email string) (*Account, error) {
+	normalized, ok := normalizeEmail(email)
+	if !ok {
+		return nil, errors.New("invalid email")
+	}
+
+	var account Account
+	err := h.db.QueryRow(ctx, `
+		SELECT id, subject, email, COALESCE(full_name, ''), false
+		FROM accounts WHERE lower(email) = $1 ORDER BY id ASC LIMIT 1
+	`, normalized).Scan(&account.ID, &account.Subject, &account.Email, &account.FullName, &account.IsNew)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		subjectDigest := sha256.Sum256([]byte(normalized))
+		subject := "email:" + base64.RawURLEncoding.EncodeToString(subjectDigest[:])
+		err = h.db.QueryRow(ctx, `
+			INSERT INTO accounts (subject, email, full_name)
+			VALUES ($1, $2, $2)
+			ON CONFLICT (subject) DO UPDATE SET email = EXCLUDED.email
+			RETURNING id, subject, email, COALESCE(full_name, ''), (xmax = 0)
+		`, subject, normalized).Scan(&account.ID, &account.Subject, &account.Email, &account.FullName, &account.IsNew)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	roles, err := h.loadAccountRoles(ctx, account.ID)
+	if err != nil {
+		return nil, err
+	}
+	account.Roles = roles
 	return &account, nil
 }
 

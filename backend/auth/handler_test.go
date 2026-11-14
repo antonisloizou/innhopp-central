@@ -16,6 +16,24 @@ func TestRegistrationSlugFromRedirect(t *testing.T) {
 	}
 }
 
+func TestNormalizeEmail(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: " Person@Example.COM ", want: "person@example.com", ok: true},
+		{input: "not-an-email", ok: false},
+		{input: "two@@example.com", ok: false},
+		{input: "Name <person@example.com>", ok: false},
+	} {
+		got, ok := normalizeEmail(tt.input)
+		if got != tt.want || ok != tt.ok {
+			t.Fatalf("normalizeEmail(%q) = (%q, %t), want (%q, %t)", tt.input, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
 func TestOnboardingPathAllowed(t *testing.T) {
 	allowed := []string{
 		"/api/auth/session",
