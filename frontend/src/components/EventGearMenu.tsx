@@ -11,6 +11,9 @@ import { parseCoordinates } from '../utils/coordinates';
 import { createDriverSummaryXlsx } from '../utils/driverSummaryExport';
 import { renderSatelliteMapForExport } from '../utils/innhoppExport';
 import { createEventKml } from '../utils/eventKmlExport';
+import { listParticipantProfiles } from '../api/participants';
+import { listEventRegistrations } from '../api/registrations';
+import { createParticipantExportXlsx } from '../utils/participantExport';
 
 export type EventGearMenuPage =
   | 'schedule'
@@ -73,6 +76,7 @@ const EventGearMenu = ({
   const [exportProgress, setExportProgress] = useState<{ completed: number; total: number; current: string; failures: string[]; done: boolean } | null>(null);
   const [driverSummaryExporting, setDriverSummaryExporting] = useState(false);
   const [kmlExporting, setKmlExporting] = useState(false);
+  const [participantsExporting, setParticipantsExporting] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [financeMenuOpen, setFinanceMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -184,6 +188,31 @@ const EventGearMenu = ({
       window.alert(error instanceof Error ? error.message : 'Failed to export KML.');
     } finally {
       setKmlExporting(false);
+    }
+  };
+
+  const handleParticipantsExport = async () => {
+    if (participantsExporting) return;
+    setParticipantsExporting(true);
+    try {
+      const [event, registrations, profiles] = await Promise.all([
+        getEvent(eventId),
+        listEventRegistrations(eventId),
+        listParticipantProfiles()
+      ]);
+      const file = createParticipantExportXlsx({ event, registrations, profiles });
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${event.name.replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '') || `event-${event.id}`}-participants.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to export participants.');
+    } finally {
+      setParticipantsExporting(false);
     }
   };
 
@@ -366,6 +395,19 @@ const EventGearMenu = ({
                         Print
                       </button>
                     ) : null}
+                    <button
+                      className="event-schedule-menu-item"
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        setExportMenuOpen(false);
+                        void handleParticipantsExport();
+                      }}
+                      disabled={participantsExporting}
+                    >
+                      {participantsExporting ? 'Exporting Participants...' : 'Participants'}
+                    </button>
                     <button
                       className="event-schedule-menu-item"
                       type="button"

@@ -1235,6 +1235,15 @@ func normalizeOptionalPublicString(value string) string {
 	return strings.TrimSpace(value)
 }
 
+func publicPhoneIdentity(value string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= '0' && character <= '9' {
+			return character
+		}
+		return -1
+	}, value)
+}
+
 func isPublicSkydivingLicense(license string) bool {
 	switch strings.ToUpper(strings.TrimSpace(license)) {
 	case "A", "B", "C", "D":
@@ -1379,6 +1388,11 @@ func (h *Handler) findOrCreatePublicParticipantTx(ctx context.Context, tx pgx.Tx
 	payload.Notes = normalizeOptionalPublicString(payload.Notes)
 	payload.EmergencyContact = normalizeOptionalPublicString(payload.EmergencyContact)
 	payload.Whatsapp = normalizeOptionalPublicString(payload.Whatsapp)
+	if strings.EqualFold(payload.Whatsapp, "NO") {
+		payload.Whatsapp = "NO"
+	} else if phone := publicPhoneIdentity(payload.Phone); phone != "" && phone == publicPhoneIdentity(payload.Whatsapp) {
+		payload.Whatsapp = ""
+	}
 	payload.Instagram = normalizeOptionalPublicString(payload.Instagram)
 	payload.Citizenship = normalizeOptionalPublicString(payload.Citizenship)
 	payload.DateOfBirth = normalizeOptionalPublicString(payload.DateOfBirth)
@@ -1501,9 +1515,9 @@ func isProfileCompleteForRegistrationTx(ctx context.Context, tx pgx.Tx, particip
 	err := tx.QueryRow(ctx, `
 		SELECT btrim(full_name) <> ''
 			AND btrim(email) <> ''
+			AND btrim(COALESCE(phone, '')) <> ''
 			AND btrim(COALESCE(emergency_contact_name, '')) <> ''
 			AND btrim(COALESCE(emergency_contact_phone, '')) <> ''
-			AND btrim(COALESCE(whatsapp, '')) <> ''
 			AND btrim(COALESCE(license, '')) <> ''
 			AND btrim(COALESCE(uses_packer, '')) <> ''
 			AND btrim(COALESCE(accommodation, '')) <> ''

@@ -358,6 +358,19 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS roles TEXT[] NOT NULL DEFAULT ARRAY['Participant']`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS notes TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS whatsapp TEXT`,
+		`UPDATE participant_profiles
+		 SET phone = btrim(whatsapp), whatsapp = ''
+		 WHERE btrim(COALESCE(phone, '')) = ''
+		   AND btrim(COALESCE(whatsapp, '')) <> ''
+		   AND upper(btrim(whatsapp)) <> 'NO'`,
+		`UPDATE participant_profiles
+		 SET whatsapp = ''
+		 WHERE btrim(COALESCE(phone, '')) <> ''
+		   AND btrim(COALESCE(whatsapp, '')) <> ''
+		   AND upper(btrim(whatsapp)) <> 'NO'
+		   AND regexp_replace(phone, '[^0-9]', '', 'g') <> ''
+		   AND regexp_replace(phone, '[^0-9]', '', 'g') = regexp_replace(whatsapp, '[^0-9]', '', 'g')`,
+		`UPDATE participant_profiles SET whatsapp = 'NO' WHERE upper(btrim(COALESCE(whatsapp, ''))) = 'NO'`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS instagram TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS citizenship TEXT`,
 		`ALTER TABLE participant_profiles ADD COLUMN IF NOT EXISTS date_of_birth TEXT`,

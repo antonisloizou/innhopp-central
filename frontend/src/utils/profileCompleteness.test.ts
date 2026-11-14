@@ -6,6 +6,7 @@ const completeProfile: ParticipantProfile = {
   id: 1,
   full_name: 'Aviator Ada',
   email: 'ada@example.test',
+  phone: '+49 987 654',
   emergency_contact_name: 'Grace Hopper',
   emergency_contact_phone: '+49 123 456',
   whatsapp: '+49 987 654',
@@ -38,5 +39,11 @@ describe('isProfileCompleteForRegistration', () => {
   it('requires packer preference but not an optional roommate preference', () => {
     expect(isProfileCompleteForRegistration({ ...completeProfile, uses_packer: '' })).toBe(false);
     expect(isProfileCompleteForRegistration({ ...completeProfile, accommodation_roommate: '' })).toBe(true);
+  });
+
+  it('requires phone and accepts both same-number and WhatsApp opt-out storage', () => {
+    expect(isProfileCompleteForRegistration({ ...completeProfile, phone: '' })).toBe(false);
+    expect(isProfileCompleteForRegistration({ ...completeProfile, whatsapp: '' })).toBe(true);
+    expect(isProfileCompleteForRegistration({ ...completeProfile, whatsapp: 'NO' })).toBe(true);
   });
 });

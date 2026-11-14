@@ -1,7 +1,8 @@
-import { FormEvent, ReactNode, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { CreateParticipantPayload, ParticipantProfile } from '../api/participants';
 import { roleOptions } from '../utils/roles';
 import { citizenshipOptions } from '../utils/citizenships';
+import { getWhatsAppMode, WhatsAppMode } from '../utils/whatsapp';
 
 export const canopyCourseOptions = [
   'Attended 1 or more canopy courses',
@@ -331,6 +332,10 @@ const ParticipantProfileForm = ({
   canEditAdminRole = false,
   canSelfRemoveElevatedRoles = false
 }: ParticipantProfileFormProps) => {
+  const [whatsappMode, setWhatsappMode] = useState<WhatsAppMode>(() => getWhatsAppMode(form.phone, form.whatsapp));
+  useEffect(() => {
+    if (form.whatsapp?.trim()) setWhatsappMode(getWhatsAppMode(form.phone, form.whatsapp));
+  }, [form.phone, form.whatsapp]);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({
     basic: false,
     skydiving: false,
@@ -357,7 +362,8 @@ const ParticipantProfileForm = ({
   const missingRequired = {
     full_name: !hasText(form.full_name),
     email: !hasText(form.email),
-    whatsapp: !hasText(form.whatsapp),
+    phone: !hasText(form.phone),
+    whatsapp: whatsappMode === 'different' && !hasText(form.whatsapp),
     license: !isNonJumper && !hasText(form.license),
     main_canopy: !isNonJumper && !hasText(form.main_canopy),
     wingload: !isNonJumper && !hasText(form.wingload),
@@ -380,6 +386,7 @@ const ParticipantProfileForm = ({
         hasMissingRequired={
           missingRequired.full_name ||
           missingRequired.email ||
+          missingRequired.phone ||
           missingRequired.whatsapp ||
           missingRequired.tshirt_size ||
           missingRequired.tshirt_gender
@@ -411,15 +418,43 @@ const ParticipantProfileForm = ({
               onChange={(event) => updateField('date_of_birth', event.target.value)}
             />
           </label>
-          <label className={`form-field ${missingRequired.whatsapp ? 'field-missing' : ''} participant-profile-grid-col-1`}>
-            <span>Whatsapp</span>
+          <label className={`form-field ${missingRequired.phone ? 'field-missing' : ''} participant-profile-grid-col-1`}>
+            <span>Phone</span>
             <input
-              type="text"
-              value={form.whatsapp || ''}
-              onChange={(event) => updateField('whatsapp', event.target.value)}
-              placeholder="Needed for event comms"
+              type="tel"
+              value={form.phone || ''}
+              onChange={(event) => updateField('phone', event.target.value)}
+              placeholder="Contact number"
             />
           </label>
+          <label className={`form-field ${missingRequired.whatsapp ? 'field-missing' : ''}`}>
+            <span>WhatsApp</span>
+            <select
+              value={whatsappMode}
+              onChange={(event) => {
+                const mode = event.target.value as WhatsAppMode;
+                setWhatsappMode(mode);
+                if (mode === 'same') updateField('whatsapp', '');
+                if (mode === 'none') updateField('whatsapp', 'NO');
+                if (mode === 'different' && (!form.whatsapp || form.whatsapp.trim().toUpperCase() === 'NO')) updateField('whatsapp', '');
+              }}
+            >
+              <option value="same">Same as phone</option>
+              <option value="none">Don&apos;t use WhatsApp</option>
+              <option value="different">Different number</option>
+            </select>
+          </label>
+          {whatsappMode === 'different' ? (
+            <label className={`form-field ${missingRequired.whatsapp ? 'field-missing' : ''}`}>
+              <span>WhatsApp number</span>
+              <input
+                type="tel"
+                value={form.whatsapp || ''}
+                onChange={(event) => updateField('whatsapp', event.target.value)}
+                placeholder="WhatsApp number"
+              />
+            </label>
+          ) : null}
           <label className="form-field">
             <span>Instagram</span>
             <input

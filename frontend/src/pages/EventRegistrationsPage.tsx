@@ -255,7 +255,13 @@ const dedupeRegistrationsByParticipant = (items: Registration[]) => {
     }
   });
   return [...latestByParticipant.values()].sort(
-    (a, b) => new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime() || b.id - a.id
+    (a, b) => Number(a.status === 'cancelled') - Number(b.status === 'cancelled')
+      || (a.participant_name || `Participant #${a.participant_id}`).localeCompare(
+        b.participant_name || `Participant #${b.participant_id}`,
+        undefined,
+        { sensitivity: 'base' }
+      )
+      || b.id - a.id
   );
 };
 

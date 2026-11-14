@@ -341,6 +341,15 @@ func normalizeOptionalString(value string) string {
 	return strings.TrimSpace(value)
 }
 
+func phoneIdentity(value string) string {
+	return strings.Map(func(character rune) rune {
+		if character >= '0' && character <= '9' {
+			return character
+		}
+		return -1
+	}, value)
+}
+
 func normalizeOptionalInt(value *int) *int {
 	if value == nil {
 		return nil
@@ -530,6 +539,11 @@ func sanitizePayload(payload *profilePayload, defaultName, defaultEmail string) 
 	payload.EmergencyContactName = normalizeOptionalString(payload.EmergencyContactName)
 	payload.EmergencyContactPhone = normalizeOptionalString(payload.EmergencyContactPhone)
 	payload.Whatsapp = normalizeOptionalString(payload.Whatsapp)
+	if strings.EqualFold(payload.Whatsapp, "NO") {
+		payload.Whatsapp = "NO"
+	} else if phone := phoneIdentity(payload.Phone); phone != "" && phone == phoneIdentity(payload.Whatsapp) {
+		payload.Whatsapp = ""
+	}
 	payload.Instagram = normalizeOptionalString(payload.Instagram)
 	payload.Citizenship = normalizeOptionalString(payload.Citizenship)
 	payload.DateOfBirth = normalizeOptionalString(payload.DateOfBirth)

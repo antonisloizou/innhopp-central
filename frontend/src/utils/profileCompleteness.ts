@@ -5,9 +5,9 @@ const hasText = (value?: string | number | null) => String(value ?? '').trim().l
 export const isProfileCompleteForRegistration = (profile: ParticipantProfile) =>
   hasText(profile.full_name) &&
   hasText(profile.email) &&
+  hasText(profile.phone) &&
   hasText(profile.emergency_contact_name) &&
   hasText(profile.emergency_contact_phone) &&
-  hasText(profile.whatsapp) &&
   hasText(profile.license) &&
   hasText(profile.uses_packer) &&
   hasText(profile.accommodation) &&
