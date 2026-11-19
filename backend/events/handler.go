@@ -109,6 +109,8 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/non-jumper-activities", h.createNonJumperActivity)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/non-jumper-activities/{activityID}", h.updateNonJumperActivity)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}/non-jumper-activities/{activityID}", h.deleteNonJumperActivity)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Get("/{eventID}/staff-meetings/{meetingDate}", h.getStaffMeeting)
+	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/staff-meetings/{meetingDate}", h.updateStaffMeeting)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/innhopps", h.createInnhopp)
 	r.With(enforcer.Authorize(rbac.PermissionViewEvents)).Get("/{eventID}/accommodations", h.listAccommodations)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Post("/{eventID}/accommodations", h.createAccommodation)
@@ -116,6 +118,160 @@ func (h *Handler) Routes(enforcer *rbac.Enforcer) chi.Router {
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Put("/{eventID}/accommodations/{accID}", h.updateAccommodation)
 	r.With(enforcer.Authorize(rbac.PermissionManageEvents)).Delete("/{eventID}/accommodations/{accID}", h.deleteAccommodation)
 	return r
+}
+
+type staffMeetingItem struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Kind    string `json:"kind"`
+	Checked bool   `json:"checked"`
+	Notes   string `json:"notes,omitempty"`
+}
+
+type staffMeeting struct {
+	EventID     int64              `json:"event_id"`
+	MeetingDate string             `json:"meeting_date"`
+	Items       []staffMeetingItem `json:"items"`
+	UpdatedAt   *time.Time         `json:"updated_at,omitempty"`
+}
+
+func defaultStaffMeetingItems() []staffMeetingItem {
+	items := []staffMeetingItem{
+		{ID: "default-1", Title: "What went well", Kind: "agenda"},
+		{ID: "default-2", Title: "What went wrong", Kind: "agenda"},
+		{ID: "default-3", Title: "What we can improve", Kind: "agenda"},
+		{ID: "default-4", Title: "Innhopps", Kind: "agenda"},
+		{ID: "default-6", Title: "Expenses", Kind: "agenda"},
+		{ID: "default-7", Title: "Tommorrow's Weather", Kind: "agenda"},
+		{ID: "default-8", Title: "Ground Crew status", Kind: "agenda"},
+		{ID: "default-9", Title: "Safety incidents", Kind: "agenda"},
+		{ID: "default-10", Title: "Transport and accommodation issues", Kind: "agenda"},
+		{ID: "default-11", Title: "Schedule changes", Kind: "agenda"},
+		{ID: "default-12", Title: "Communications requiring follow-up", Kind: "agenda"},
+	}
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-0", Title: "Review schedule for tomorrow", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-1", Title: "Share Pilot brief with pilots", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-2", Title: "Charge radios and other equipment", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-3", Title: "Confirm accommodation and meals", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-7", Title: "Accommodation for Staff leaving early (ground crew, pilots, etc)", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-4", Title: "Confirm staff assignments", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-8", Title: "Assign staff to lead participant meeting and group presentations", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-5", Title: "Confirm ground transport", Kind: "tomorrow"})
+	items = append(items, staffMeetingItem{ID: "default-tomorrow-6", Title: "Bring Water", Kind: "tomorrow"})
+	return items
+}
+
+func parseMeetingDate(r *http.Request) (string, error) {
+	value := chi.URLParam(r, "meetingDate")
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil || parsed.Format("2006-01-02") != value {
+		return "", errors.New("invalid meeting date")
+	}
+	return value, nil
+}
+
+func (h *Handler) getStaffMeeting(w http.ResponseWriter, r *http.Request) {
+	eventID, err := parsePositiveIDParam(r, "eventID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	meetingDate, err := parseMeetingDate(r)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var raw []byte
+	var updatedAt time.Time
+	err = h.db.QueryRow(r.Context(), `SELECT items, updated_at FROM event_staff_meetings WHERE event_id=$1 AND meeting_date=$2`, eventID, meetingDate).Scan(&raw, &updatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if checkErr := h.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE id=$1)`, eventID).Scan(&exists); checkErr != nil {
+			httpx.Error(w, http.StatusInternalServerError, "failed to load staff meeting")
+			return
+		}
+		if !exists {
+			httpx.Error(w, http.StatusNotFound, "event not found")
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, staffMeeting{EventID: eventID, MeetingDate: meetingDate, Items: defaultStaffMeetingItems()})
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load staff meeting")
+		return
+	}
+	items := []staffMeetingItem{}
+	if err := json.Unmarshal(raw, &items); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to load staff meeting")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, staffMeeting{EventID: eventID, MeetingDate: meetingDate, Items: items, UpdatedAt: &updatedAt})
+}
+
+func (h *Handler) updateStaffMeeting(w http.ResponseWriter, r *http.Request) {
+	eventID, err := parsePositiveIDParam(r, "eventID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+	meetingDate, err := parseMeetingDate(r)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var payload struct {
+		Items []staffMeetingItem `json:"items"`
+	}
+	if err := httpx.DecodeJSON(r, &payload); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validateStaffMeetingItems(payload.Items); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	raw, _ := json.Marshal(payload.Items)
+	var updatedAt time.Time
+	err = h.db.QueryRow(r.Context(), `
+		INSERT INTO event_staff_meetings(event_id,meeting_date,items) VALUES($1,$2,$3::jsonb)
+		ON CONFLICT(event_id,meeting_date) DO UPDATE SET items=EXCLUDED.items, updated_at=NOW()
+		RETURNING updated_at`, eventID, meetingDate, string(raw)).Scan(&updatedAt)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "failed to save staff meeting")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, staffMeeting{EventID: eventID, MeetingDate: meetingDate, Items: payload.Items, UpdatedAt: &updatedAt})
+}
+
+func validateStaffMeetingItems(items []staffMeetingItem) error {
+	if len(items) > 100 {
+		return errors.New("staff meeting cannot contain more than 100 items")
+	}
+	seen := map[string]bool{}
+	for i := range items {
+		item := &items[i]
+		item.ID = strings.TrimSpace(item.ID)
+		item.Title = strings.TrimSpace(item.Title)
+		item.Notes = strings.TrimSpace(item.Notes)
+		if item.ID == "" {
+			return errors.New("staff meeting item id is required")
+		}
+		if seen[item.ID] {
+			return errors.New("duplicate staff meeting item id: " + item.ID)
+		}
+		if item.Title == "" || len(item.Title) > 300 {
+			return errors.New("staff meeting item title is invalid: " + item.ID)
+		}
+		if len(item.Notes) > 10000 {
+			return errors.New("staff meeting item notes are too long: " + item.ID)
+		}
+		if item.Kind != "agenda" && item.Kind != "tomorrow" && item.Kind != "innhopp" {
+			return errors.New("staff meeting item kind is invalid: " + item.ID)
+		}
+		seen[item.ID] = true
+	}
+	return nil
 }
 
 type NonJumperActivity struct {

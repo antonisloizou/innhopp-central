@@ -239,6 +239,66 @@ func TestUpdateAirfieldRecalculatesDependentInnhoppAirDistances(t *testing.T) {
 	}
 }
 
+func TestStaffMeetingPersistsCheckedStateNotesAndCustomItems(t *testing.T) {
+	db := openEventTestDB(t)
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	ensureEventTestSchema(t, ctx, db)
+	eventID := insertEventTestEvent(t, ctx, db, insertEventTestSeason(t, ctx, db))
+
+	h := NewHandler(db)
+	router := chi.NewRouter()
+	router.Get("/api/events/{eventID}/staff-meetings/{meetingDate}", h.getStaffMeeting)
+	router.Put("/api/events/{eventID}/staff-meetings/{meetingDate}", h.updateStaffMeeting)
+	path := "/api/events/" + strconv.FormatInt(eventID, 10) + "/staff-meetings/2099-07-04"
+
+	initial := httptest.NewRecorder()
+	router.ServeHTTP(initial, httptest.NewRequest(http.MethodGet, path, nil))
+	if initial.Code != http.StatusOK {
+		t.Fatalf("initial GET status = %d body=%s", initial.Code, initial.Body.String())
+	}
+	var defaults staffMeeting
+	if err := json.NewDecoder(initial.Body).Decode(&defaults); err != nil {
+		t.Fatalf("decode defaults: %v", err)
+	}
+	if len(defaults.Items) == 0 || defaults.UpdatedAt != nil {
+		t.Fatalf("unexpected unsaved defaults: %+v", defaults)
+	}
+
+	persisted := []staffMeetingItem{
+		{ID: "default-1", Title: "What went well", Kind: "agenda", Checked: true, Notes: "Good day"},
+		{ID: "custom-1", Title: "Custom check", Kind: "tomorrow", Checked: true, Notes: "Assigned"},
+		{ID: "innhopp-42", Title: "Landing", Kind: "agenda", Checked: true, Notes: "Reviewed"},
+	}
+	body, _ := json.Marshal(map[string]any{"items": persisted})
+	updated := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(updated, req)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d body=%s", updated.Code, updated.Body.String())
+	}
+
+	reloaded := httptest.NewRecorder()
+	router.ServeHTTP(reloaded, httptest.NewRequest(http.MethodGet, path, nil))
+	if reloaded.Code != http.StatusOK {
+		t.Fatalf("reloaded GET status = %d body=%s", reloaded.Code, reloaded.Body.String())
+	}
+	var meeting staffMeeting
+	if err := json.NewDecoder(reloaded.Body).Decode(&meeting); err != nil {
+		t.Fatalf("decode persisted meeting: %v", err)
+	}
+	if meeting.UpdatedAt == nil || len(meeting.Items) != len(persisted) {
+		t.Fatalf("persisted meeting mismatch: %+v", meeting)
+	}
+	for i := range persisted {
+		if meeting.Items[i] != persisted[i] {
+			t.Errorf("persisted item %d = %+v, want %+v", i, meeting.Items[i], persisted[i])
+		}
+	}
+}
+
 func openEventTestDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("DATABASE_URL")
@@ -422,6 +482,13 @@ func ensureEventTestSchema(t *testing.T, ctx context.Context, db *pgxpool.Pool) 
 			event_id INTEGER,
 			season_id INTEGER,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS event_staff_meetings (
+			event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+			meeting_date DATE NOT NULL,
+			items JSONB NOT NULL DEFAULT '[]'::jsonb,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			PRIMARY KEY (event_id, meeting_date)
 		)`,
 	}
 	for _, stmt := range stmts {

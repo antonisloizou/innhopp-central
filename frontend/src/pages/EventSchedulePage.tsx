@@ -70,6 +70,7 @@ import {
   listRosterCheckInSummaries
 } from '../api/rosterCheckIns';
 import RosterCheckInOverlay from '../components/RosterCheckInOverlay';
+import StaffMeetingOverlay from '../components/StaffMeetingOverlay';
 
 const OVERLAY_EXIT_MS = 180;
 type DayBucket = {
@@ -305,6 +306,7 @@ const EventSchedulePage = () => {
   const [renderedPreviewEntry, setRenderedPreviewEntry] = useState<{ entry: Entry; day: DayBucket } | null>(null);
   const [previewClosing, setPreviewClosing] = useState(false);
   const [dayAddMenuOpenKey, setDayAddMenuOpenKey] = useState<string | null>(null);
+  const [staffMeetingDay, setStaffMeetingDay] = useState<{ key:string; label:string; innhopps:Event['innhopps'] } | null>(null);
   const dayAddMenuRef = useRef<HTMLDivElement | null>(null);
   const [importDayKey, setImportDayKey] = useState<string | null>(null);
   const [importType, setImportType] = useState<EntryType>('Innhopp');
@@ -2309,6 +2311,11 @@ const EventSchedulePage = () => {
                   ) : null}
                 </div>
               ) : null}
+              {!participantOnly && expandedDays[day.key] !== false ? (
+                <button type="button" className="event-schedule-day-add-button event-schedule-day-meeting-button" aria-label={`Open daily staff meeting for ${day.label}`} title="Daily staff meeting" onClick={(event) => { event.stopPropagation(); setStaffMeetingDay({ key:day.key, label:day.label, innhopps:day.innhopps }); }}>
+                  <span className="material-symbols-outlined" aria-hidden="true">fact_check</span>
+                </button>
+              ) : null}
             </header>
             {expandedDays[day.key] === false ? null : (() => {
               const orderedEntries = buildOrderedEntriesForDay(day);
@@ -2863,6 +2870,15 @@ const EventSchedulePage = () => {
               return next;
             });
           }}
+        />
+      ) : null}
+      {staffMeetingDay && eventData ? (
+        <StaffMeetingOverlay
+          eventId={eventData.id}
+          meetingDate={staffMeetingDay.key}
+          dayLabel={staffMeetingDay.label}
+          innhopps={staffMeetingDay.innhopps}
+          onClose={() => setStaffMeetingDay(null)}
         />
       ) : null}
     </section>

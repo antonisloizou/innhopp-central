@@ -134,6 +134,14 @@ export const createNonJumperActivity = (eventId:number,payload:NonJumperActivity
 export const updateNonJumperActivity = (eventId:number,id:number,payload:NonJumperActivityPayload) => apiRequest<NonJumperActivity>(`/events/${eventId}/non-jumper-activities/${id}`,{method:'PUT',body:JSON.stringify(payload)});
 export const deleteNonJumperActivity = (eventId:number,id:number) => apiRequest<void>(`/events/${eventId}/non-jumper-activities/${id}`,{method:'DELETE'});
 
+export type StaffMeetingItemKind = 'agenda' | 'tomorrow' | 'innhopp';
+export interface StaffMeetingItem { id:string; title:string; kind:StaffMeetingItemKind; checked:boolean; notes?:string }
+export interface StaffMeeting { event_id:number; meeting_date:string; items:StaffMeetingItem[]; updated_at?:string }
+export const getStaffMeeting = (eventId:number, meetingDate:string) =>
+  apiRequest<StaffMeeting>(`/events/${eventId}/staff-meetings/${meetingDate}`);
+export const updateStaffMeeting = (eventId:number, meetingDate:string, items:StaffMeetingItem[]) =>
+  apiRequest<StaffMeeting>(`/events/${eventId}/staff-meetings/${meetingDate}`, { method:'PUT', body:JSON.stringify({ items }) });
+
 export interface Accommodation {
   id: number;
   event_id: number;

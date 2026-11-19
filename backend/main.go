@@ -1667,6 +1667,13 @@ func ensureSchema(ctx context.Context, pool *pgxpool.Pool) error {
             sent_at TIMESTAMPTZ
         )`,
 		`CREATE INDEX IF NOT EXISTS task_email_delivery_queue_idx ON task_email_deliveries (status, created_at) WHERE status IN ('queued','failed')`,
+		`CREATE TABLE IF NOT EXISTS event_staff_meetings (
+            event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            meeting_date DATE NOT NULL,
+            items JSONB NOT NULL DEFAULT '[]'::jsonb,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (event_id, meeting_date)
+        )`,
 	}
 
 	for _, stmt := range stmts {
