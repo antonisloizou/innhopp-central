@@ -5,8 +5,9 @@ import { defaultStaffMeetingAgenda, defaultStaffMeetingChecklist, normalizeStaff
 describe('normalizeStaffMeetingItems', () => {
   it('backfills every default, keeps review open tasks last in the agenda, and keeps review schedule first in the checklist', () => {
     const result = normalizeStaffMeetingItems([], []);
-    expect(result.filter((item) => item.kind === 'agenda')).toEqual(defaultStaffMeetingAgenda);
-    expect(result.filter((item) => item.kind === 'agenda').at(-1)?.title).toBe('Review open tasks');
+    const agenda = result.filter((item) => item.kind === 'agenda');
+    expect(agenda).toEqual(defaultStaffMeetingAgenda);
+    expect(agenda[agenda.length - 1]?.title).toBe('Review open tasks');
     expect(result.filter((item) => item.kind === 'tomorrow')).toEqual(defaultStaffMeetingChecklist);
     expect(result.filter((item) => item.kind === 'tomorrow')[0].title).toBe('Review schedule for tomorrow');
   });
@@ -31,7 +32,8 @@ describe('normalizeStaffMeetingItems', () => {
     const result = normalizeStaffMeetingItems([
       { id:'custom-1', title:'Custom agenda item', kind:'agenda', checked:false }
     ], []);
-    expect(result.filter((item) => item.kind === 'agenda').at(-1)?.title).toBe('Review open tasks');
+    const agenda = result.filter((item) => item.kind === 'agenda');
+    expect(agenda[agenda.length - 1]?.title).toBe('Review open tasks');
   });
 
   it('emits each scheduled Innhopp exactly once when reopening a saved meeting', () => {
