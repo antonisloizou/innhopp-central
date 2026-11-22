@@ -13,7 +13,8 @@ export const defaultStaffMeetingAgenda:StaffMeetingItem[] = [
   { id:'default-9', title:'Safety incidents', kind:'agenda', checked:false },
   { id:'default-10', title:'Transport and accommodation issues', kind:'agenda', checked:false },
   { id:'default-11', title:'Schedule changes', kind:'agenda', checked:false },
-  { id:'default-12', title:'Communications requiring follow-up', kind:'agenda', checked:false }
+  { id:'default-12', title:'Communications requiring follow-up', kind:'agenda', checked:false },
+  { id:'default-13', title:'Review open tasks', kind:'agenda', checked:false }
 ];
 
 export const defaultStaffMeetingChecklist:StaffMeetingItem[] = [
@@ -52,6 +53,7 @@ export const normalizeStaffMeetingItems = (
   });
 
   const agenda = defaultStaffMeetingAgenda.map((item) => mergeDefault(item, currentByID.get(item.id)));
+  const finalAgendaItem = agenda.find((item) => item.id === 'default-13');
   const checklist = defaultStaffMeetingChecklist.map((item) => mergeDefault(item, currentByID.get(item.id)));
   const scheduledInnhopps = innhopps.map((innhopp):StaffMeetingItem => {
     const current = currentByID.get(`innhopp-${innhopp.id}`);
@@ -65,8 +67,9 @@ export const normalizeStaffMeetingItems = (
   });
 
   return [
-    ...agenda,
+    ...agenda.filter((item) => item.id !== 'default-13'),
     ...customItems.filter((item) => item.kind === 'agenda'),
+    ...(finalAgendaItem ? [finalAgendaItem] : []),
     ...checklist,
     ...customItems.filter((item) => item.kind === 'tomorrow'),
     ...scheduledInnhopps

@@ -148,6 +148,7 @@ func defaultStaffMeetingItems() []staffMeetingItem {
 		{ID: "default-10", Title: "Transport and accommodation issues", Kind: "agenda"},
 		{ID: "default-11", Title: "Schedule changes", Kind: "agenda"},
 		{ID: "default-12", Title: "Communications requiring follow-up", Kind: "agenda"},
+		{ID: "default-13", Title: "Review open tasks", Kind: "agenda"},
 	}
 	items = append(items, staffMeetingItem{ID: "default-tomorrow-0", Title: "Review schedule for tomorrow", Kind: "tomorrow"})
 	items = append(items, staffMeetingItem{ID: "default-tomorrow-1", Title: "Share Pilot brief with pilots", Kind: "tomorrow"})

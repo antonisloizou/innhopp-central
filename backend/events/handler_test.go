@@ -39,10 +39,13 @@ func TestDefaultStaffMeetingItems(t *testing.T) {
 		}
 		seen[item.ID] = true
 	}
-	for _, id := range []string{"default-1", "default-4", "default-12", "default-tomorrow-0", "default-tomorrow-8"} {
+	for _, id := range []string{"default-1", "default-4", "default-12", "default-13", "default-tomorrow-0", "default-tomorrow-8"} {
 		if !seen[id] {
 			t.Errorf("missing default staff meeting item %q", id)
 		}
+	}
+	if got := items[11]; got.ID != "default-13" || got.Title != "Review open tasks" || got.Kind != "agenda" {
+		t.Fatalf("final agenda item = %+v, want Review open tasks", got)
 	}
 	var firstChecklist *staffMeetingItem
 	for i := range items {
