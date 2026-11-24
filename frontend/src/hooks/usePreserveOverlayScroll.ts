@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 
 /** Locks the document behind an overlay without changing the body's layout or background. */
-export function usePreserveOverlayScroll() {
+export function usePreserveOverlayScroll(enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
+
     const scrollY = window.scrollY;
     const { style } = document.documentElement;
     const previousStyles = {
@@ -21,5 +23,5 @@ export function usePreserveOverlayScroll() {
       style.overscrollBehavior = previousStyles.overscrollBehavior;
       window.scrollTo(0, scrollY);
     };
-  }, []);
+  }, [enabled]);
 }

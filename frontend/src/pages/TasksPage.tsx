@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Event as EventRecord, listEventSummaries } from '../api/events';
 import {
@@ -9,6 +10,7 @@ import {
 import EventGearMenu from '../components/EventGearMenu';
 import EventPageTitle from '../components/EventPageTitle';
 import { useResourceStream } from '../hooks/useResourceStream';
+import { usePreserveOverlayScroll } from '../hooks/usePreserveOverlayScroll';
 import { parseEventLocal } from '../utils/eventDate';
 import { isPastEvent } from '../utils/eventStatus';
 
@@ -157,6 +159,17 @@ const TasksPage = () => {
 
   const groupedAudit = useMemo(() => audit || [], [audit]);
 
+  usePreserveOverlayScroll(selected !== null);
+
+  useEffect(() => {
+    if (!selected) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeTask();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [selected, params]);
+
   return <section className="tasks-page">
     <header className="page-header">
       {lockedEvent
@@ -204,8 +217,9 @@ const TasksPage = () => {
       })}
     </div>}
 
-    {selected && <div className="modal-backdrop task-detail-backdrop" role="presentation" onMouseDown={closeTask}><article className="card task-detail" role="dialog" aria-modal="true" aria-label={selected.title} onMouseDown={(e) => e.stopPropagation()}>
-      <header className="task-detail-header"><h2>{selected.title}</h2><button type="button" className="ghost" onClick={closeTask}>Close</button></header>
+    {selected && typeof document !== 'undefined' && createPortal(<div className="event-schedule-preview-backdrop task-detail-backdrop" role="presentation" onMouseDown={closeTask}><article className="card overlay-panel-with-close task-detail" role="dialog" aria-modal="true" aria-label={selected.title} onMouseDown={(e) => e.stopPropagation()}>
+      <button type="button" className="overlay-close-button overlay-close-top-left" aria-label="Close task details" onClick={closeTask}>×</button>
+      <header className="task-detail-header"><h2>{selected.title}</h2></header>
       {selected.deleted_at && <div className="task-deleted-banner"><strong>Deleted {dateTime(selected.deleted_at)}</strong><span> by {selected.deleted_by_name}{selected.deleted_reason ? ` · ${selected.deleted_reason}` : ''}</span></div>}
       <p className="task-detail-description">{selected.description}</p>
       <dl className="task-detail-meta"><div><dt>Assignee</dt><dd>{selected.assignee_name || 'Unassigned'}</dd></div><div><dt>Due date</dt><dd>{dateOnly(selected.due_on)}</dd></div><div><dt>Status</dt><dd>{selected.completed_at ? `Done by ${selected.completed_by_name} · ${dateTime(selected.completed_at)}` : 'Open'}</dd></div><div><dt>Created</dt><dd>{selected.created_by_name} · {dateTime(selected.created_at)}</dd></div></dl>
@@ -218,7 +232,7 @@ const TasksPage = () => {
         {!selected.deleted_at && <form onSubmit={submitComment} className="task-comment-form"><label className="form-field"><span>Add comment</span><textarea rows={4} maxLength={10000} placeholder="Write a comment…" value={comment} onChange={(e) => setComment(e.target.value)} /></label><div className="form-actions"><button type="submit" className="primary" disabled={detailBusy || !comment.trim()}>{detailBusy ? 'Posting…' : 'Post comment'}</button></div></form>}
       </section>
       <section className="task-audit"><div className="page-header"><h3>Audit history</h3>{audit === null ? <button type="button" className="ghost" onClick={() => void listTaskAudit(selected.id).then(setAudit).catch((err) => setError(err instanceof Error ? err.message : 'Failed to load history.'))}>Show history</button> : <button type="button" className="ghost" onClick={() => setAudit(null)}>Close history</button>}</div>{audit !== null && <div className="task-audit-list">{groupedAudit.map((item) => <div key={item.id}><strong>{item.action.replace('_', ' ')}</strong><span>{item.actor_name} · {dateTime(item.created_at)}</span></div>)}</div>}</section>
-    </article></div>}
+    </article></div>, document.body)}
   </section>;
 };
 
